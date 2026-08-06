@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for the /rest/auth/* endpoints: login, logout, session round-trip,
-// registration-enabled flag, and GET /auth/me auth enforcement.
 
 mod common;
 use axum::http::StatusCode;
@@ -87,7 +85,6 @@ async fn auth_me_returns_401_without_session() {
 
     let res = app.oneshot(get_req("/rest/auth/me")).await.unwrap();
 
-    // auth_guard lets /rest/auth/* through; AuthGuard extractor returns 401.
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -173,7 +170,6 @@ async fn registration_enabled_returns_correct_flag() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    // new_for_test sets registration_enabled = true
     assert_eq!(body["enabled"], serde_json::json!(true));
 }
 
@@ -204,11 +200,9 @@ async fn a_revoked_session_cookie_stops_working() {
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
 
-    // Two independent logins for the same user — one to revoke, one to revoke from.
     let victim = login(&app, username, password).await;
     let survivor = login(&app, username, password).await;
 
-    // The victim must be recorded before it can be named.
     let ok = app
         .clone()
         .oneshot(authed_get("/rest/auth/sessions", &victim))
@@ -234,7 +228,6 @@ async fn a_revoked_session_cookie_stops_working() {
         ids.len()
     );
 
-    // Revoke every session except the surviving one.
     let res = app
         .clone()
         .oneshot(
@@ -249,8 +242,6 @@ async fn a_revoked_session_cookie_stops_working() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // The revoked cookie must now be refused. Writing `revoked_at` and hiding
-    // the row from the listing is not revocation if the cookie still works.
     let replay = app
         .clone()
         .oneshot(authed_get("/rest/auth/sessions", &victim))
@@ -262,7 +253,6 @@ async fn a_revoked_session_cookie_stops_working() {
         "a revoked session must not be able to keep making requests"
     );
 
-    // And the session doing the revoking must be unaffected.
     let still_ok = app
         .oneshot(authed_get("/rest/auth/sessions", &survivor))
         .await

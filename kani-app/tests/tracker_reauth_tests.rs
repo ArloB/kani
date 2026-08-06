@@ -1,16 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group L2/L3 — token-failure recovery. Two defects the plan flagged:
-//!
-//! * **L3** — a refresh that the provider rejects (`400 invalid_grant`) just
-//!   propagates its error; nothing records that the link is dead, so every
-//!   later sync retries the same doomed refresh and logs a warning forever.
-//! * **L2** — nothing reacts to a `401`. A token revoked *before* its
-//!   `expires_at` is never refreshed (the refresh is proactive-only) and never
-//!   flagged, so the link silently stops working.
-//!
-//! Both are fixed by recording `needs_reauth` on the credential row, which the
-//! trackers settings page surfaces so the user knows to re-link.
+//! Tracker credential failures persist `needs_reauth` for both rejected refreshes
+//! and authorization failures received before the token's recorded expiry.
 
 mod common;
 use common::{insert_user, test_service};
@@ -59,14 +50,11 @@ async fn needs_reauth(db: &SqlitePool, user: UserId, tid: i64) -> bool {
     .unwrap()
 }
 
-// L3 — a refresh the provider rejects marks the link as needing reauth instead
-// of failing forever in silence.
 #[tokio::test]
 async fn a_failed_refresh_marks_the_link_as_needing_reauth() {
     let svc = test_service().await;
     let user = insert_user(&svc.db, "alice").await;
     let tid = tracker_id(&svc.db).await;
-    // Already expired, so get_access_token attempts the proactive refresh.
     seed_credentials(&svc.db, user, tid, -60).await;
 
     let origin = TestOrigin::start().await;
@@ -86,10 +74,6 @@ async fn a_failed_refresh_marks_the_link_as_needing_reauth() {
     );
 }
 
-// L1 — an expired token is refreshed *before* the call, and the refreshed
-// credentials are what the caller gets. This never worked: `expires_at` was
-// decoded into a `time` value whose `to_string()` is not RFC3339, so the
-// re-parse always failed and `needs_refresh` was permanently false.
 #[tokio::test]
 async fn an_expired_token_is_refreshed_before_the_call() {
     let svc = test_service().await;
@@ -121,7 +105,6 @@ async fn an_expired_token_is_refreshed_before_the_call() {
     );
 }
 
-// A token that is still valid must NOT trigger a refresh.
 #[tokio::test]
 async fn a_valid_token_is_used_without_refreshing() {
     let svc = test_service().await;
@@ -141,8 +124,6 @@ async fn a_valid_token_is_used_without_refreshing() {
     assert_eq!(origin.hits("/token"), 0, "no refresh for a valid token");
 }
 
-// L2 — a 401 from the API (token revoked while still notionally valid) is
-// recognised as an auth failure rather than a generic parse error.
 #[tokio::test]
 async fn a_revoked_token_is_reported_as_an_auth_failure() {
     let origin = TestOrigin::start().await;
@@ -161,14 +142,11 @@ async fn a_revoked_token_is_reported_as_an_auth_failure() {
     );
 }
 
-// L2 — and the reactive recovery: syncing with a revoked token flags the link.
 #[tokio::test]
 async fn a_revoked_token_is_recovered_from_reactively() {
     let svc = test_service().await;
     let user = insert_user(&svc.db, "alice").await;
     let tid = tracker_id(&svc.db).await;
-    // NOT expired — the proactive refresh never fires, so only a reactive 401
-    // check can notice the token is dead.
     seed_credentials(&svc.db, user, tid, 3600).await;
 
     let origin = TestOrigin::start().await;
@@ -205,8 +183,6 @@ async fn a_revoked_token_is_recovered_from_reactively() {
     );
 }
 
-// L7 — one entry failing must not abort the rest of the sync. The loop isolates
-// each manga, so a 500 on the first still leaves the second attempted.
 #[tokio::test]
 async fn a_partial_sync_failure_does_not_abort_the_remaining_entries() {
     let svc = test_service().await;
@@ -215,7 +191,6 @@ async fn a_partial_sync_failure_does_not_abort_the_remaining_entries() {
     seed_credentials(&svc.db, user, tid, 3600).await;
 
     let origin = TestOrigin::start().await;
-    // The first mapped manga errors; the second answers normally.
     origin.set("/manga/bad", Response::status(500));
     origin.set(
         "/manga/good",
@@ -262,9 +237,6 @@ async fn a_partial_sync_failure_does_not_abort_the_remaining_entries() {
     );
 }
 
-// L4 — a 429 carrying `Retry-After` must actually make the sync wait before it
-// touches that account again, rather than hammering straight through the
-// provider's limit.
 #[tokio::test]
 async fn a_tracker_rate_limit_is_respected() {
     let svc = test_service().await;
@@ -273,7 +245,6 @@ async fn a_tracker_rate_limit_is_respected() {
     seed_credentials(&svc.db, user, tid, 3600).await;
 
     let origin = TestOrigin::start().await;
-    // The first mapping is rate-limited with a 1s Retry-After; the second is fine.
     origin.set(
         "/manga/limited",
         Response::status(429).header("Retry-After", "1"),
@@ -325,11 +296,6 @@ async fn a_tracker_rate_limit_is_respected() {
     );
 }
 
-// L9 — tracker tokens must never reach a support bundle. Bundles get shared
-// with strangers to debug a deployment, so a leaked OAuth token there is a live
-// account compromise. The bundle ships the DB *schema* (not rows) and redacts
-// secret-named settings keys; this pins both against a future change that
-// starts dumping credential rows or logging a token.
 #[tokio::test]
 async fn tracker_tokens_are_never_written_to_the_support_bundle() {
     let svc = test_service().await;
@@ -352,7 +318,6 @@ async fn tracker_tokens_are_never_written_to_the_support_bundle() {
 
     let (zip_bytes, _name) = svc.generate_support_bundle(Vec::new()).await.unwrap();
 
-    // Scan every entry in the archive, not just the ones we expect to be risky.
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
     for i in 0..archive.len() {
         use std::io::Read;
@@ -368,7 +333,6 @@ async fn tracker_tokens_are_never_written_to_the_support_bundle() {
     }
 }
 
-// Re-linking clears the flag — otherwise the warning would stick forever.
 #[tokio::test]
 async fn storing_fresh_credentials_clears_the_reauth_flag() {
     let svc = test_service().await;

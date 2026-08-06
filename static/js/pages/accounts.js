@@ -1,5 +1,4 @@
 // @ts-check
-// Accounts page — user and role management (master-detail layout).
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -21,7 +20,6 @@ import { ListItem } from '../components/list-item.js';
 import { pushState } from '../url-params.js';
 const html = htm.bind(h);
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 /** @type {any[]} */ let _users = [];
 /** @type {any[]} */ let _roles = [];
@@ -30,7 +28,6 @@ const html = htm.bind(h);
 /** @type {'users' | 'roles'} */ let _activeTab = 'users';
 /** @type {any | null} */ let _selected = null;
 
-// All known permissions (mirrors permissions.rs)
 const ALL_PERMISSIONS = [
   'library:view', 'library:add', 'library:delete', 'library:refresh', 'library:manage',
   'chapter:download', 'chapter:delete',
@@ -40,7 +37,6 @@ const ALL_PERMISSIONS = [
   'server:manage',
 ];
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -61,7 +57,6 @@ export async function init(container) {
     return;
   }
 
-  // Content area — full height master-detail (below global header)
   const contentEl = document.createElement('div');
   contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:100%;min-height:0;';
 
@@ -121,7 +116,6 @@ function _updateHeaderActions() {
   setPageHeader({ crumbs, actions: addBtn });
 }
 
-// ── Data loading ──────────────────────────────────────────────────────────────
 
 async function _reload() {
   const [usersRes, rolesRes] = await Promise.allSettled([
@@ -132,7 +126,6 @@ async function _reload() {
   _roles = rolesRes.status === 'fulfilled' ? rolesRes.value ?? [] : [];
 }
 
-// ── Master-detail shell ───────────────────────────────────────────────────────
 
 /** @type {HTMLElement | null} */ let _listEl = null;
 /** @type {HTMLElement | null} */ let _detailEl = null;
@@ -191,7 +184,6 @@ function _renderDetail(detailEl) {
 function _renderList(listEl) {
   listEl.innerHTML = '';
 
-  // Header with tabs
   const headerEl = document.createElement('div');
   headerEl.className = 'list-pane-header';
 
@@ -215,7 +207,6 @@ function _renderList(listEl) {
   });
   headerEl.appendChild(tabsEl);
 
-  // Search
   const { el: searchEl, input: searchInput } = createSearchInput({
     size: 'sm',
     placeholder: t('accounts.search'),
@@ -223,7 +214,6 @@ function _renderList(listEl) {
   headerEl.appendChild(searchEl);
   listEl.appendChild(headerEl);
 
-  // List body
   const bodyEl = document.createElement('div');
   bodyEl.className = 'list-pane-body';
 
@@ -293,14 +283,12 @@ function _renderList(listEl) {
   listEl.appendChild(bodyEl);
 }
 
-// ── User detail ───────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} el
  * @param {any} user
  */
 function _renderUserDetail(el, user) {
-  // Effective permissions: union of all roles' permissions
   const effectivePerms = new Map();
   for (const roleName of (user.roles ?? [])) {
     const role = _roles.find(r => r.slug === roleName);
@@ -401,7 +389,6 @@ function _renderUserDetail(el, user) {
     }
   });
 
-  // Mount activity feed
   const feedEl = /** @type {HTMLElement} */ (el.querySelector('.js-activity-feed'));
   /** @type {Array<{ at: string, kind: string, description: string }>} */
   let _activityEvents = [];
@@ -438,7 +425,6 @@ function _renderUserDetail(el, user) {
   _loadActivity();
 }
 
-// ── Role detail ───────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} el
@@ -448,7 +434,6 @@ function _renderRoleDetail(el, role) {
   const usersWithRole = _users.filter(u => u.roles?.includes(role.slug));
   const isProtected = role.slug === 'user' || role.slug === 'admin';
 
-  // Build inherited permissions from parent role chain
   const directPerms = new Set(role.permissions ?? []);
   /** @type {Map<string, string>} */
   const inheritedPerms = new Map();
@@ -551,7 +536,6 @@ function _renderRoleDetail(el, role) {
     }
   });
 
-  // Clicking a user badge jumps to Users tab and selects that user
   for (const btn of el.querySelectorAll('.js-user-badge')) {
     btn.addEventListener('click', () => {
       const userId = Number(/** @type {HTMLElement} */ (btn).dataset.userId);
@@ -566,7 +550,6 @@ function _renderRoleDetail(el, role) {
   }
 }
 
-// ── User modal ────────────────────────────────────────────────────────────────
 
 /**
  * @param {any | null} user
@@ -674,7 +657,6 @@ function _showUserModal(user, onSaved) {
   const unmount = mountIntoModalRoot(html`<${UserModal} onClose=${() => unmount()} />`);
 }
 
-// ── Role modal ────────────────────────────────────────────────────────────────
 
 /**
  * @param {any | null} role

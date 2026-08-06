@@ -1,8 +1,3 @@
-// @ts-check
-// ManageRow — the Preact flavour of the Manage-tab row idiom (label + optional
-// description on the left, control on the right, hairline separators). The
-// vanilla builders live in _shared.js (mkItem/mkRow); tracker-panel and
-// library-settings-panel each re-implemented this markup inline before.
 
 import { h } from 'preact';
 import htm from 'htm';

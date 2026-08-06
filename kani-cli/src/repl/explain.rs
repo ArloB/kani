@@ -5,12 +5,14 @@ use kani_shared::ast::Expr;
 use std::fmt;
 
 #[derive(Debug, Clone)]
+/// One depth-annotated expression in a DSL explanation.
 pub struct TraceStep {
     pub depth: usize,
     pub expr_kind: String,
     pub description: String,
 }
 
+/// Pre-order explanation of a parsed DSL expression tree.
 pub struct ExplainTrace {
     pub steps: Vec<TraceStep>,
 }

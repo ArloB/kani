@@ -1,3 +1,5 @@
+//! Database-backed application service and its domain-specific operation modules.
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -50,6 +52,7 @@ pub mod library;
 pub mod manifest_capture;
 pub mod metadata_provider;
 mod migration;
+mod migration_checksums;
 pub mod opds;
 pub mod password_policy;
 pub mod password_reset;
@@ -77,6 +80,10 @@ pub mod volumes;
 pub mod webhooks;
 
 #[derive(Clone)]
+/// Cloneable application boundary shared by HTTP handlers and background jobs.
+///
+/// Clones share database pools, runtime registries, caches, cancellation, and side-effect services;
+/// cloning does not create an isolated transaction or source-runtime instance.
 pub struct AppService {
     pub db: SqlitePool,
     /// Where the database actually lives. Several callers need the sidecar
@@ -150,7 +157,6 @@ fn load_or_provision_credential_cipher(
         return parse_cipher_hex(val.trim(), reg);
     }
 
-    // Auto-provision path.
     let key_path = data_dir.join("secret.key");
     let hex = if key_path.exists() {
         match std::fs::read_to_string(&key_path) {
@@ -289,11 +295,6 @@ async fn apply_pragmas(
 
 impl AppService {
     pub async fn new(data_dir: &std::path::Path) -> Result<Self> {
-        // The database belongs in the data directory, alongside the keyfiles.
-        // It used to be opened as a bare `sqlite://kani.db`, resolved against
-        // the *working directory* — so `KANI_DATA_DIR` moved the keys and left
-        // the database behind, silently splitting an install across two places.
-        // Docker never noticed because its working directory is already /data.
         let db_path = data_dir.join("kani.db");
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
@@ -311,7 +312,7 @@ impl AppService {
 
         tracing::info!("SQL Pool Created");
 
-        sqlx::migrate!("../migrations").run(&pool).await?;
+        migration_checksums::run(&pool).await?;
 
         let sources_registry = SourceRegistry::new();
 
@@ -517,13 +518,6 @@ impl AppService {
             }
         });
 
-        // Create everything the app expects to find under its data and library
-        // directories, on every start. A fresh deployment has none of them: the
-        // Docker image mounts an empty /data, so the very first boot logged
-        // "Failed to scan and register sources: No such file or directory"
-        // because `wasm_sources/` — the extension directory it is meant to read
-        // — had never been created. Directories are cheap; assuming they exist
-        // is what cost a clean install its extension registry.
         for (label, dir) in [
             ("WASM storage", settings.wasm_storage_path.as_path()),
             ("library", settings.library_path.as_path()),
@@ -611,9 +605,7 @@ impl AppService {
                 .wasm_storage_path
                 .join(format!("{}.wasm", source.name));
 
-            // One unreadable extension file used to abort startup entirely, with
-            // an IoError that named neither the source nor the path. A missing
-            // extension is a degraded source, not a dead server.
+            // An unreadable extension degrades that source without aborting startup.
             if !yaml_path.exists() && !wasm_path.exists() {
                 degradation_registry.register(
                     &degradations::ids::source_load(&source.name),
@@ -1015,11 +1007,6 @@ impl AppService {
             global_search_timeout_secs: 6,
         };
 
-        // Every test origin is on loopback, and production `new()`/`new_proxy()`
-        // refuse redirects to private hosts — so the test clients must opt into
-        // private egress or no service-level test could follow a redirect to a
-        // TestOrigin. SSRF blocking itself is verified at the http.rs unit and
-        // webhook levels, which use their own clients.
         let smart_client = kani_core::http::SmartClient::new(None)
             .expect("SmartClient::new failed in test")
             .with_allow_private_egress(true);

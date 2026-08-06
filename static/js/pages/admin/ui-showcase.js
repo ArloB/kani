@@ -1,6 +1,4 @@
 // @ts-check
-// UI component showcase — a live catalog of every reusable component in static/js/components/.
-// Gated to admin:manage via the nav link; no backend endpoint needed.
 
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
 import { createEmptyState } from '../../components/empty-state.js';
@@ -99,7 +97,6 @@ export function init(container) {
   `;
   root.appendChild(heading);
 
-  // ── Feedback ─────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('Feedback', [
     {
       title: 'Toast — info',
@@ -196,7 +193,6 @@ export function init(container) {
     },
   ]));
 
-  // ── States ────────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('States', [
     {
       title: 'createEmptyState()',
@@ -238,7 +234,6 @@ export function init(container) {
     },
   ]));
 
-  // ── Inputs ────────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('Inputs & Controls', [
     {
       title: 'Star checkbox (favourite toggle)',
@@ -315,7 +310,6 @@ export function init(container) {
     },
   ]));
 
-  // ── Feedback blocks ───────────────────────────────────────────────────────
   root.appendChild(_renderSection('Callouts', [
     {
       title: 'Callout — info / warn / danger',
@@ -331,7 +325,6 @@ export function init(container) {
     },
   ]));
 
-  // ── Layout ────────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('Layout & Navigation', [
     {
       title: 'renderPagination()',
@@ -355,7 +348,6 @@ export function init(container) {
     },
   ]));
 
-  // ── Buttons ───────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('Buttons & Chips', [
     {
       title: 'Button variants',
@@ -413,7 +405,6 @@ export function init(container) {
     },
   ]));
 
-  // ── Typography & tokens ───────────────────────────────────────────────────
   root.appendChild(_renderSection('Typography & Color Tokens', [
     {
       title: 'Text scale',

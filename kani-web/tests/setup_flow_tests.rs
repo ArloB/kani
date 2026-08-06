@@ -45,8 +45,6 @@ async fn an_instance_with_an_account_does_not() {
 
 #[tokio::test]
 async fn setup_is_refused_once_an_account_exists() {
-    // The empty user table *is* the lock. A second caller must not be able to
-    // mint themselves an administrator.
     let state = test_state().await;
     create_admin(&state).await;
     let app = build_test_app(state).await;
@@ -72,8 +70,6 @@ async fn setup_is_refused_once_an_account_exists() {
 
 #[tokio::test]
 async fn setup_refuses_a_caller_whose_address_is_unknown() {
-    // A synthetic request carries no `ConnectInfo`, which stands in for "not
-    // demonstrably local". The default must be refusal, not admission.
     let state = test_state().await;
     let app = build_test_app(state).await;
 
@@ -103,7 +99,6 @@ async fn setup_refuses_a_caller_whose_address_is_unknown() {
 
 #[tokio::test]
 async fn setup_rejects_a_weak_password() {
-    // SAFETY: single-threaded test process; the override is read on this request.
     unsafe { std::env::set_var("KANI_ALLOW_REMOTE_SETUP", "true") };
     let state = test_state().await;
     let app = build_test_app(state).await;
@@ -156,7 +151,6 @@ async fn the_first_account_becomes_an_administrator() {
         "the person who sets the instance up owns it, got {roles:?}"
     );
 
-    // And the window is now shut for everyone else.
     let res = app
         .oneshot(post_json(
             "/rest/auth/setup",

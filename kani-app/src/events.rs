@@ -1,8 +1,11 @@
+//! Application events broadcast to SSE subscribers after service-layer state changes.
+
 use crate::ids::MangaId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// Wire-level event envelope consumed by the web SSE stream and frontend cache handlers.
 pub enum AppEvent {
     NewChapters {
         manga_id: MangaId,
@@ -118,6 +121,7 @@ pub enum AppEvent {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// Progress lifecycle for a multi-manga metadata refresh.
 pub enum RefreshProgressEvent {
     Started {
         total: usize,

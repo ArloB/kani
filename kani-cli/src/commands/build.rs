@@ -113,10 +113,7 @@ pub fn run(
 
     let (out_dir, _) = resolve_dir(out_dir, "KANI_OUT_DIR", "wasm_sources", &|_| true);
 
-    // An extension directory is one holding a Cargo.toml. When extensions lived
-    // inside the server tree this could assume every subdirectory was a crate;
-    // an external checkout is a repository root, so it also contains .git, and
-    // target/ once anything has been built there.
+    // Repository metadata and build output are not extension directories.
     let dirs: Vec<String> = fs::read_dir(&extensions_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
@@ -362,7 +359,7 @@ fn build_one(
         "--manifest-path",
         &manifest_str,
     ];
-    // Temporary storage so the string outlives the vec push
+    // Own the generated argument until `cargo_args` is consumed.
     let version_config;
     if let Some(ver) = set_version {
         version_config = format!("package.version=\"{ver}\"");
@@ -506,7 +503,6 @@ mod dir_resolution_tests {
     fn with_env<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
         let previous = std::env::var(key).ok();
         match value {
-            // Safety: single-threaded within the guard, and restored after.
             Some(v) => unsafe { std::env::set_var(key, v) },
             None => unsafe { std::env::remove_var(key) },
         }

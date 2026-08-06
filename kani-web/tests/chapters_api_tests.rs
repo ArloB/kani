@@ -1,8 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for chapter-level REST endpoints:
-// PUT /chapter/{id}/progress, PUT /chapters/read_status, GET /manga/{id}/chapters.
-// WASM-driven download (POST /chapter/{id}/download) requires a real source with
-// WASM loaded and is out of host-side REST test scope.
 
 mod common;
 use axum::http::StatusCode;
@@ -27,7 +23,6 @@ async fn set_chapter_progress_returns_error_for_missing_chapter() {
         .await
         .unwrap();
 
-    // FK constraint violation on non-existent chapter_id → error response.
     assert!(
         !res.status().is_success(),
         "expected error for non-existent chapter, got {}",
@@ -55,7 +50,6 @@ async fn set_read_status_returns_204_for_empty_chapter_list() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // Marking an empty chapter list as read is a valid no-op.
     let res = app
         .oneshot(put_json(
             "/rest/chapters/read_status",
@@ -88,13 +82,11 @@ async fn get_manga_chapters_returns_empty_for_fresh_db() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // page=1 is required by the query validator.
     let res = app
         .oneshot(authed_get("/rest/manga/999999/chapters?page=1", &cookie))
         .await
         .unwrap();
 
-    // Non-existent manga → empty chapter list (the DB returns no rows).
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert!(
@@ -113,7 +105,6 @@ async fn get_manga_chapters_invalid_page_returns_400() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // page=0 violates the garde min=1 validator.
     let res = app
         .oneshot(authed_get("/rest/manga/1/chapters?page=0", &cookie))
         .await

@@ -1,3 +1,5 @@
+//! Sandboxed Rhai hooks, pure functions, and browser-script registries for extensions.
+
 pub mod bindings;
 pub mod browser_scripts;
 pub mod engine;

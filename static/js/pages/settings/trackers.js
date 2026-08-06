@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Trackers section.
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

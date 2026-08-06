@@ -1,5 +1,4 @@
 // @ts-check
-// Virtual chapter list — windowed rendering for large chapter counts.
 
 import { h } from 'preact';
 import { memo } from 'preact/compat';
@@ -76,7 +75,6 @@ const OVERSCAN = 5;
  * }} props
  */
 function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolume, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange, onUpgradeClick }) {
-  // The first candidate is enough for a badge; the dialogue shows the detail.
   const upgradeCandidate = chapter.upgrade_available?.candidates?.[0] ?? null;
   const upgradeIsReassurance = upgradeCandidate?.kind === 'source_downgraded';
 
@@ -136,8 +134,6 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
   // not a full-height border).
   const rowIndicator = downloaded ? 'downloaded' : (isRead ? 'read' : '');
 
-  // Download state button — still needed for in-progress / failed visual in context menu trigger area
-  // We render a small status indicator inline with the title row instead of a full button
   let statusIndicator = null;
   if (inLibrary) {
     if (isActive) {
@@ -290,7 +286,6 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
         data-indicator=${rowIndicator || undefined}
         class=${'chapter-row flex items-center gap-3 px-3 border-b border-border-subtle cursor-pointer select-none' + (chapter.is_orphaned ? ' opacity-60' : '') + (selected ? ' bg-accent/10' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
         onClick=${() => {
-          // Absorb the click from pointer-up that fires right after a long-press entered select mode
           if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
           onToggleSelect && onToggleSelect(chapter.id);
         }}
@@ -313,8 +308,6 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
     `;
   }
 
-  // Local chapters open the reader when downloaded, or when the user can
-  // download (the reader downloads on open); active downloads stay non-clickable.
   const isClickable = inLibrary && !isActive && (downloaded || canDownload);
   let nonClickableClass = '', nonClickableTitle = '';
   if (!isClickable) {
@@ -523,10 +516,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   }, [chapters]);
   const sentinelRef = useRef(/** @type {HTMLDivElement | null} */(null));
   const scrollRef = useRef(/** @type {HTMLDivElement | null} */(null));
-  // Disable all bulk actions while any one is in flight (prevents double-submit).
   const { busy: bulkBusy, run: runBulk } = useBusy();
 
-  // IntersectionObserver for the non-windowed sentinel
   useEffect(() => {
     if (height || !hasMore || !onLoadMore || !sentinelRef.current) return;
     const observer = new IntersectionObserver((entries) => {
@@ -622,7 +613,6 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     ? allSelectedProp
     : (selectedCount === chapters.length && chapters.length > 0);
 
-  // Count downloaded/undownloaded among selected for smart bulk-bar feedback
   const selectedDownloadedCount = selected
     ? chapters.filter(ch => selected.has(ch.id) && ch.downloaded).length
     : 0;
@@ -672,7 +662,6 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     />
   ` : null;
 
-  // Slice indices — used by both windowed rendering and the aria-activedescendant guard
   const startIdx = height ? Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN) : 0;
   const endIdx = height ? Math.min(chapters.length, startIdx + visibleCount + OVERSCAN * 2) : chapters.length;
   // Only emit aria-activedescendant when the active option's DOM node exists in the current slice

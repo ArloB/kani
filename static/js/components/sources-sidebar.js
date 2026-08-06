@@ -21,7 +21,6 @@ function _isYamlName(name) {
   return /\.ya?ml$/i.test(name ?? '');
 }
 
-// ── Pending source cleanup ─────────────────────────────────────────────────
 
 /** @type {number|null} */
 let _pendingSourceId = null;
@@ -37,7 +36,6 @@ export function consumePendingSourceId() {
   return id;
 }
 
-// ── AddSourceModal ─────────────────────────────────────────────────────────
 
 /**
  * Modal for adding a new source from a WASM URL or file upload.
@@ -55,7 +53,6 @@ export function AddSourceModal({ open, onClose, onCreated }) {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(/** @type {string|null} */ (null));
 
-  // Reset state when modal opens
   useEffect(() => {
     if (open) {
       setMode('url');
@@ -88,9 +85,6 @@ export function AddSourceModal({ open, onClose, onCreated }) {
     setLoading(true);
     setError(null);
 
-    // Decide format. YAML installs in one step (the endpoint finds-or-creates
-    // the source by the definition's own id). WASM needs a placeholder source
-    // first, then the binary is compiled into it.
     const url = wasmUrl.trim();
     const isYaml = mode === 'yaml'
       || (mode === 'url' && _isYamlName(new URL(url).pathname))
@@ -107,8 +101,6 @@ export function AddSourceModal({ open, onClose, onCreated }) {
           await api.installYaml(text);
         }
       } else {
-        // WASM two-step: placeholder source → binary. Unique placeholder name
-        // avoids colliding with an existing (or soft-deleted) source name.
         const placeholder = 'pending-' + Date.now().toString(36);
         const { id: sourceId } = await api.createSource(placeholder);
         _pendingSourceId = sourceId;
@@ -211,7 +203,6 @@ export function AddSourceModal({ open, onClose, onCreated }) {
   `;
 }
 
-// ── SourcesSidebar ─────────────────────────────────────────────────────────
 
 /**
  * Desktop sources sidebar: search input, source list with star toggles, and add source button.
@@ -225,12 +216,10 @@ export function AddSourceModal({ open, onClose, onCreated }) {
  */
 export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
   const [query, setQuery]     = useState('');
-  // Track optimistic starred state per source id; sync when sources prop changes
   const [starred, setStarred] = useState(() => _buildStarred(sources));
 
   useEffect(() => {
     setStarred(prev => {
-      // Merge: keep local overrides, add any new ids from refreshed sources
       /** @type {Record<number, boolean>} */
       const next = {};
       for (const s of sources) {

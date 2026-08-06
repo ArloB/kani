@@ -123,6 +123,8 @@ const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
 const MAX_BACKUP_BYTES: usize = 100 * 1024 * 1024;
 const MAX_TACHI_BYTES: usize = 50 * 1024 * 1024;
 
+/// Extractor that authenticates by bearer token or session and enforces `P` before dispatch.
+/// An invalid explicit bearer token never falls back to session authentication.
 pub struct AuthGuard<P: AuthRequirement>(pub crate::auth::User, pub PhantomData<P>);
 
 impl<S, P> axum::extract::FromRequestParts<S> for AuthGuard<P>
@@ -137,10 +139,9 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        // A programmatic caller presents a bearer token and has no session. An
-        // explicit bearer that fails to authenticate is refused outright rather
-        // than falling through to session auth: silently downgrading would make
-        // a broken integration look like a working one.
+        // A programmatic caller presents a bearer token and has no session. An explicit bearer
+        // that fails to authenticate is refused outright rather than falling through to session
+        // auth: silently downgrading would make a broken integration look like a working one.
         if let Some(raw) = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -270,26 +271,16 @@ fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-// ── Password strength endpoint (public — called before registration) ──────────
-
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct PasswordStrengthRequest {
     pub(crate) password: String,
     pub(crate) identity: Option<String>,
 }
 
-// ── Session inventory ─────────────────────────────────────────────────────────
-
-// ── TOTP 2FA ──────────────────────────────────────────────────────────────────
-
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct TotpCodeRequest {
     pub(crate) code: String,
 }
-
-// ── Features endpoint ─────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// The client's socket address, when the server was started with connect info.
 ///
@@ -331,10 +322,6 @@ pub(crate) struct RegisterRequest {
     pub(crate) captcha_id: String,
     pub(crate) captcha_answer: i64,
 }
-
-// ── Filesystem browser ────────────────────────────────────────────────────────
-
-// ── Path migration ────────────────────────────────────────────────────────────
 
 async fn resolve_path_field(state: &AppState, field: &str) -> Result<std::path::PathBuf, AppError> {
     let settings = state.settings.read().await;
@@ -700,13 +687,6 @@ pub(crate) async fn image_proxy(
                                         "Upstream response missing Content-Type".into(),
                                     )
                                 })?;
-                            // The declared type is a claim, not evidence: CDNs
-                            // serve real images as `application/octet-stream`,
-                            // and a hostile origin can label a challenge page
-                            // `image/png`. The body is fully buffered below, so
-                            // the magic number decides — see the sniff after the
-                            // read. Only an outright HTML page is worth
-                            // rejecting this early, before spending the read.
                             let ct_str = content_type.to_str().unwrap_or("");
                             if ct_str.starts_with("text/html") {
                                 tracing::warn!(
@@ -1101,8 +1081,6 @@ pub(crate) async fn serve_manga_cover(
         .into_response())
 }
 
-// ── Library ──────────────────────────────────────────────────────────────────
-
 #[derive(serde::Deserialize)]
 pub(crate) struct DownloadHistoryQuery {
     #[serde(default = "default_history_limit")]
@@ -1111,10 +1089,6 @@ pub(crate) struct DownloadHistoryQuery {
 fn default_history_limit() -> i64 {
     50
 }
-
-// ── Filter metadata ───────────────────────────────────────────────────────────
-
-// ── Settings & scan ───────────────────────────────────────────────────────────
 
 fn map_refresh_request(
     req: crate::models::RefreshMangaRequest,
@@ -1154,20 +1128,6 @@ fn map_refresh_request(
         clear_overrides: req.clear_overrides.unwrap_or(false),
     })
 }
-
-// ── Download rules ────────────────────────────────────────────────────────────
-
-// ── Scanlator preferences ─────────────────────────────────────────────────────
-
-// ── Categories ────────────────────────────────────────────────────────────────
-
-// ── Source preferences ────────────────────────────────────────────────────────
-
-// ── Migration ─────────────────────────────────────────────────────────────────
-
-// ── User / Auth ───────────────────────────────────────────────────────────────
-
-// ── Chapter CBZ reader ────────────────────────────────────────────────────────
 
 #[utoipa::path(
     get, path = "/rest/chapter/{id}/page/{page_num}",
@@ -1286,8 +1246,6 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-// ── External tracker handlers ────────────────────────────────────────────
-
 const OAUTH_SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head><title>Account Linked</title></head>
@@ -1302,14 +1260,6 @@ const OAUTH_SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 </script>
 </body>
 </html>"#;
-
-// ── Progress tracking handlers ───────────────────────────────────────────
-
-// ── Admin — maintenance ───────────────────────────────────────────────────────
-
-// ── Admin — user management ───────────────────────────────────────────────────
-
-// ── Admin — user activity feed ────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub(crate) struct UserActivityQuery {
@@ -1332,8 +1282,6 @@ struct UserActivityResponse {
     events: Vec<ActivityEvent>,
 }
 
-// ── Admin — role management ───────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1345,8 +1293,6 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
     use tower_sessions_sqlx_store::SqliteStore;
-
-    // ── test helpers ──────────────────────────────────────────────────────────
 
     async fn test_app_state(pool: sqlx::SqlitePool) -> AppState {
         AppState::new_for_test(pool).await
@@ -1418,8 +1364,6 @@ mod tests {
             .to_string()
     }
 
-    // ── login ─────────────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn login_valid_credentials_returns_200() {
         let (app, user, pass) = test_router().await;
@@ -1470,8 +1414,6 @@ mod tests {
         assert!(json["error"].is_string());
     }
 
-    // ── auth/me ───────────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn auth_me_without_session_returns_401() {
         let (app, _, _) = test_router().await;
@@ -1512,8 +1454,6 @@ mod tests {
         assert_eq!(json["username"], user.as_str());
     }
 
-    // ── logout ────────────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn logout_returns_200() {
         let (app, user, pass) = test_router().await;
@@ -1542,7 +1482,6 @@ mod tests {
             .unwrap();
         app.clone().oneshot(logout).await.unwrap();
 
-        // Old cookie should no longer grant access.
         let req = axum::http::Request::builder()
             .uri("/auth/me")
             .header("cookie", &cookie)
@@ -1551,8 +1490,6 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
-
-    // ── boot_id ───────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn boot_id_with_session_returns_expected_value() {
@@ -1569,8 +1506,6 @@ mod tests {
         let json = body_json(resp.into_body()).await;
         assert_eq!(json["boot_id"], "test-boot-id");
     }
-
-    // ── smoke: unauthenticated protected routes return 401 ────────────────────
 
     async fn assert_401_without_session(uri: &'static str) {
         let (app, _, _) = test_router().await;
@@ -1622,34 +1557,16 @@ mod tests {
     }
 }
 
-// ── Admin: application logs ───────────────────────────────────────────────────
-
-// ── Admin: audit log ──────────────────────────────────────────────────────────
-
-// ── Reading statistics ────────────────────────────────────────────────────────
-
-// ── Bookmarks (#14) ───────────────────────────────────────────────────────────
-
-// ── Per-chapter notes (#31) ───────────────────────────────────────────────────
-
-// ── Backup / Restore ─────────────────────────────────────────────────────────
-
 #[derive(serde::Deserialize)]
 pub(crate) struct LibraryBackupQuery {
     pub(crate) include_chapter_progress: Option<bool>,
 }
-
-// ── Pending imports ───────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub(crate) struct ResolvePendingImportBody {
     pub(crate) source_id: i64,
     pub(crate) source_manga_id: String,
 }
-
-// ── Orphaned manga ────────────────────────────────────────────────────────────
-
-// ── Duplicates ────────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub(crate) struct DismissDuplicatePath {
@@ -1662,8 +1579,6 @@ pub(crate) struct MergeDuplicateBody {
     pub(crate) keep_id: i64,
     pub(crate) discard_id: i64,
 }
-
-// ── Backup multipart helper ───────────────────────────────────────────────────
 
 async fn collect_file_field(
     multipart: &mut Multipart,
@@ -1688,8 +1603,6 @@ async fn collect_file_field(
     .await?)
 }
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
-
 fn parse_csv(s: Option<&str>) -> Vec<String> {
     match s {
         Some(v) if !v.is_empty() => v.split(',').map(|p| p.trim().to_string()).collect(),
@@ -1705,8 +1618,6 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
-// ── CBZ / Export handlers ─────────────────────────────────────────────────────
-
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct ExportQuery {
     pub(crate) profile: Option<String>,
@@ -1718,5 +1629,3 @@ pub(crate) struct KccExportQuery {
     pub(crate) format: Option<String>,
     pub(crate) manga: Option<bool>,
 }
-
-// ── Webhooks ──────────────────────────────────────────────────────────────────

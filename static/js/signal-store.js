@@ -1,9 +1,3 @@
-// @ts-check
-// Signal-backed key/value store factory. Replaces the hand-rolled
-// Map<key, Set<listener>> pub/sub in session.js / cache.js / ui-state.js with
-// @preact/signals: writes flow through a per-key signal, so components can read
-// atoms reactively inside effect()/computed() while the legacy getState/
-// setState/updateState/subscribe API keeps working unchanged.
 
 import { signal, effect, untracked } from '@preact/signals';
 

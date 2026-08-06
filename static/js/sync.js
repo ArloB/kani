@@ -17,7 +17,7 @@ function _getChannel() {
  * @param {any} value
  */
 export function broadcastStateChange(key, value) {
-  try { _getChannel()?.postMessage({ key, value }); } catch { /* BroadcastChannel unavailable */ }
+  try { _getChannel()?.postMessage({ key, value }); } catch { }
 }
 
 /**

@@ -1,11 +1,3 @@
-// @ts-check
-// Saved-searches manager — save the current filter state as a named search,
-// apply or delete existing ones. library.js owns filter state; this component
-// only reads it once via getCurrentFilters() and applies it via onApply().
-//
-// Preact throughout; both dialogs use the shared Modal (stacking in
-// mountIntoModalRoot makes the nested delete-confirm safe, which is what the
-// old hand-rolled overlays were working around).
 
 import { h, render } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

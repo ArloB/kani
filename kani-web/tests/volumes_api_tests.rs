@@ -9,8 +9,6 @@ use common::{
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── GET /rest/manga/:id/volumes ───────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_volumes_returns_200_for_authed_user() {
     let state = test_state().await;
@@ -36,8 +34,6 @@ async fn list_volumes_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── POST /rest/manga/:id/volumes ──────────────────────────────────────────────
-
 #[tokio::test]
 async fn create_volume_returns_401_without_auth() {
     let state = test_state().await;
@@ -53,8 +49,6 @@ async fn create_volume_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── DELETE /rest/manga/:id/volumes/:vid ───────────────────────────────────────
 
 #[tokio::test]
 async fn delete_volume_returns_401_without_auth() {
@@ -83,8 +77,6 @@ async fn delete_volume_returns_404_for_missing_volume() {
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
-
-// ── PUT /rest/manga/:id/chapters/:cid/volume ──────────────────────────────────
 
 #[tokio::test]
 async fn assign_chapter_volume_returns_401_without_auth() {

@@ -1,8 +1,3 @@
-// @ts-check
-// Reactive bridge between a save-bar settings section and the host's <SaveBar/>.
-// A section calls `useSettingsForm(...)`; the host reads `formDirty` and invokes
-// `runSave`/`runReset`. Replaces the old `{ isDirty, save }` mount contract and
-// the 400 ms dirty poll.
 
 import { signal } from '@preact/signals';
 import { useEffect } from 'preact/hooks';

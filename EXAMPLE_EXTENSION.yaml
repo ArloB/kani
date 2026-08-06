@@ -1,14 +1,3 @@
-# =============================================================================
-# Kani Declarative Extension: Mangapill
-# =============================================================================
-# This is a complete YAML extension definition for the Mangapill source.
-# It is a 1:1 equivalent of the mangapill extension (kani-extensions repository) and
-# can be compiled to an identical WASM binary via `kani-cli generate`.
-#
-# Compare this file (~150 lines) to the hand-written Rust (~378 lines) to
-# see the reduction in boilerplate.
-# =============================================================================
-
 id: mangapill-gen
 name: Mangapill
 version: "0.1.0"
@@ -17,33 +6,20 @@ language: multi
 nsfw: false
 unrestricted_http: false
 
-# =============================================================================
-# Endpoints
-# =============================================================================
 endpoints:
 
-  # ---------------------------------------------------------------------------
-  # Popular manga (reuses search with empty query when filters are active)
-  # ---------------------------------------------------------------------------
-  # NOTE: Mangapill has no dedicated "popular" endpoint. The hand-written
-  # extension returns an empty list when no filters are set, and delegates
-  # to the search endpoint otherwise. The codegen handles this by checking
-  # whether filters are empty and short-circuiting.
   popular:
     delegate_to: search
     empty_without_filters: true
 
-  # ---------------------------------------------------------------------------
-  # Search manga
-  # ---------------------------------------------------------------------------
   search:
     route: "/search"
     queries:
       q: $query$
     filter_mapping:
-      genre: genre        # checkbox group "genre:*" -> query param "genre"
-      type: type           # select "type" -> query param "type"
-      status: status       # select "status" -> query param "status"
+      genre: genre
+      type: type
+      status: status
     pagination:
       native_page_size: 50
       offset_param: "page"
@@ -62,9 +38,6 @@ endpoints:
           if $src.starts_with("http") then $src else "https://mangapill.com".append($src)
         optional: true
 
-  # ---------------------------------------------------------------------------
-  # Manga details
-  # ---------------------------------------------------------------------------
   manga_details:
     route: "/manga/$manga_id$"
     container: ":root"
@@ -97,9 +70,6 @@ endpoints:
         expr: 'dom("img").attr("data-src")'
         optional: true
 
-  # ---------------------------------------------------------------------------
-  # Chapter list
-  # ---------------------------------------------------------------------------
   chapter_list:
     route: "/manga/$manga_id$"
     container: "div.grid a.border"
@@ -122,9 +92,6 @@ endpoints:
         optional: true
       language: '"en"'
 
-  # ---------------------------------------------------------------------------
-  # Pages
-  # ---------------------------------------------------------------------------
   pages:
     route: "/chapters/$chapter_id$"
     container: "img.js-page"
@@ -132,54 +99,8 @@ endpoints:
       index: "index()"
       url: 'self.attr("data-src")'
 
-  # ---------------------------------------------------------------------------
-  # JSON API example — illustrates JSON-specific features (e.g. MangaDex-style)
-  # Uncomment and adapt for sources with a JSON API.
-  # ---------------------------------------------------------------------------
-  # manga_details_json:
-  #   route: "/manga/$manga_id$?includes[]=cover_art"
-  #   type: json
-  #   container: ""
-  #   bindings:
-  #     # `.find(key, value)` locates the cover_art relationship object in the array.
-  #     $cover: 'json("/data/relationships").find("type", "cover_art")'
-  #     $filename: '$cover.ptr("/attributes/fileName").str()'
-  #     # `.get(key_expr)` accesses an object field using a dynamic key (preference value).
-  #     $local_title: 'json("/data/attributes/title").get(pref("language"))'
-  #   fields:
-  #     id: '"$manga_id$"'
-  #     title: '$local_title.str().fallback(json("/data/attributes/title/en").str())'
-  #     # `.to_string()` converts the parsed integer chapter count back to a String.
-  #     chapter_count:
-  #       expr: 'json("/data/attributes/lastChapter").str().parse_int().fallback(0).to_string().append(" chapters")'
-  #       optional: true
-  #     cover_url:
-  #       expr: '"https://uploads.mangadex.org/covers/".append(json("/data/id").str()).append("/").append($filename)'
-  #       optional: true
 
-# =============================================================================
-# Filters
-# =============================================================================
-# Filter IDs follow the "group" or "group:action" convention used by the
-# `ApplyFilters` wrapper in `kani-shared`:
-#
-#   "group"        — the group name becomes the query parameter key.
-#                    e.g. id: "status"  →  ?status=<value>
-#
-#   "group:action" — for checkbox filters, `action` is emitted as the query
-#                    parameter value when the checkbox is checked, instead of
-#                    the default "true".
-#                    e.g. id: "genre:Action"  →  ?genre=Action  (when checked)
-#
-# Multiselect filters produce repeated keys by default (?tag=a&tag=b).
-# To use bracket notation (?tag[]=a&tag[]=b) or comma-separated (?tag=a,b),
-# call `.apply_filters_fmt(filters, ArrayFormat::Bracket)` or
-# `.apply_filters_fmt(filters, ArrayFormat::CommaSeparated)` respectively.
-#
-# When the filter group name differs from the API parameter name, use
-# `.apply_filters_mapped(filters, &[("group", "api_param")])`.
 filters:
-  # --- Genre checkboxes ---
   - { id: "genre:Action",        name: "Action",        type: checkbox }
   - { id: "genre:Adventure",     name: "Adventure",     type: checkbox }
   - { id: "genre:Cars",          name: "Cars",          type: checkbox }
@@ -227,7 +148,6 @@ filters:
   - { id: "genre:Yaoi",          name: "Yaoi",          type: checkbox }
   - { id: "genre:Yuri",          name: "Yuri",          type: checkbox }
 
-  # --- Type select ---
   - id: type
     name: Type
     type: select
@@ -241,7 +161,6 @@ filters:
       - { name: OEL,        value: oel }
     default: { name: All, value: "" }
 
-  # --- Status select ---
   - id: status
     name: Status
     type: select
@@ -254,15 +173,8 @@ filters:
       - { name: Not Yet Published, value: "not+yet+published" }
     default: { name: All, value: "" }
 
-# =============================================================================
-# Preferences
-# =============================================================================
-# Mangapill has no user-configurable preferences.
 preferences: []
 
-# =============================================================================
-# Source URL
-# =============================================================================
 # Optional. When set, provides the canonical URL for a manga on the source site.
 # Use $manga_id$ as a placeholder for the manga's ID.
 get_url: "https://mangapill.com/manga/$manga_id$"

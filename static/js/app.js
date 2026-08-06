@@ -21,7 +21,6 @@ import { listenForStateChanges } from './sync.js';
 import { registerShortcuts, showCheatsheet } from './shortcuts.js';
 import { openCommandPalette } from './components/command-palette.js';
 
-// ── Bootstrap ────────────────────────────────────────────────────────────────
 
 (async () => {
   initTheme();
@@ -35,8 +34,8 @@ import { openCommandPalette } from './components/command-palette.js';
 
 
   await initPermissions();
-  syncServerThemes().catch(() => { /* the cached theme stays applied */ });
-  getCurrentUser().then(user => setState('user', user)).catch(() => { /* non-fatal */ });
+  syncServerThemes().catch(() => { });
+  getCurrentUser().then(user => setState('user', user)).catch(() => { });
   initTooltip();
   connectSSE();
   _mountConnectionBanner();
@@ -46,7 +45,7 @@ import { openCommandPalette } from './components/command-palette.js';
   try {
     const { boot_id } = await getBootId();
     if (boot_id) setState('bootId', boot_id);
-  } catch { /* non-fatal */ }
+  } catch { }
 
   const navEl    = document.getElementById('nav');
   const tabNavEl = document.getElementById('bottom-nav');
@@ -56,7 +55,6 @@ import { openCommandPalette } from './components/command-palette.js';
 
   const appEl = document.getElementById('app');
   if (appEl) {
-    // Mount the global header at the top of shell-main; pages go in a sub-container.
     const { notificationsMount } = mountAppHeader(appEl);
     // Async: show security banner if admin and TOTP not enabled on public instance.
     _maybeShowSecurityBanner(appEl);
@@ -78,28 +76,26 @@ import { openCommandPalette } from './components/command-palette.js';
     // Re-hydrate permissions immediately — the SSE reconnect means the server
     // is up, so this should succeed without a full reload.
     initPermissions();
-    getCurrentUser().then(user => setState('user', user)).catch(() => { /* non-fatal */ });
+    getCurrentUser().then(user => setState('user', user)).catch(() => { });
     _handleServerRestart();
   });
 
   _registerServiceWorker();
 })();
 
-// ── Sidebar ───────────────────────────────────────────────────────────────────
 
 async function _maybeRedirectFirstRun() {
   if (!hasPermission('admin:manage')) return;
   try {
     const info = await getSystemInfo();
     if (info?.first_run && location.pathname !== '/onboarding') {
-      // Remember where they were going. Discarding it silently sends every
-      // first-run deep link to the library instead — and a link carrying a query
-      // string (`/settings?section=diagnostics`) lands somewhere that looks
-      // plausible, so the drop is invisible rather than merely annoying.
+      // Remember where they were going. Discarding it silently sends every first-run deep link to
+      // the library instead — and a link carrying a query string (`/settings?section=diagnostics`)
+      // lands somewhere that looks plausible, so the drop is invisible rather than merely annoying.
       rememberIntendedDestination(location.pathname + location.search);
       navigate('/onboarding');
     }
-  } catch { /* non-fatal */ }
+  } catch { }
 }
 
 /** @param {HTMLElement} appEl */
@@ -113,7 +109,7 @@ async function _maybeShowWhatsNew(appEl) {
     const changelog = await getChangelog().catch(() => null);
     if (!changelog?.html?.trim()) return;
     showWhatsNew(changelog.version ?? info.version, changelog.html);
-  } catch { /* non-fatal */ }
+  } catch { }
 }
 
 const SIDEBAR_KEY = 'kani_sidebar_collapsed';
@@ -211,7 +207,7 @@ function _renderDesktopNav(el) {
   });
 
   el.querySelector('#nav-logout')?.addEventListener('click', async () => {
-    try { await logout(); } catch { /* ignore */ }
+    try { await logout(); } catch { }
     navigate('/login');
   });
 
@@ -307,7 +303,6 @@ function _updateDesktopActive(el, path) {
   }
 }
 
-// ── Mobile bottom tab bar ────────────────────────────────────────────────────
 
 /** @param {HTMLElement} el */
 function _renderBottomNav(el) {
@@ -379,7 +374,6 @@ function _updateTabActive(el, path) {
   for (const a of /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('.tab-link'))) {
     let isActive;
     if (a.dataset.morePaths != null) {
-      // "More" button: active when the path is one of its destinations.
       isActive = a.dataset.morePaths.split(',').some(p => p && (p === '/' ? path === '/' : path.startsWith(p)));
     } else {
       const href = a.getAttribute('href') ?? '';
@@ -391,7 +385,6 @@ function _updateTabActive(el, path) {
   }
 }
 
-// ── Chrome show/hide ──────────────────────────────────────────────────────────
 
 function _hideChrome() {
   const nav    = document.getElementById('nav');
@@ -415,7 +408,6 @@ function _showChrome() {
   if (app) app.classList.add('shell-main');
 }
 
-// ── Server restart banner ─────────────────────────────────────────────────────
 
 function _handleServerRestart() {
   if (document.getElementById('restart-banner')) return;
@@ -440,7 +432,7 @@ function _handleServerRestart() {
       try {
         const r = await fetch('/ready');
         if (r.ok) { location.reload(); return; }
-      } catch { /* server not yet accepting connections */ }
+      } catch { }
       await new Promise(res => setTimeout(res, 500));
     }
     // Fell through — reload anyway after 10 s.
@@ -448,7 +440,6 @@ function _handleServerRestart() {
   });
 }
 
-// ── SSE connection banner ─────────────────────────────────────────────────────
 
 function _mountConnectionBanner() {
   /** @type {HTMLElement | null} */
@@ -475,7 +466,6 @@ function _mountConnectionBanner() {
   });
 }
 
-// ── Service worker ────────────────────────────────────────────────────────────
 
 function _registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
@@ -523,7 +513,7 @@ async function _maybeShowSecurityBanner(appEl) {
     } else {
       appEl.appendChild(banner);
     }
-  } catch { /* non-fatal */ }
+  } catch { }
 }
 
 /** @param {ServiceWorker} incoming */

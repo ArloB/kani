@@ -1,4 +1,7 @@
+//! Typed application permissions and zero-sized handler requirement markers.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Failure to parse a persisted `resource:action` permission string.
 pub struct PermissionParseError(pub String);
 
 impl std::error::Error for PermissionParseError {}
@@ -9,10 +12,12 @@ impl std::fmt::Display for PermissionParseError {
     }
 }
 
+/// Declares the permission enforced by web middleware before a handler runs.
 pub trait AuthRequirement {
     fn required_permission() -> Option<Permission>;
 }
 
+/// Requirement marker for authentication without an additional permission.
 pub struct IsAuthenticated;
 impl AuthRequirement for IsAuthenticated {
     fn required_permission() -> Option<Permission> {
@@ -20,6 +25,7 @@ impl AuthRequirement for IsAuthenticated {
     }
 }
 
+/// Defines typed resource/action enums, their stable string encoding, and handler guards.
 macro_rules! permissions {
     (
         $(

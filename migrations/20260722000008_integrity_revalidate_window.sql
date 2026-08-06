@@ -1,11 +1,3 @@
--- How long a successful verification stays trusted.
---
--- `chapters.file_verified_at` has been written by every scrub and every
--- download since it was added, and read by nothing — so a scheduled scrub
--- re-hashed the entire library on every run regardless of what it had checked
--- an hour earlier. Thirty days is the default: long enough that a nightly quick
--- scrub does real work only on a rolling slice, short enough that bit rot
--- surfaces within a month.
---
--- A scrub the user triggers by hand ignores this and checks everything.
+-- Scheduled scrubs trust recent successful verification for 30 days instead of
+-- rehashing the entire library every run. Explicit scrubs still check every file.
 ALTER TABLE settings ADD COLUMN integrity_revalidate_after_days INTEGER NOT NULL DEFAULT 30;

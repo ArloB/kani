@@ -7,8 +7,6 @@ CREATE TABLE webhooks (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- webhook_id = 0 is a sentinel meaning "global opt-out for all webhooks" (set from manga detail page).
--- Non-zero webhook_id values reference webhooks.id for per-webhook overrides.
 CREATE TABLE webhook_manga_overrides (
     webhook_id INTEGER NOT NULL,
     manga_id   INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,

@@ -1,10 +1,8 @@
 // @ts-check
-// Star checkbox — favourite toggle for manga.
 
 import { iconStarFilled, iconStarOutline } from '../icons.js';
 
 /**
- * Creates a star checkbox element.
  * @param {{
  *   checked: boolean,
  *   onChange: (checked: boolean) => void,

@@ -1,7 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for DB-side chapter deduplication and duplicate-manga detection.
-// WASM-driven end-to-end scanning (fetch_and_store_chapters_silent) is out of
-// host-side scope and is covered by the kani-core WASM integration tests.
 
 mod common;
 use common::{insert_manga, insert_source, test_service};
@@ -9,8 +6,6 @@ use kani_app::ids::MangaId;
 use kani_app::service::dedup::{
     find_similar_manga, normalise_title, record_duplicates_for_manga, scan_and_persist_duplicates,
 };
-
-// ── normalise_title unit tests ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn normalise_title_strips_leading_the() {
@@ -34,8 +29,6 @@ async fn normalise_title_collapses_punctuation_and_whitespace() {
     assert_eq!(normalise_title("Attack  on  Titan"), "attack on titan");
 }
 
-// ── find_similar_manga DB tests ───────────────────────────────────────────────
-
 #[tokio::test]
 async fn find_similar_manga_returns_empty_on_fresh_db() {
     let svc = test_service().await;
@@ -52,7 +45,6 @@ async fn find_similar_manga_finds_close_title_match() {
     let id1 = insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
     let _id2 = insert_manga(&svc.db, src, "m2", "Dragon Ball Z").await;
 
-    // Searching for "Dragon Ball Z" should surface both titles (sim >= 0.85).
     let hits = find_similar_manga(&svc.db, "Dragon Ball Z", &[], None)
         .await
         .unwrap();
@@ -73,7 +65,6 @@ async fn find_similar_manga_returns_nothing_for_dissimilar_title() {
     let src = insert_source(&svc.db, "src").await;
     insert_manga(&svc.db, src, "m1", "One Piece").await;
 
-    // "Naruto" shares no first word with "One Piece".
     let hits = find_similar_manga(&svc.db, "Naruto", &[], None)
         .await
         .unwrap();
@@ -87,7 +78,6 @@ async fn find_similar_manga_excludes_the_given_id() {
     let id1 = insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
     let id2 = insert_manga(&svc.db, src, "m2", "Dragon Ball Z").await;
 
-    // Searching from the perspective of id1: id1 itself must be excluded.
     let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], Some(id1))
         .await
         .unwrap();
@@ -98,8 +88,6 @@ async fn find_similar_manga_excludes_the_given_id() {
     );
     assert!(hit_ids.contains(&id2));
 }
-
-// ── scan_and_persist_duplicates tests ────────────────────────────────────────
 
 #[tokio::test]
 async fn scan_and_persist_duplicates_empty_db_returns_zero() {
@@ -138,15 +126,12 @@ async fn scan_and_persist_duplicates_is_idempotent() {
     let first_run = scan_and_persist_duplicates(&svc.db).await.unwrap();
     assert!(first_run >= 1);
 
-    // Second run must not add more pairs (INSERT OR IGNORE prevents duplicates).
     let second_run = scan_and_persist_duplicates(&svc.db).await.unwrap();
     assert_eq!(
         second_run, 0,
         "re-running should not insert duplicate pairs"
     );
 }
-
-// ── record_duplicates_for_manga tests ────────────────────────────────────────
 
 #[tokio::test]
 async fn record_duplicates_for_manga_creates_pair_with_similar_title() {

@@ -1,11 +1,5 @@
-//! O6 — handle lifetime across a *failing* call.
-//!
-//! Every cross-boundary value is an integer handle the host allocates and the
-//! guest is trusted to release. `wasm_abi.rs` proves the happy path releases
-//! them; this proves the error path does too. The interesting case is a failure
-//! that lands *mid-sequence*, with handles already outstanding — if unwinding
-//! skipped a release, the maps would keep growing until `MAX_HANDLES` (10,000)
-//! eventually bricked the source, long after the request that caused it.
+//! Cross-boundary handles acquired before a guest failure must be released while
+//! unwinding so repeated failures cannot exhaust the host handle table.
 //!
 //! Build the fixture first:  cargo run -p kani-cli -- build --dev
 
@@ -75,10 +69,6 @@ async fn a_handle_is_not_leaked_when_a_live_fetch_fails() {
     let instance = rt.instantiate(&mut store, &component).await.unwrap();
     let provider = instance.kani_extension_manga_provider();
 
-    // `__fanout__:40` makes the guest extract 40 documents in one call. Each
-    // allocates a handle; the host's 32-request budget stops it partway, so the
-    // call fails with handles already outstanding — the case a naive error path
-    // leaks.
     let result = provider
         .call_search_manga(&mut store, "__fanout__:40", 1, 20, &[])
         .await
@@ -122,15 +112,11 @@ async fn handles_do_not_accumulate_across_repeated_failures() {
     let instance = rt.instantiate(&mut store, &component).await.unwrap();
     let provider = instance.kani_extension_manga_provider();
 
-    // A single leaked handle per failure is invisible until it isn't; repeating
-    // the failure is what turns a slow leak into an assertion.
     for _ in 0..5 {
         let _ = provider
             .call_search_manga(&mut store, "__fanout__:40", 1, 20, &[])
             .await
             .expect("the WASM call itself must not trap");
-        // The host resets its io budget per call, so each iteration fails the
-        // same way rather than short-circuiting.
         store.data_mut().io_count = 0;
     }
 

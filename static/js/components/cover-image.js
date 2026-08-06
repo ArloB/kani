@@ -1,12 +1,10 @@
 // @ts-check
-// Cover image component — manga cover with no-cover fallback.
-
 import { t } from '../i18n.js';
 
 const MAX_RETRIES = 3;
 
 /**
- * Creates a cover image element. Returns a DOM node ready to insert.
+ * Retries failed image loads before rendering the no-cover fallback.
  * @param {{ url?: string | null, alt?: string, loading?: 'lazy' | 'eager', fetchpriority?: 'high' | 'low' | 'auto' }} props
  * @returns {HTMLElement}
  */

@@ -1,16 +1,11 @@
 use super::super::*;
 
-// Per-manga download-rule preview and chapter filtering.
-
 impl AppService {
     /// Returns `(matching_chapters, total_chapters)` for a hypothetical rule set,
     /// without modifying any state.
     ///
-    /// `matching` is the count that would *actually* be downloaded: the same
-    /// pipeline auto-download runs — the rule predicate **and** the per-manga
-    /// scanlator whitelist/block + priority dedup. Applying only the rule
-    /// predicate here (as this once did) overstated the number, since the UI
-    /// promises "{matching} of {total} would be downloaded with these rules".
+    /// `matching` applies the complete auto-download pipeline: the rule
+    /// predicate, per-manga scanlator filters, and priority deduplication.
     pub async fn preview_download_rules(
         &self,
         manga_id: MangaId,
@@ -284,7 +279,6 @@ mod tests {
             .as_secs() as i64
     }
 
-    // B3.1
     #[test]
     fn no_rules_passes_everything() {
         assert!(passes(
@@ -294,7 +288,6 @@ mod tests {
         assert!(passes(vec![], &chapter("ja", None, 999.5, None)));
     }
 
-    // B3.2
     #[test]
     fn a_single_language_include_admits_only_that_language() {
         let r = || vec![DownloadRuleKind::LanguageInclude("en".into())];
@@ -302,7 +295,6 @@ mod tests {
         assert!(!passes(r(), &chapter("ja", None, 1.0, None)));
     }
 
-    // B3.3
     #[test]
     fn two_language_includes_are_a_union() {
         let r = || {
@@ -316,7 +308,6 @@ mod tests {
         assert!(!passes(r(), &chapter("fr", None, 1.0, None)));
     }
 
-    // B3.4
     #[test]
     fn a_language_exclude_removes_that_language() {
         let r = || vec![DownloadRuleKind::LanguageExclude("ja".into())];
@@ -324,11 +315,8 @@ mod tests {
         assert!(passes(r(), &chapter("en", None, 1.0, None)));
     }
 
-    // B3.5
     #[test]
     fn include_and_exclude_on_one_axis_both_apply() {
-        // include {en, ja} OR, exclude {ja} AND — ja is admitted by the include
-        // but then removed by the exclude.
         let r = || {
             vec![
                 DownloadRuleKind::LanguageInclude("en".into()),
@@ -341,7 +329,6 @@ mod tests {
         assert!(!passes(r(), &chapter("fr", None, 1.0, None)));
     }
 
-    // B3.6
     #[test]
     fn title_contains_and_title_excludes_compose() {
         let r = || {
@@ -355,7 +342,6 @@ mod tests {
         assert!(!passes(r(), &chapter("en", Some("Extra"), 1.0, None)));
     }
 
-    // B3.7
     #[test]
     fn chapter_number_min_and_max_bound_a_range() {
         let r = || {
@@ -376,7 +362,6 @@ mod tests {
         assert!(!passes(r(), &chapter("en", None, 20.1, None)));
     }
 
-    // B3.8
     #[test]
     fn exclude_fractional_drops_point_five_chapters() {
         let r = || vec![DownloadRuleKind::ExcludeFractional];
@@ -384,7 +369,6 @@ mod tests {
         assert!(!passes(r(), &chapter("en", None, 167.5, None)));
     }
 
-    // B3.9
     #[test]
     fn max_age_days_uses_uploaded_at() {
         let r = || vec![DownloadRuleKind::MaxAgeDays(7)];
@@ -398,7 +382,6 @@ mod tests {
         ));
     }
 
-    // B3.10
     #[test]
     fn published_after_is_an_absolute_cutoff() {
         let r = || vec![DownloadRuleKind::PublishedAfter(1_000)];
@@ -406,7 +389,6 @@ mod tests {
         assert!(!passes(r(), &chapter("en", None, 1.0, Some(500))));
     }
 
-    // B3.11
     #[test]
     fn rules_on_different_axes_are_conjunctive() {
         let r = || {
@@ -426,11 +408,8 @@ mod tests {
         );
     }
 
-    // B3.12
     #[test]
     fn a_chapter_with_null_title_or_date_is_handled() {
-        // Missing name: TitleContains can't match (fails), TitleExcludes vacuously
-        // passes (the substring isn't present).
         assert!(!passes(
             vec![DownloadRuleKind::TitleContains("x".into())],
             &chapter("en", None, 1.0, None)
@@ -439,8 +418,6 @@ mod tests {
             vec![DownloadRuleKind::TitleExcludes("x".into())],
             &chapter("en", None, 1.0, None)
         ));
-        // Missing date: a chapter with no upload date is admitted by both time
-        // rules (can't prove it's too old).
         assert!(passes(
             vec![DownloadRuleKind::MaxAgeDays(7)],
             &chapter("en", None, 1.0, None)
@@ -451,7 +428,6 @@ mod tests {
         ));
     }
 
-    // B3.13
     #[test]
     fn an_unparseable_rule_row_is_skipped_not_fatal() {
         let bad = DownloadRuleRow {

@@ -31,7 +31,6 @@ import { iconSearch, iconChevronDown, iconWarning } from '../icons.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 let _sourceId = 0;
 let _page = 1;
@@ -84,7 +83,6 @@ let _filterModalDestroy = null;
 /** @type {Record<string, string>} */
 let _pendingFilterParams = {};
 
-// ── Filter helpers ─────────────────────────────────────────────────────────────
 
 /**
  * Normalize a filter state value from either adjacently-tagged ({kind, data}) or
@@ -112,8 +110,7 @@ function _showDisabledPanel(panelEl) {
 
 function _normalizeFilterState(raw) {
   if (!raw || typeof raw !== 'object') return raw;
-  if (typeof raw.kind === 'string') return raw; // already adjacently-tagged
-  // Externally-tagged: { Selection: {...} } → { kind: 'Selection', data: {...} }
+  if (typeof raw.kind === 'string') return raw;
   const entries = Object.entries(raw);
   if (entries.length === 1) return { kind: entries[0][0], data: entries[0][1] };
   return raw;
@@ -133,7 +130,6 @@ function _buildDefaultFilters(filterDefs) {
   return defaults;
 }
 
-// ── Preferences tab panel ─────────────────────────────────────────────────────
 
 /**
  * Renders the source's full preference list. Complex preference types open in
@@ -235,7 +231,6 @@ function SourcePreferencesPanel({ sourceId }) {
   `;
 }
 
-// ── Source settings page component ───────────────────────────────────────────
 
 /**
  * Full-page settings panel for a single source, designed for the Settings tab.
@@ -265,7 +260,6 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   const [reloadMsg, setReloadMsg] = useState(/** @type {'ok'|'err'|null} */ (null));
   const [capabilities, setCapabilities] = useState(/** @type {{streaming_chapters:boolean}|null} */ (null));
 
-  // Load preferences and health on mount
   useEffect(() => {
     api.getSourcesHealth().then(rows => {
       if (Array.isArray(rows)) {
@@ -285,7 +279,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       await api.toggleSourceEnabled(sid, val);
       setEnabled(val);
       onEnabledChange?.(val);
-    } catch { /* revert on error */ }
+    } catch { }
   }
 
   async function handleSaveDlConcurrency() {
@@ -342,7 +336,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
     try {
       const parsed = JSON.parse(source.languages);
       if (Array.isArray(parsed)) sourceLanguages = parsed;
-    } catch { /* malformed languages column, ignore */ }
+    } catch { }
   }
 
   return html`
@@ -562,7 +556,6 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 }
 
 
-// ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
   /** @type {Record<string, string|number|null>} */
@@ -578,7 +571,6 @@ function _updateUrl() {
   replaceState(params);
 }
 
-// ── Breadcrumb ────────────────────────────────────────────────────────────────
 
 function _updateBreadcrumb() {
   const crumbs = [{ label: t('source.nav.sources'), href: '/sources' }];
@@ -591,7 +583,6 @@ function _updateBreadcrumb() {
   setPageHeader({ crumbs, actions: _addSourceBtn ?? null });
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} container
@@ -617,7 +608,6 @@ export async function init(container, { id }) {
   _filterModalDestroy?.();
   _filterModalDestroy = null;
 
-  // If a query or filter arrives from a semantic link, open directly to Search tab
   const _preFilterName  = _urlParams.get('filter_name');
   const _preFilterValue = _urlParams.get('filter_value');
   _filters = (_preFilterName && _preFilterValue)
@@ -751,7 +741,6 @@ export async function init(container, { id }) {
   const libGridEl      = /** @type {HTMLElement} */ (container.querySelector('.js-lib-grid'));
   const libPaginEl     = /** @type {HTMLElement} */ (container.querySelector('.js-lib-pagination'));
 
-  // ── Breadcrumb + header ──
   _updateBreadcrumb();
 
   // Wire add source button. Mount once per click and close via the returned
@@ -772,7 +761,6 @@ export async function init(container, { id }) {
 
   if (_query) searchEl.value = _query;
 
-  // ── Tab switching ──
   const panels = /** @type {NodeListOf<HTMLElement>} */ (container.querySelectorAll('.js-panel'));
 
   let _popularFetched = false;
@@ -799,7 +787,6 @@ export async function init(container, { id }) {
     }
   };
 
-  // ── Tab bar ──
   const _tabDefs = () => [
     { id: 'popular', name: t('source.tab.popular') },
     { id: 'search', name: t('source.tab.search') },
@@ -815,13 +802,6 @@ export async function init(container, { id }) {
   });
   _tabsUpdateFn = tabsUpdate;
 
-  // The Preferences tab starts greyed out; enable it once the schema shows
-  // this source actually exposes preferences.
-  //
-  // A failed probe is not an answer. Swallowing it left the tab disabled
-  // forever on any transient error — a rate limit, a restart mid-load — so the
-  // source could never be configured and nothing said why. Unknown enables the
-  // tab instead: the panel re-fetches on open and reports its own error.
   api.getPreferenceSchema(_sourceId).then(schema => {
     _hasPrefs = Array.isArray(schema) && schema.length > 0;
     if (_hasPrefs) _tabsUpdateFn?.(_activeTab, _tabDefs());
@@ -837,7 +817,6 @@ export async function init(container, { id }) {
     _fetch(searchGridEl, searchPaginEl, true);
   }
 
-  // ── Search tab events ──
   searchEl.addEventListener('input', debounce(() => {
     _query = searchEl.value.trim();
     _page = 1;
@@ -859,7 +838,6 @@ export async function init(container, { id }) {
     }}
   />`, searchSizeMountEl);
 
-  // ── Popular tab page size ──
   render(html`<${PageSizeSelect}
     options=${[18, 27, 36]}
     value=${_pageSize}
@@ -875,7 +853,6 @@ export async function init(container, { id }) {
     }}
   />`, popularSizeMountEl);
 
-  // ── Filter modal — shown in Search tab, hidden until filter defs load ──
   _filterDefs = [];
   _filterModalDestroy?.();
   _filterModalDestroy = null;
@@ -888,11 +865,10 @@ export async function init(container, { id }) {
     if (Object.keys(_pendingFilterParams).length > 0) {
       const merged = _buildDefaultFilters(_filterDefs);
       for (const [filterId, value] of Object.entries(_pendingFilterParams)) {
-        try { merged[filterId] = JSON.parse(value); } catch { /* skip malformed */ }
+        try { merged[filterId] = JSON.parse(value); } catch { }
       }
       _filters = merged;
       _pendingFilterParams = {};
-      // Re-fetch on search tab with the restored filter state
       if (_activeTab === 'search') _fetch(searchGridEl, searchPaginEl, true);
     }
 
@@ -909,7 +885,6 @@ export async function init(container, { id }) {
     });
   }).catch(() => {});
 
-  // ── Source name + title ──
   document.title = t('source.title');
   api.getSource(_sourceId).then(src => {
     if (src?.name) {
@@ -919,7 +894,6 @@ export async function init(container, { id }) {
     }
     if (src && src.enabled === false) {
       _sourceEnabled = false;
-      // If currently on popular or search panel, replace with disabled state
       if (_activeTab === 'popular') {
         _popularFetched = false;
         _showDisabledPanel(/** @type {HTMLElement} */ (container.querySelector('[data-panel="popular"]')));
@@ -930,7 +904,6 @@ export async function init(container, { id }) {
     }
   }).catch(() => {});
 
-  // ── Sidebar component ──
   let _sidebarSources = /** @type {any[]} */ ([]);
 
   function _mountSidebar() {
@@ -949,7 +922,7 @@ export async function init(container, { id }) {
         _sidebarSources = updated;
         _mountSidebar();
       }
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   api.getSources().then(sources => {
@@ -957,16 +930,13 @@ export async function init(container, { id }) {
     _mountSidebar();
   }).catch(() => { _mountSidebar(); });
 
-  // Re-fetch sidebar when any source is enabled/disabled (e.g. from Settings tab)
   _unsubSourcesInvalidation = subscribeCache('sourcesInvalidation', _refreshSidebar);
 
-  // Re-fetch browse/search results when a preference changes for this source.
   let _prevPrefVersion = /** @type {number | undefined} */ (undefined);
   _unsubPrefVersion = subscribeUiState('sourcePreferenceVersion', (/** @type {Map<number, number>} */ map) => {
     const v = map.get(_sourceId);
     if (v === undefined || v === _prevPrefVersion) return;
     _prevPrefVersion = v;
-    // Re-fetch whichever content tab is currently active.
     const popularGridEl = _popularPanelEl?.querySelector('.js-popular-grid');
     const popularPaginEl = _popularPanelEl?.querySelector('.js-popular-pagination');
     const searchGridEl = _searchPanelEl?.querySelector('.js-search-grid');
@@ -979,7 +949,6 @@ export async function init(container, { id }) {
   });
 }
 
-// ── Preferences tab ───────────────────────────────────────────────────────────
 
 function _mountPrefs() {
   if (_prefsMounted || !_prefsMountEl) return;
@@ -987,7 +956,6 @@ function _mountPrefs() {
   render(html`<${SourcePreferencesPanel} sourceId=${_sourceId} />`, _prefsMountEl);
 }
 
-// ── Settings tab ──────────────────────────────────────────────────────────────
 
 async function _mountSettings() {
   if (_settingsMounted || !_settingsMountEl) return;
@@ -1055,13 +1023,12 @@ async function _mountSettings() {
   );
 }
 
-// ── Library tab ───────────────────────────────────────────────────────────────
 
 let _libLoaded = false;
 
 /** @param {HTMLElement} gridEl @param {HTMLElement} paginEl */
 async function _fetchLibrary(gridEl, paginEl) {
-  if (_libLoaded) return; // don't re-fetch on re-switch to library tab (page changes clear this flag)
+  if (_libLoaded) return;
   _libLoaded = true;
 
   _libAbort?.abort();
@@ -1087,7 +1054,7 @@ async function _fetchLibrary(gridEl, paginEl) {
     errorMessage: t('library.error.load'),
     onRetry: () => { _libLoaded = false; _fetchLibrary(gridEl, paginEl); },
   });
-  if (!outcome || 'error' in outcome) return; // aborted, or error already rendered into gridEl
+  if (!outcome || 'error' in outcome) return;
 
   const { result, items } = outcome;
   const hasNext = hasNextPage(result, items.length, _libPageSize);
@@ -1102,7 +1069,6 @@ async function _fetchLibrary(gridEl, paginEl) {
   }
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} gridEl
@@ -1165,7 +1131,7 @@ async function _fetch(gridEl, paginEl, isSearch) {
       return true;
     },
   });
-  if (!outcome) return; // aborted — a newer fetch is already in flight, don't touch paginEl
+  if (!outcome) return;
   if ('error' in outcome) { paginEl.innerHTML = ''; return; }
 
   const { result, items } = outcome;
@@ -1212,7 +1178,6 @@ function _setupSourceSentinel(gridEl, paginEl, hasNext, isSearch) {
   _sentinelObserver.observe(sentinel);
 }
 
-// ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export function destroy(container) {

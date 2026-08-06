@@ -1,6 +1,9 @@
+//! Structured job failures and retry-policy classification.
+
 use std::time::Duration;
 
 #[derive(Debug, thiserror::Error, serde::Serialize)]
+/// Failure boundary recorded by the job manager and exposed through job history.
 pub enum JobError {
     #[error("Download error: {0}")]
     Download(DownloadErrorKind),
@@ -32,6 +35,7 @@ impl From<sqlx::Error> for JobError {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+/// Download failure categories used to decide whether and how a job is retried.
 pub enum DownloadErrorKind {
     Network { retryable: bool },
     RateLimited { retry_after_secs: Option<u64> },
@@ -94,6 +98,7 @@ impl DownloadErrorKind {
     }
 }
 
+/// Exponential retry schedule for a classified job failure.
 pub struct RetryPolicy {
     pub max_attempts: u32,
     pub base_delay: Duration,

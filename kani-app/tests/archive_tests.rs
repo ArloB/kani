@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Archive export: layout, sidecar manifests, and the recompute path for rows
-// that predate the manifest backfill.
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
@@ -86,7 +84,6 @@ async fn an_export_verifies_with_no_database_present() {
     assert_eq!(report.series_count, 1);
     assert_eq!(report.chapter_count, 1);
 
-    // The whole point: verification consults only the archive.
     let root = find_archive_root(&library);
     let v = kani_core::archive::verify_archive(&root).unwrap();
     assert!(v.is_ok(), "{:?}", v.failures);

@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group D (D1/D3) + Group O — the WASM source lifecycle against the compiled
+//! WASM source lifecycle against the compiled
 //! `kani-fixture-source`, which makes real HTTP against a `TestOrigin`. Covers the
-//! lease/drain coordination (whose lease_count/draining pair is now SeqCst) and a
-//! live error path. Requires the fixture:
+//! lease/drain coordination and a live error path. Requires the fixture:
 //!   cargo run -p kani-cli -- build kani-fixture-source
 
 use std::collections::HashMap;
@@ -49,7 +48,7 @@ fn wasm_backend(origin_base: &str) -> Option<SourceBackend> {
         instance_pre,
         SmartClient::new(None).unwrap(),
         None,
-        true, // unrestricted_http → reach loopback
+        true,
         false,
         prefs,
         Arc::new(InMemoryCache::new()),
@@ -67,8 +66,6 @@ fn as_wasm(backend: &SourceBackend) -> &WasmSource {
     }
 }
 
-// D3 — a live lease keeps `drain` waiting until it is released, and a lease held
-// past the timeout forces the drain (rather than blocking forever).
 #[tokio::test]
 async fn drain_waits_for_a_live_lease_then_forces_after_the_timeout() {
     let origin = TestOrigin::start().await;
@@ -77,8 +74,6 @@ async fn drain_waits_for_a_live_lease_then_forces_after_the_timeout() {
     };
     let w = as_wasm(&backend);
 
-    // A lease held for the whole drain window: drain(300ms) must return ~at the
-    // timeout, not immediately and not never.
     let lease = w.lease_instance().await.unwrap();
     let start = Instant::now();
     w.drain(Duration::from_millis(300)).await;
@@ -94,8 +89,6 @@ async fn drain_waits_for_a_live_lease_then_forces_after_the_timeout() {
     drop(lease);
 }
 
-// D1/O7 — once draining, no new lease is handed out (the in-flight ones drain on
-// the old backend; the swap waits for them, and nothing new starts).
 #[tokio::test]
 async fn a_lease_is_rejected_once_the_source_is_draining() {
     let origin = TestOrigin::start().await;
@@ -104,7 +97,6 @@ async fn a_lease_is_rejected_once_the_source_is_draining() {
     };
     let w = as_wasm(&backend);
 
-    // No leases outstanding → drain returns immediately, leaving `draining` set.
     w.drain(Duration::from_millis(50)).await;
 
     match w.lease_instance().await {
@@ -116,8 +108,6 @@ async fn a_lease_is_rejected_once_the_source_is_draining() {
     }
 }
 
-// D1 — an in-flight lease completes against the old backend; hot_swap blocks on
-// the drain until the lease is released, then installs the new backend.
 #[tokio::test]
 async fn hot_swap_waits_for_an_in_flight_lease_then_installs_the_new_backend() {
     let origin = TestOrigin::start().await;
@@ -128,14 +118,12 @@ async fn hot_swap_waits_for_an_in_flight_lease_then_installs_the_new_backend() {
     let registry = Arc::new(SourceRegistry::default());
     registry.insert(1, old);
 
-    // Take an in-flight lease on the installed backend.
     let backend_arc = registry.get_backend(1).unwrap();
     let lease = as_wasm(&backend_arc).lease_instance().await.unwrap();
 
     let reg2 = registry.clone();
     let swap = tokio::spawn(async move { reg2.hot_swap(1, new).await });
 
-    // While the lease is live the swap is parked on the drain.
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(!swap.is_finished(), "hot_swap swapped out a live lease");
 
@@ -147,8 +135,6 @@ async fn hot_swap_waits_for_an_in_flight_lease_then_installs_the_new_backend() {
     assert!(registry.contains_key(1), "the new backend is installed");
 }
 
-// Group O — a WASM guest surfaces a live upstream failure as an error, driven
-// through the real host↔guest ABI (not an in-process stub).
 #[tokio::test]
 async fn a_wasm_guest_surfaces_an_upstream_failure() {
     let origin = TestOrigin::start().await;

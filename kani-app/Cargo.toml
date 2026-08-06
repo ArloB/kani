@@ -80,6 +80,3 @@ mail-parser = "0.11.5"
 prost-build = "0.14.3"
 protox = "0.9.1"
 
-# `loom` model-checks the lease/drain coordination in src/source/lease.rs.
-# Only pulled in under `--cfg loom`; run: RUSTFLAGS="--cfg loom" cargo test -p kani-app --lib source::lease
-

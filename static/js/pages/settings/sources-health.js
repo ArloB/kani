@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Sources Health section.
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';

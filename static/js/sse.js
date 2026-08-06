@@ -81,7 +81,6 @@ function _connect() {
       return;
     }
     _handleEvent(data);
-    // Broadcast to any page-level listeners (e.g. manga-details watching its chapters).
     window.dispatchEvent(new CustomEvent('kani:sse', { detail: data }));
   });
 
@@ -117,7 +116,6 @@ function _scheduleReconnect() {
 function _handleEvent(data) {
   const type = data.type;
 
-  // ── Initial state snapshot ───────────────────────────────────────────────
   if (type === 'state_snapshot') {
     const prev = getSession('bootId');
     if (data.boot_id && prev && data.boot_id !== prev) {
@@ -125,7 +123,6 @@ function _handleEvent(data) {
     }
     if (data.boot_id) setSession('bootId', data.boot_id);
 
-    // Repopulate chapter progress from snapshot
     /** @type {Map<number, import('./cache.js').ChapterProgress>} */
     const map = new Map();
     for (const ch of (data.chapters ?? [])) {
@@ -147,7 +144,6 @@ function _handleEvent(data) {
     return;
   }
 
-  // ── Download events ──────────────────────────────────────────────────────
   if (type === 'chapter_started') {
     updateState('chaptersProgress', (map) => {
       const m = new Map(map);
@@ -217,12 +213,10 @@ function _handleEvent(data) {
     return;
   }
 
-  // ── Refresh events ───────────────────────────────────────────────────────
   if (type === 'started') {
     setState('refreshState', { type: 'running', completed: 0, total: data.total });
     // Mark every manga that will be scanned as "pending" so covers show a spinner.
     setState('scanningMangaIds', new Set((data.manga_ids ?? []).map(Number)));
-    // Reset per-manga chapter accumulator for the new run.
     _scanNewChapters = new Map();
     return;
   }
@@ -232,7 +226,6 @@ function _handleEvent(data) {
       if (s.type !== 'running') return s;
       return { ...s, completed: data.completed, total: data.total };
     });
-    // Remove from pending set — this manga is done.
     updateState('scanningMangaIds', (s) => { const n = new Set(s); n.delete(Number(data.manga_id)); return n; });
     // Accumulate new chapter counts (non-zero only for scan operations).
     const nc = Number(data.new_chapters ?? 0);
@@ -263,7 +256,6 @@ function _handleEvent(data) {
     return;
   }
 
-  // ── Upgrades found by a scan ─────────────────────────────────────────────
   // Emitted since upgrade detection shipped and handled by nobody, so a scan
   // that found replaceable chapters left no trace until the user happened to
   // open the Upgrades page.
@@ -272,7 +264,6 @@ function _handleEvent(data) {
     return;
   }
 
-  // ── A source tripped its circuit breaker ─────────────────────────────────
   // The event carries the host and failure count and was broadcast to nothing,
   // so requests to a failing source simply started erroring with no
   // explanation of why or for how long.
@@ -284,9 +275,7 @@ function _handleEvent(data) {
     return;
   }
 
-  // ── New chapters ─────────────────────────────────────────────────────────
   if (type === 'new_chapters') {
-    // In-app badge notifications
     if (localStorage.getItem('kani_disable_notifications') !== 'true') {
       const incomingNames = /** @type {string[]} */ (data.chapter_names ?? []);
       updateState('scanNotifications', (list) => {
@@ -331,7 +320,7 @@ function _handleEvent(data) {
         : `${count} new chapters`;
       try {
         new Notification(data.manga_name ?? 'New chapters', { body, tag: `kani-manga-${mangaId}` });
-      } catch { /* ignore — browsers may restrict notifications in some contexts */ }
+      } catch { }
     }
   }
 }

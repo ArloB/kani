@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group C — the challenge/FlareSolverr fallback in `kani_core::http::SmartClient`,
-//! previously unexercised (no test ever set a `solver_url`). A `TestOrigin` plays
-//! the protected site and a second one plays the fake solver, returning the
+//! Challenge and FlareSolverr fallback behavior in `kani_core::http::SmartClient`.
+//! A `TestOrigin` plays the protected site and a second one plays the fake solver, returning the
 //! FlareSolverr envelope. The 503/403 paths are used deliberately: neither status
 //! is retryable, so these never hit the 5 s×2^n retry backoff.
 
@@ -24,8 +23,6 @@ fn solver_envelope(rendered: &str) -> String {
     .to_string()
 }
 
-// C1 — an interstitial "Just a moment…" HTML page routes through the solver and
-// the caller receives the rendered page, not the challenge.
 #[tokio::test]
 async fn a_challenge_page_triggers_the_solver_and_replays() {
     let site = TestOrigin::start().await;
@@ -50,7 +47,6 @@ async fn a_challenge_page_triggers_the_solver_and_replays() {
     assert!(solver.hits("/v1") >= 1, "the solver was invoked");
 }
 
-// C2 — after a 403/503 solve, the solved cookie rides the replayed request.
 #[tokio::test]
 async fn the_solved_cookie_is_attached_to_the_replay() {
     let site = TestOrigin::start().await;
@@ -73,7 +69,6 @@ async fn the_solved_cookie_is_attached_to_the_replay() {
     );
 }
 
-// C3 — a solver that reports an error surfaces a real error, not a silent pass.
 #[tokio::test]
 async fn a_solver_error_status_surfaces_as_a_useful_error() {
     let site = TestOrigin::start().await;
@@ -96,8 +91,6 @@ async fn a_solver_error_status_surfaces_as_a_useful_error() {
     );
 }
 
-// C5 — a 403 after a prior solve clears the stored credential and re-solves,
-// rather than replaying a stale cookie forever.
 #[tokio::test]
 async fn stored_credentials_are_re_solved_after_a_403() {
     let site = TestOrigin::start().await;
@@ -140,18 +133,15 @@ async fn stored_credentials_are_re_solved_after_a_403() {
     );
 }
 
-// C6 — an expired credential is dropped before reuse: the stale cookie must not
-// ride the next request. Contrast: a live credential is attached by the same
-// pre-request block, so its absence here is the expiry drop, not a missing cred.
 #[tokio::test]
 async fn expired_credentials_are_dropped_before_reuse() {
     let site = TestOrigin::start().await;
     site.script(
         "/page",
         vec![
-            Response::status(503),             // R1: challenge
-            Response::html("<html>ok</html>"), // R1: replay after the solve
-            Response::html("<html>ok</html>"), // R2: direct 200
+            Response::status(503),
+            Response::html("<html>ok</html>"),
+            Response::html("<html>ok</html>"),
         ],
     );
     let solver = TestOrigin::start().await;
@@ -164,7 +154,6 @@ async fn expired_credentials_are_dropped_before_reuse() {
             ..Timings::default()
         });
 
-    // R1 solves and stores the credential, which rides the replay.
     client.get(&site.url("/page")).await.unwrap();
     assert!(
         site.last_request("/page")
@@ -175,7 +164,6 @@ async fn expired_credentials_are_dropped_before_reuse() {
         "sanity: the freshly-solved credential rode the replay"
     );
 
-    // Let it expire, then make another request.
     tokio::time::sleep(Duration::from_millis(60)).await;
     client.get(&site.url("/page")).await.unwrap();
 
@@ -191,9 +179,6 @@ async fn expired_credentials_are_dropped_before_reuse() {
     );
 }
 
-// C4 — a solver that never responds must not hang the request. The solver HTTP
-// client now carries a timeout (Timings::solver_timeout); shortened here so a
-// stalling solver surfaces as an error in milliseconds instead of hanging.
 #[tokio::test]
 async fn a_solver_that_is_unreachable_does_not_hang_the_request() {
     let site = TestOrigin::start().await;
@@ -208,7 +193,6 @@ async fn a_solver_that_is_unreachable_does_not_hang_the_request() {
             ..Timings::default()
         });
 
-    // A generous outer bound so a regression can never hang the whole suite.
     let outcome = tokio::time::timeout(Duration::from_secs(10), client.get(&site.url("/page")))
         .await
         .expect("the request must return, not hang, when the solver stalls");
@@ -219,8 +203,6 @@ async fn a_solver_that_is_unreachable_does_not_hang_the_request() {
     );
 }
 
-// Baseline — with no solver configured, a challenge is passed through untouched
-// (the guard that gates the whole path on `solver_url`).
 #[tokio::test]
 async fn without_a_solver_a_challenge_is_passed_through() {
     let site = TestOrigin::start().await;

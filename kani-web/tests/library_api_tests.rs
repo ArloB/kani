@@ -1,7 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for library/manga REST endpoints:
-// GET /library, GET /manga/{id}, DELETE /manga/{id},
-// POST /manga/{id}/refresh, POST /library/scan-all, POST /manga/scan.
 
 mod common;
 use axum::http::StatusCode;
@@ -19,7 +16,6 @@ async fn get_library_returns_empty_list_for_fresh_db() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // page and page_size are required by the query validator.
     let res = app
         .oneshot(authed_get("/rest/library?page=1&page_size=20", &cookie))
         .await
@@ -126,7 +122,6 @@ async fn get_library_invalid_page_returns_400() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // page=0 violates the garde min=1 validator on LibraryQuery.
     let res = app
         .oneshot(authed_get("/rest/library?page=0&page_size=20", &cookie))
         .await
@@ -144,8 +139,6 @@ async fn delete_manga_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── POST /manga/scan ──────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn scan_manga_all_returns_200_for_authed_user() {
@@ -195,7 +188,6 @@ async fn scan_manga_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    // POST without credentials — use a raw request without cookie.
     let req = axum::http::Request::builder()
         .method("POST")
         .uri("/rest/manga/scan")
@@ -217,7 +209,6 @@ async fn scan_manga_invalid_body_returns_422() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // "ids" must be either "all" or an array — an integer is invalid.
     let res = app
         .oneshot(authed_post(
             "/rest/manga/scan",

@@ -74,10 +74,6 @@ pub async fn etag_middleware(req: Request, next: Next) -> Response {
     if let Ok(value) = HeaderValue::from_str(&etag) {
         parts.headers.insert(header::ETAG, value);
     }
-    // A tag advertises the response as cacheable, and these lists are per-user.
-    // `private` keeps a shared cache from handing one user's library to
-    // another; `no-cache` says revalidate every time, which is the contract the
-    // tag is offering. A handler that already stated its own policy keeps it.
     if !parts.headers.contains_key(header::CACHE_CONTROL) {
         parts.headers.insert(
             header::CACHE_CONTROL,

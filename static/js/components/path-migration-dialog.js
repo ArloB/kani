@@ -1,5 +1,4 @@
 // @ts-check
-// Migration dialog — confirm moving files to a new path and show progress.
 
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -21,7 +20,6 @@ const html = htm.bind(h);
  * }} props
  */
 export function PathMigrationDialog({ open, field, currentPath, newPath, onDone, onCancel }) {
-  // States: 'estimating' | 'confirm' | 'migrating' | 'done' | 'error'
   const [phase, setPhase] = useState('estimating');
   const [estimate, setEstimate] = useState(/** @type {any} */ (null));
   const [estimateError, setEstimateError] = useState(/** @type {string|null} */ (null));
@@ -30,7 +28,6 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
   const [migError, setMigError] = useState(/** @type {string|null} */ (null));
   const sseListenerRef = useRef(/** @type {((e: Event) => void) | null} */ (null));
 
-  // Fetch estimate when dialog opens
   useEffect(() => {
     if (!open) return;
     setPhase('estimating');

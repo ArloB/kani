@@ -1,7 +1,4 @@
 // @ts-check
-// DateInput — labeled native date field. The native picker stays (it is the
-// best cross-platform calendar); this wraps it in the design system's frame
-// and gives it the label the bare inputs lacked.
 
 import { h } from 'preact';
 import htm from 'htm';

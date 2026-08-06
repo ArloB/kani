@@ -1,3 +1,5 @@
+//! Bounded in-memory log capture with query and SSE subscription support.
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -5,7 +7,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::{Layer, layer::Context};
 
 #[derive(Clone, serde::Serialize)]
+/// Transport representation of one captured tracing or injected log event.
 pub struct LogEntry {
+    /// UTC timestamp encoded as RFC 3339.
     pub timestamp: String,
     pub level: String,
     pub target: String,
@@ -15,6 +19,7 @@ pub struct LogEntry {
     pub source: String,
 }
 
+/// Shared query, injection, clearing, and subscription handle for the log ring buffer.
 pub struct LogHandle {
     buffer: Arc<Mutex<VecDeque<LogEntry>>>,
     capacity: usize,
@@ -98,7 +103,7 @@ impl LogHandle {
         let start = page.saturating_sub(1) * page_size;
         let entries = filtered
             .into_iter()
-            .rev() // newest first
+            .rev()
             .skip(start)
             .take(page_size)
             .cloned()
@@ -127,6 +132,7 @@ impl LogHandle {
     }
 }
 
+/// Tracing subscriber layer that copies events into a [`LogHandle`].
 pub struct RingBufferLayer {
     handle: Arc<LogHandle>,
 }

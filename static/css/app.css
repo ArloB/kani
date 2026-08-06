@@ -1,23 +1,13 @@
-/* ──────────────────────────────────────────────────────────────────────────
-   Kani — Tailwind v4 source CSS
-   Input  → static/css/app.css  (this file, committed)
-   Output → static/css/main.css (generated, gitignored)
 
-   Build:  ./scripts/build-css.sh [dev|watch|prod]
-   ────────────────────────────────────────────────────────────────────────── */
 
-/* ── 2. Tailwind v4 + legacy CSS ─────────────────────────────────────────── */
+
 @import "tailwindcss";
 
-/* ── 3. Content sources ───────────────────────────────────────────────────── */
-/*
- * Tell Tailwind where to scan for utility class names.  The standalone CLI
- * automatically scans files near the input CSS; adding an explicit @source
- * ensures the JS component tree is always included.
- */
+
+
 @source "../js";
 
-/* ── 4. Design tokens ────────────────────────────────────────────────────── */
+
 @theme {
   --color-bg:            #111113;
   --color-surface:       #18181b;
@@ -36,7 +26,6 @@
   --color-danger:        #e04b55;
   --color-danger-dim:    rgba(224, 75, 85, 0.14);
 
-  /* Fonts */
   --font-body: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'DM Mono', 'Fira Code', ui-monospace, monospace;
   --font-display: 'Zen Kaku Gothic New', 'DM Sans', system-ui, sans-serif;
@@ -57,15 +46,12 @@
   --radius-xl:   16px;
   --radius-full: 9999px;
 
-  /* Layout dimensions */
   --header-h: 60px;
   --header-h-mobile: 44px;
   --sidebar-w: 234px;
 
-  /* Surface alias — fixes bg-surface-alt references */
   --color-surface-alt: var(--color-surface-2);
 
-  /* Z-stack layers */
   --z-sidebar: 40;
   --z-header: 30;
   --z-modal: 50;
@@ -74,11 +60,9 @@
   --z-popover: 80;
   --z-top: 100;
 
-  /* Container widths */
   --container-page: 1440px;
   --container-narrow: 48rem;
 
-  /* Icon sizes */
   --icon-xs: 0.875rem;
   --icon-sm: 1rem;
   --icon-md: 1.25rem;
@@ -87,10 +71,8 @@
   --icon-2xl: 2.5rem;
   --icon-3xl: 3rem;
 
-  /* Sub-xs text */
   --text-2xs: 0.625rem;
 
-  /* Button heights */
   --btn-h-sm: 1.75rem;
   --btn-h-md: 2.25rem;
   --btn-h-lg: 2.75rem;
@@ -103,7 +85,6 @@
   --shadow-popover:    0 8px 24px rgba(0, 0, 0, 0.45);
   --shadow-focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
 
-  /* Motion */
   --motion-fast:    100ms;
   --motion-base:    150ms;
   --motion-slow:    250ms;
@@ -111,14 +92,12 @@
   --motion-ease-in:  cubic-bezier(0.7, 0, 0.84, 0);
   --motion-ease:     cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Z-stack semantic extensions */
   --z-reader-bar:   21;
   --z-reader-hover:  9;
   --z-card-overlay: 10;
   --z-banner:       20;
   --z-bottom-nav:   25;
 
-  /* Chart palette */
   --chart-1: #e0523f;
   --chart-2: #4caf79;
   --chart-3: #e8a954;
@@ -131,14 +110,11 @@
   --chart-10: #55aacd;
   --chart-11: #b08a62;
 
-  /* Reader progress segments */
   --color-reader-seg-loaded:   rgba(255, 255, 255, 0.34);
   --color-reader-seg-unloaded: rgba(255, 255, 255, 0.12);
 
-  /* Text on accent/colored fill backgrounds */
   --color-on-accent: #ffffff;
 
-  /* Brand gradient endpoint (sidebar mark) */
   --color-brand-2: #a13e70;
 
   /* Breakpoints (overrides Tailwind defaults) */
@@ -154,7 +130,7 @@
   --chapter-row-h: 60px;
 }
 
-/* ── 4b. Runtime theme overrides ─────────────────────────────────────────── */
+
 
 [data-theme="light"] {
   --color-bg:              #f5f4f0;
@@ -210,18 +186,13 @@
   --color-text-muted: #7d6a52;
 }
 
-/* Density scales the vertical rhythm of repeated content — rows, list items,
-   table cells — and nothing else. It must never change control heights, tap
-   targets, cover art or nav chrome, which is exactly what the old
-   `--spacing: 0.2rem` override did: every Tailwind padding, gap, width and
-   height utility derives from --spacing, so "compact" silently shrank the
-   bottom nav and cover thumbnails while leaving actual rows untouched. */
+
 [data-density="compact"] {
   --density: 0.55;
   --chapter-row-h: 48px;
 }
 
-/* ── 5. Base styles ──────────────────────────────────────────────────────── */
+
 @layer base {
     @import url('/fonts/fonts.css');
 
@@ -245,9 +216,6 @@
     text-decoration: none;
   }
 
-  /* Display face is reserved for page and group titles (ink-and-stamp:
-     hierarchy comes from typography, not boxes). Row labels, card meta, and
-     body copy stay on the body face. */
   h1, h2 {
     font-family: var(--font-display);
     font-weight: 700;
@@ -271,10 +239,7 @@
     outline: none;
   }
 
-  /* Honour the user's motion preference everywhere. Component-level animations
-     (e.g. .skeleton, .page-loading-bar--active) already gate themselves on
-     prefers-reduced-motion: no-preference, but this catch-all ensures any
-     transition/animation we forgot collapses to an instant change. */
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       transition-duration: 0.001ms !important;
@@ -285,12 +250,11 @@
   }
 }
 
-/* ── 6. Component classes ────────────────────────────────────────────────── */
+
 @layer components {
 
-  /* ── Buttons ─────────────────────────────────────────────────────────── */
 
-  /* Base layout shared across all button variants. */
+
   .btn-primary,
   .btn-ghost,
   .btn-secondary,
@@ -330,7 +294,6 @@
     }
   }
 
-  /* Primary — accent fill with subtle depth */
   .btn-primary {
     background-color: var(--color-accent);
     color: var(--color-on-accent);
@@ -344,7 +307,6 @@
     }
   }
 
-  /* Ghost — outlined neutral; default for cancel / secondary actions */
   .btn-ghost {
     background-color: transparent;
     border: 1px solid var(--color-border);
@@ -374,7 +336,6 @@
     }
   }
 
-  /* Icon-only: square, transparent, no border */
   .btn-icon {
     width: var(--btn-h-md);
     padding: 0;
@@ -394,7 +355,7 @@
     }
   }
 
-  /* ── Card ────────────────────────────────────────────────────────────── */
+
 
   .card {
     background-color: var(--color-surface);
@@ -404,7 +365,6 @@
     transition: border-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
   }
 
-  /* Interactive card (anchor or button) gets a lift on hover */
   @media (hover: hover) {
     a.card:hover,
     button.card:hover {
@@ -413,7 +373,7 @@
     }
   }
 
-  /* ── Input ───────────────────────────────────────────────────────────── */
+
 
   .input {
     @apply w-full h-10 px-3 text-base rounded-md;
@@ -453,7 +413,6 @@
     &:checked {
       background-color: var(--color-accent);
       border-color: var(--color-accent);
-      /* white check = --color-on-accent, constant across themes */
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
       background-size: 0.75rem;
       background-position: center;
@@ -468,8 +427,6 @@
     }
   }
 
-  /* .input fixes a one-line height, which silently clips any textarea that
-     asks for more via `rows`. Let the row count decide instead. */
   textarea.input {
     height: auto;
     padding-block: 0.5rem;
@@ -478,7 +435,6 @@
   select.input {
     appearance: none;
     padding-right: 2rem;
-    /* mid-gray chevron reads on both paper and ink themes */
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23888888' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
     background-size: 1rem;
     background-position: right 0.5rem center;
@@ -486,7 +442,6 @@
     cursor: pointer;
   }
 
-  /* NumberInput component: [−][field][+] group sharing one border */
   .num-input {
     display: inline-flex;
     align-items: stretch;
@@ -568,7 +523,7 @@
     }
   }
 
-  /* ── Input pills (multi-select combobox container) ──────────────────── */
+
 
   .input-pills {
     @apply w-full rounded-md flex flex-wrap items-center gap-1.5 cursor-text;
@@ -586,7 +541,7 @@
     }
   }
 
-  /* ── Chips ───────────────────────────────────────────────────────────── */
+
 
   .chip {
     @apply inline-flex items-center gap-1.5 px-3 py-1 text-sm rounded-sm cursor-pointer select-none;
@@ -607,9 +562,6 @@
     }
   }
 
-  /* Active/selected chip */
-  /* Selected chips are pressed ink, not a stamp: raised surface + full-strength
-     text. The accent stays reserved for the one primary action per view. */
   .chip-active {
     background-color: var(--color-surface-2);
     color: var(--color-text);
@@ -617,7 +569,7 @@
     font-weight: 500;
   }
 
-  /* ── Skeleton loader ─────────────────────────────────────────────────── */
+
 
   .skeleton {
     background-color: var(--color-surface-2);
@@ -640,7 +592,7 @@
     100% { background-position: -200% 0; }
   }
 
-  /* ── Button size modifier ── */
+
   .btn-sm {
     height: var(--btn-h-sm);
     padding: 0 0.625rem;
@@ -650,8 +602,7 @@
     width: var(--btn-h-sm);
     padding: 0;
   }
-  /* On touch devices, give .btn-sm a generous tap target so it clears the
-     ~40px guideline. Padding-only on text variants; explicit width on icon. */
+  /* Touch targets expand without changing the visual size of text buttons. */
   @media (hover: none) {
     .btn-sm {
       min-height: 2.5rem;
@@ -666,7 +617,7 @@
     font-size: var(--text-base);
   }
 
-  /* ── Manga grid ── */
+
   .manga-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -689,7 +640,7 @@
     }
   }
 
-  /* ── Manga card ── */
+
   .manga-card {
     @apply relative flex flex-col cursor-pointer;
     contain: layout style paint;
@@ -699,7 +650,6 @@
   .manga-card a {
     @apply block;
   }
-  /* Title overlays the bottom of the cover */
   .manga-card .title {
     position: absolute;
     bottom: 0;
@@ -709,7 +659,6 @@
     background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.88) 78%);
     border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   }
-  /* Inner span handles line-clamp without padding interference */
   .manga-card .title > span {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -794,7 +743,7 @@
   .manga-card__resume-btn svg {
     width: 1.375rem;
     height: 1.375rem;
-    margin-left: 2px; /* optically center the play triangle */
+    margin-left: 2px;
   }
   @media (hover: hover) {
     .manga-card:hover .manga-card__resume-btn,
@@ -815,13 +764,13 @@
     display: none !important;
   }
 
-  /* ── Manga row (horizontal scroll, used in global search) ── */
+
   .manga-row {
     display: flex;
     gap: 0.75rem;
     overflow-x: auto;
     padding-bottom: 0.5rem;
-    scrollbar-width: none; /* hidden on mobile */
+    scrollbar-width: none;
     @media (min-width: 768px) {
       scrollbar-width: thin;
       scrollbar-color: var(--color-border) transparent;
@@ -846,7 +795,7 @@
     position: absolute;
     top: 0; bottom: 0;
     z-index: 1;
-    display: none; /* JS controls visibility; never shown on mobile */
+    display: none;
     @media (min-width: 1024px) { display: flex; }
     align-items: center; justify-content: center;
     width: 2.5rem;
@@ -861,10 +810,7 @@
     &[data-dir="right"] { right: 0; }
   }
 
-  /* ── Eyebrow ──
-     The one canonical small-caps section label. It was being hand-rolled with a
-     dozen slightly different utility combos (text-xs vs text-sm, font-medium vs
-     font-semibold); use this class instead of re-deriving it. */
+
   .eyebrow {
     font-size: var(--text-xs);
     font-weight: 600;
@@ -873,10 +819,7 @@
     color: var(--color-text-muted);
   }
 
-  /* ── Updates timeline (day rail) ──
-     Each day is a rail: the date sits at the top, a hairline runs down the left,
-     and every manga group hangs off it with a small node. Typography and the rail
-     carry the hierarchy — no card boxes. */
+
   .update-day__label {
     font-family: var(--font-display);
     font-size: var(--text-sm);
@@ -898,7 +841,6 @@
     position: relative;
     min-width: 0;
   }
-  /* Node on the rail, vertically aligned with the group's cover */
   .update-group::before {
     content: "";
     position: absolute;
@@ -913,7 +855,7 @@
     display: flex;
     flex-direction: column;
     margin-top: 0.5rem;
-    margin-left: 3.5rem; /* aligns under the title, clearing the cover */
+    margin-left: 3.5rem;
   }
   .update-chapter-row {
     padding-block: calc(0.5rem * var(--density));
@@ -931,8 +873,6 @@
     height: var(--chapter-row-h);
   }
 
-  /* Left-edge status stripe: taller than the text but inset from the row edges,
-     so it never reads as a full-height border. */
   .chapter-row[data-indicator] {
     position: relative;
   }
@@ -952,13 +892,6 @@
     background-color: color-mix(in srgb, var(--color-text-faint) 35%, transparent);
   }
 
-  /* Manga-details metadata panel: a gentle raised surface sitting halfway
-     between the page bg and a full surface, so it separates from the background
-     without reading as a stark white card (notably in the light theme). */
-  /* ── Manga details hero (D5) ──
-     A blurred, cover-derived band bleeding past the page gutters, with the title
-     set in the display face. The cover (first child of the left column) rises into
-     it via the negative margin on __body, so it reads as a floating card. */
   .manga-hero {
     /* A direct child of the page container, above the max-w-page wrapper —
        the band spans the whole pane edge to edge and meets the title bar
@@ -989,7 +922,6 @@
     opacity: 0.42;
     transform: scale(1.08);
   }
-  /* Fade the backdrop into the page so it reads as atmosphere, not a photo band. */
   .manga-hero::after {
     content: "";
     position: absolute;
@@ -1004,8 +936,6 @@
   }
   .manga-hero__title {
     font-family: var(--font-display);
-    /* Fluid: ~28px on phones, ~40px at 1280, capped ~54px on 1440p+. A fixed
-       size that suits a laptop reads timid inside the band on a big monitor. */
     font-size: clamp(1.75rem, 1.4rem + 1.4vw, 3.4rem);
     font-weight: 700;
     letter-spacing: -0.015em;
@@ -1014,12 +944,9 @@
     text-wrap: balance;
     min-width: 0;
     @media (min-width: 768px) {
-      /* Align with the content column beside the floating cover below
-         (cover column is 25% + the layout's md:gap-8). */
       padding-left: calc(25% + 2rem);
     }
   }
-  /* Pull the content up so the cover overlaps the hero band. */
   .manga-hero__body {
     margin-top: -3.5rem;
     position: relative;
@@ -1029,9 +956,7 @@
     }
   }
 
-  /* ── Prose ──
-     Token-styled rendering for server-sanitised markdown (changelog, manga
-     descriptions). Typography-first: headings carry the hierarchy, no boxes. */
+
   .prose-kani {
     font-size: var(--text-sm);
     line-height: 1.65;
@@ -1098,11 +1023,7 @@
     margin-bottom: 0.75rem;
   }
 
-  /* ── Data table ──
-     One look for the app's handful of real tables (storage history, webhook
-     delivery log). Only two exist, so this is a class set rather than a
-     component. Mark numeric columns with .num to get right alignment + tabular
-     figures. */
+
   .data-table {
     width: 100%;
     border-collapse: collapse;
@@ -1135,7 +1056,7 @@
     color: var(--color-text-muted);
   }
 
-  /* ── Continue-reading shelf (horizontal snap scroll, library page) ── */
+
   .shelf-row {
     display: flex;
     gap: 0.75rem;
@@ -1183,7 +1104,7 @@
     background: var(--color-accent);
   }
 
-  /* ── Category tabs ── */
+
   .category-tab {
     @apply inline-flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap cursor-pointer select-none;
     color: var(--color-text-muted);
@@ -1204,9 +1125,7 @@
     border-bottom-color: var(--color-accent);
   }
 
-  /* ── Search input ──
-     form/search-input.js. Clear-button visibility is pure CSS via
-     :placeholder-shown so programmatic value changes need no JS wiring. */
+
   .search-input {
     position: relative;
     min-width: 0;
@@ -1247,9 +1166,7 @@
   }
   .search-input input:placeholder-shown ~ .search-input__clear { display: none; }
 
-  /* ── Checkbox ──
-     The labelled checkbox (form/checkbox.js). kani-toggle is for on/off
-     settings rows; this is for multi-pick lists and modal options. */
+
   .kani-checkbox {
     display: inline-flex;
     align-items: center;
@@ -1286,7 +1203,7 @@
   }
   .kani-checkbox input:disabled ~ * { opacity: 0.5; cursor: not-allowed; }
 
-  /* ── Toggle switch ── */
+
   .kani-toggle {
     position: relative;
     display: inline-flex;
@@ -1325,7 +1242,7 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
-  /* ── Star / favourite checkbox ── */
+
   .star-checkbox {
     @apply inline-flex items-center justify-center w-9 h-9 rounded-md cursor-pointer;
     color: var(--color-text-muted);
@@ -1350,7 +1267,7 @@
     border-radius: var(--radius-sm);
   }
 
-  /* ── Download button variants ── */
+
   .dl-btn {
     @apply inline-flex items-center justify-center gap-1 w-9 h-9 text-xs font-medium rounded-md cursor-pointer select-none;
     border: 1px solid var(--color-border);
@@ -1388,7 +1305,7 @@
     pointer-events: none;
   }
 
-  /* ── Page loading bar ── */
+
   .page-loading-bar {
     position: fixed; top: 0; left: 0; right: 0;
     height: 3px;
@@ -1413,7 +1330,7 @@
     100% { transform: translateX(250%);  width: 50%; }
   }
 
-  /* ── Progress ring spin (indeterminate) ── */
+
   @keyframes ring-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
@@ -1431,9 +1348,8 @@
     }
   }
 
-  /* ── Additional button variants ── */
 
-  /* Secondary — filled surface, always has border */
+
   .btn-secondary {
     background-color: var(--color-surface-2);
     border: 1px solid var(--color-border);
@@ -1459,7 +1375,7 @@
     }
   }
 
-  /* ── Icon size helpers ── */
+
   .icon-xs  { & svg { width: var(--icon-xs);  height: var(--icon-xs); } }
   .icon-sm  { & svg { width: var(--icon-sm);  height: var(--icon-sm); } }
   .icon-md  { & svg { width: var(--icon-md);  height: var(--icon-md); } }
@@ -1468,11 +1384,11 @@
   .icon-2xl { & svg { width: var(--icon-2xl); height: var(--icon-2xl); } }
   .icon-3xl { & svg { width: var(--icon-3xl); height: var(--icon-3xl); } }
 
-  /* ── Container widths ── */
+
   .max-w-page   { max-width: var(--container-page); }
   .max-w-narrow { max-width: var(--container-narrow); }
 
-  /* ── Small input ── */
+
   .input-sm {
     height: 2rem;
     font-size: var(--text-sm);
@@ -1480,13 +1396,13 @@
     padding-right: 0.625rem;
   }
 
-  /* ── Modal scrim ── */
+
   .bg-scrim { background-color: rgba(0, 0, 0, 0.6); }
 
-  /* ── Sub-extra-small text ── */
+
   .text-2xs { font-size: var(--text-2xs); }
 
-  /* ── Crumb truncation ── */
+
   .truncate-crumb {
     max-width: 12.5rem;
     overflow: hidden;
@@ -1499,7 +1415,7 @@
     }
   }
 
-  /* ── App shell layout ── */
+
 
   /* Fixed-viewport shell: the header stays put and #page-content is the one
      scroll container (pages with internal scrollers size against it). */
@@ -1518,12 +1434,7 @@
     @media (max-width: 767px) { margin-left: 0; }
   }
 
-  /* ── Sidebar width ──
-     Every offset in the app — the shell, the full-bleed banners, the bulk bar —
-     reads this one value, so collapsing is a single token change rather than a
-     class on each of them. The tablet step is narrower because 234 px of a
-     1024 px screen is a lot to spend on navigation; the collapsed rail keeps
-     the icons and drops everything else. */
+
   @media (min-width: 768px) and (max-width: 1023px) { :root { --sidebar-w: 200px; } }
   html[data-sidebar="collapsed"] { --sidebar-w: 60px; }
   #page-content {
@@ -1536,7 +1447,6 @@
     /* Page roots must overflow (and scroll), not shrink to fit. Full-height
        pages opt into filling via flex-1 basis-0 which is unaffected. */
     & > * { flex-shrink: 0; }
-    /* Prevent mobile bottom-nav from covering content */
     @media (max-width: 767px) {
       padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
     }
@@ -1546,7 +1456,7 @@
     #page-content { scroll-behavior: auto; }
   }
 
-  /* ── Sidebar ── */
+
 
   .sidebar {
     position: fixed;
@@ -1578,9 +1488,7 @@
     flex-shrink: 0;
     box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 28%, transparent);
   }
-  /* ── Auth card (C3) ──
-     Border + token shadow instead of a heavy blurry drop-shadow, and the app
-     mark above the title so the sign-in screen carries the brand. */
+
   .auth-card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -1616,7 +1524,7 @@
     flex-shrink: 0;
   }
 
-  /* ── Sidebar nav items ── */
+
 
   .nav-section {
     font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.1em;
@@ -1639,11 +1547,7 @@
     &.active,
     &[aria-current="page"] { background: var(--color-accent-dim); color: var(--color-accent); }
   }
-  /* ── Collapsed rail ──
-     60 px of icons. Everything that needs width to be legible — labels, section
-     headings, the user's name — is removed rather than squeezed, and the icons
-     centre so the rail reads as a deliberate second state and not a clipped
-     first one. Labels come back as tooltips, set on the anchors by the toggle. */
+
   html[data-sidebar="collapsed"] {
     & .sidebar-title,
     & .sidebar-mark,
@@ -1687,7 +1591,7 @@
     padding: 1px 6px; border-radius: 99px;
   }
 
-  /* ── App-shell header (global, mounted once in app.js) ── */
+
 
   .app-header {
     position: sticky; top: 0; z-index: var(--z-header);
@@ -1701,8 +1605,6 @@
     @media (max-width: 767px) { height: var(--header-h-mobile); padding: 0 16px; }
   }
 
-  /* Header action buttons are more compact on mobile — the default size is
-     chunky in the shorter mobile header. */
   @media (max-width: 767px) {
     .header-actions .btn-primary,
     .header-actions .btn-secondary,
@@ -1734,7 +1636,6 @@
     }
   }
   .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; position: relative; }
-  /* Kebab overflow for header actions on narrow screens (E1) */
   .header-overflow-panel {
     position: absolute;
     top: calc(100% + 6px);
@@ -1753,7 +1654,7 @@
   }
   .header-overflow-panel[hidden] { display: none; }
 
-  /* ── Avatar ── */
+
 
   .avatar {
     width: 28px; height: 28px;
@@ -1766,7 +1667,7 @@
     &.xl { width: 54px; height: 54px; font-size: var(--text-lg); border-radius: var(--radius-lg); }
   }
 
-  /* ── Badges ── */
+
 
   .badge {
     display: inline-flex; align-items: center;
@@ -1779,7 +1680,7 @@
   .badge-muted   { background: var(--color-surface-2); color: var(--color-text-muted); border: 1px solid var(--color-border); }
   .badge-accent  { background: var(--color-accent-dim); color: var(--color-accent); }
 
-  /* ── Master-detail layout ── */
+
 
   .master-detail {
     display: grid;
@@ -1794,7 +1695,6 @@
     min-height: 0;
   }
   @media (max-width: 767px), (hover: none) and (orientation: landscape) and (max-height: 500px) {
-    /* Single-pane mode: only the active pane is shown. */
     .master-detail {
       grid-template-columns: 1fr;
     }
@@ -1802,7 +1702,7 @@
     .master-detail[data-view="detail"] .master-detail__list   { display: none; }
   }
 
-  /* ── Master-detail list pane ── */
+
 
   .list-pane {
     display: flex; flex-direction: column;
@@ -1836,7 +1736,7 @@
     & .li-sub   { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: 1px; }
   }
 
-  /* ── Detail card ── */
+
 
   .detail-card {
     background: var(--color-surface);
@@ -1862,7 +1762,7 @@
     & .v { color: var(--color-text); flex: 1; }
   }
 
-  /* ── Warn tray ── */
+
 
   .warn-tray {
     display: flex; align-items: flex-start; gap: 12px;
@@ -1874,7 +1774,7 @@
     & strong { font-weight: 600; display: block; margin-bottom: 4px; }
   }
 
-  /* ── Dirty indicators ── */
+
 
   .dirty-dot {
     width: 6px; height: 6px; border-radius: 99px;
@@ -1889,7 +1789,7 @@
     border: 1px solid color-mix(in srgb, var(--color-warn) 25%, transparent);
   }
 
-  /* ── Section card (settings sections) ── */
+
 
   .section-card {
     background: var(--color-surface);
@@ -1906,7 +1806,7 @@
     & .sc-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; align-self: flex-start; }
   }
 
-  /* ── Preference row ── */
+
 
   .pref-row {
     display: flex; align-items: center; justify-content: space-between; gap: 14px;
@@ -1920,7 +1820,7 @@
     &.dirty .pref-ctrl select { border-color: var(--color-warn); }
   }
 
-  /* ── Settings search hit ── */
+
   .search-hit {
     box-shadow: inset 2px 0 0 var(--color-accent);
     animation: search-hit-fade 2.5s var(--motion-ease) 1.2s both;
@@ -1934,31 +1834,26 @@
     .search-hit { animation: none; }
   }
 
-  /* ── Utility clusters (F-06) ── */
+
 
   .meta { font-size: var(--text-xs); color: var(--color-text-muted); }
   .row-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
-  /* ── Portal roots ── */
+
   #modal-root   { position: relative; z-index: var(--z-modal); }
   #popover-root { position: fixed; inset: 0; z-index: var(--z-popover); pointer-events: none; }
   #popover-root > * { pointer-events: auto; }
 
-  /* ── Toast z-layer ── */
+
   #toast-root { position: fixed; z-index: var(--z-toast); }
 
-  /* ── Modal/dialog size utilities ── */
-  .modal-narrow { max-width: 37.5rem; }  /* 600px */
-  .modal-wide   { max-width: 50rem; }    /* 800px */
+
+  .modal-narrow { max-width: 37.5rem; }
+  .modal-wide   { max-width: 50rem; }
   .max-h-modal  { max-height: 90vh; max-height: 90dvh; }
   .max-h-sheet  { max-height: 85vh; max-height: 85dvh; }
 
-  /* ── Manga details rail ──
-     Credits then facts, in the shape of a book's edition page. The label sits
-     above its value like the old eyebrow did, so the calibration is the whole
-     point: the label is smaller, lighter, less tracked and fainter than the
-     value on every axis at once. The previous eyebrow was heavier (600) and
-     more tracked (0.07em) than the value it named, which is why it won the eye. */
+
   .rail-credit-name {
     font-family: var(--font-display);
     font-weight: 700;
@@ -1966,8 +1861,7 @@
     line-height: 1.25;
     letter-spacing: -0.005em;
   }
-  /* Trailing credits: a series with four credited people must not grow four
-     headlines, so everyone after the byline drops to the body face. */
+  /* Credits after the byline use body typography rather than additional headings. */
   .rail-credit-name--secondary {
     font-family: var(--font-body);
     font-weight: 500;
@@ -1986,8 +1880,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 0.85rem 1rem;
   }
-  /* An odd last fact has an empty cell beside it anyway, so let it take the
-     width — at 390 px "2 months ago" was truncating in half a column. */
+  /* An odd final fact spans both columns. */
   .rail-facts > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .rail-fact-k {
     font-size: 0.6875rem;
@@ -2001,8 +1894,6 @@
     font-weight: 500;
     line-height: 1.3;
   }
-  /* The one vermilion mark in the rail. A seal, not a traffic light — hence a
-     small square with a softened corner rather than a dot. */
   .rail-seal {
     width: 0.55rem;
     height: 0.55rem;
@@ -2011,25 +1902,9 @@
     display: inline-block;
   }
 
-  /* ── Description disclosure ──
-     Clamp on, clamp off. The previous version tweened max-height by measuring
-     scrollHeight, forcing a reflow, caching the collapsed height on a dataset
-     attribute and racing a transitionend against a safety timer — about ninety
-     lines to animate text height, which reads worse than simply revealing it.
-     The mask makes the cut deliberate; the cap keeps a long synopsis from
-     running off the page. */
-  /* ── Description: the rail re-composes, nothing overlays ──
-     Expanding used to raise a panel over the column. Anything that covers
-     other content needs its own opaque fill, which is precisely what makes it
-     read as a pasted-on surface. So nothing covers anything: the artwork crops
-     from the bottom, the credits and facts step aside, and the description
-     takes the space they vacate. One ground throughout, no border, no shadow,
-     no second plane — the column simply shows something else.
 
-     The exchange is even: what the cover and facts give up, the description
-     takes, so the rail's height never changes and nothing below it moves. */
+
   .rail-desc {
-    /* flex: none or the rail's column squeezes the three-line window shut. */
     flex: none;
     height: 4.4rem;
     overflow: hidden;
@@ -2039,11 +1914,7 @@
   }
   .rail-desc:hover { color: var(--color-text); }
 
-  /* One gesture, not three. The cover's height is the animation worth having
-     because it *is* the exchange — space visibly moving from the artwork to
-     the text — and the arriving text eases in on the same curve so it does not
-     pop while the cover glides. The departing facts are not animated: things
-     leaving should get out of the way, not perform. */
+
   .rail-cover-slot { transition: none; }
   @media (prefers-reduced-motion: no-preference) {
     .rail-cover-box { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
@@ -2064,7 +1935,7 @@
       display: block;
       flex: none;
       width: 100%;
-      height: 26.25rem;           /* 2:3 jacket at 280 px */
+      height: 26.25rem;
     }
     .rail-cover-slot {
       width: 100%;
@@ -2077,9 +1948,6 @@
   }
 
   .rail--reading .rail-cover-box {
-    /* Crops rather than scales: the artwork keeps its width and loses its
-       lower half, which is what "covering the bottom of the cover" looked
-       like when it was an overlay. */
     height: 8.5rem;
   }
   .rail--reading .rail-cover-slot img { object-fit: cover; object-position: top center; }
@@ -2095,40 +1963,16 @@
     -webkit-mask-image: none;
   }
 
-  /* The rail holds a cover, a 2x2 fact grid and a synopsis, all of which were
-     drawn for about 300 px. As a fraction of the viewport it was 186 px at
-     1024 and 305 px at 1500 — the same column doing the same job at wildly
-     different sizes, clipping its own labels at the small end. A pixel range
-     keeps it legible everywhere and makes the layout question arithmetic:
-     260 + ~450 for chapters + gap is roughly 740 px of content. */
-  @media (min-width: 1024px) {
-    /* The cover is the element that gives way. Everything else in the rail —
-       the actions, the credits, the facts, three lines of synopsis — has a
-       size it needs, and the artwork is the only part that can lose height and
-       still do its job. Left fixed, a 420 px cover on a 768 px screen pushed
-       the description off the bottom entirely, which is the one thing in the
-       rail people actually read. */
-    /* Height flexes and the width follows from the 2:3 ratio, so the jacket
-       gets smaller rather than letterboxed. Cropping kept the frame 280 px
-       wide and squashed it to a 2.5:1 strip, which stops reading as a cover
-       at all. Centred, because a narrower cover in a 280 px rail should look
-       placed rather than left-aligned by accident. */
-    /* The cover always spans the rail. Its edges line up with the Read button,
-       the facts and the synopsis, because a column whose widest element wanders
-       is the most visible kind of wrong.
 
-       What changes with height is the crop, and it changes in steps rather than
-       continuously: a jacket, a plate, a band. Sliding through every ratio in
-       between is what read as broken — no single frame looked chosen. Three
-       fixed ratios each look deliberate, and all three keep the top of the
-       artwork, where the title and the character are. */
+  @media (min-width: 1024px) {
+
+
+
   }
 
-  /* Not enough height for the full jacket: a square plate. */
   @media (min-width: 1024px) and (min-height: 700px) and (max-height: 1009px) {
     .rail-cover-box { height: 17.5rem; }
   }
-  /* Shorter still: a band, the shape a chapter header would use. */
   @media (min-width: 1024px) and (min-height: 700px) and (max-height: 859px) {
     .rail-cover-box { height: 8.5rem; }
   }
@@ -2153,26 +1997,9 @@
     }
   }
 
-  /* ── Fixed-viewport page layout ──
-     A desktop page fills the shell exactly and never scrolls itself: its
-     heading, filters and pagination hold their place and only the data region
-     moves. Three primitives, used together:
 
-       .page-fixed   the page root — fills the shell, lays out as a column
-       .page-body    the one region that scrolls; everything else is chrome
-       .page-col     a nested column that also needs to distribute height
-
-     Gated on height as well as width. At 768 px wide but 600 px tall a pinned
-     layout leaves a scroll region a few rows deep, which is worse than simply
-     scrolling the page — so below the floor these are inert and the document
-     scrolls as normal. Tailwind's `md:` cannot express that, which is why
-     these are real classes rather than utilities. */
   @media (min-width: 1024px) and (min-height: 700px) {
-    /* The page root is #page-content itself, which already lays out as a
-       scrolling column. What it needs is for its child to be allowed to
-       shrink — and `#page-content > * { flex-shrink: 0 }` outranks a plain
-       class, so the primitive has to be scoped to beat it. Without this the
-       page silently kept scrolling and every measurement said so. */
+
     #page-content.page-fixed { overflow: hidden; }
     #page-content.page-fixed > .page-body-host { flex: 1 1 auto; min-height: 0; }
     .page-fixed {
@@ -2204,30 +2031,16 @@
     .page-body-host { flex: 1 1 auto; min-height: 0; }
   }
 
-  /* Below lg the rail is a stacked row and the cover must hold its size; the
-     `shrink-0` utility that used to do this was removed because at lg it beat
-     the rule that lets the cover absorb the column's squeeze. */
   @media (max-width: 1023px) {
     .rail-cover-slot { flex: none; }
   }
 
-  /* ── Chapter tab row: sticky on a phone ──
-     Vertical space above the list is cheap on mobile — a flick clears the hero
-     — so nothing here is about saving pixels. It is about reach: once the hero
-     has scrolled past, a 219-chapter list leaves the sort, filters and the
-     Manage tab stranded at the top of the document. Sticking the row keeps
-     them a thumb away. Desktop does not need it; nothing scrolls there. */
-  /* Up to lg, since that is where the stacked layout ends — a 900 px tablet
-     gets the same treatment as a phone because it has the same layout. */
+
+  /* The stacked layout uses the same treatment through the lg breakpoint. */
   @media (max-width: 1023px) {
-    /* Full width, split evenly: two tabs sharing a phone's width read as a
-       segmented control, which is what they are. The controls wrap beneath —
-       vertical space is the cheap axis here. */
     .chapter-tabs { width: 100%; }
     .chapter-tabs [role="tab"] { flex: 1 1 0; justify-content: center; text-align: center; }
     .chapter-tabrow > * { width: 100%; }
-    /* Sort and page size read left-to-right with the rows they order; Filters
-       is the odd one out and sits on the opposite edge, where the thumb is. */
     .chapter-filter-btn { margin-left: auto; }
 
     .chapter-tabrow {
@@ -2245,13 +2058,7 @@
     }
   }
 
-  /* ── Floating bulk bar ──
-     Centres over the content column, not the viewport, so the selection count
-     does not sit behind the sidebar. Deliberately one class rather than a
-     stack of inset utilities: `inset-x-0` and the offset fight over source
-     order, and the loser is invisible until someone screenshots it. No
-     transform — a transformed ancestor becomes the containing block for the
-     `position: fixed` dropdown rendered inside this bar. */
+
   .bulk-bar-dock {
     position: fixed;
     left: 0;
@@ -2267,23 +2074,19 @@
     }
   }
 
-  /* ── Sidebar offset (for full-bleed banners on desktop) ── */
-  /* Owns `left` at every width. It cannot merely override at md and up: the
-     `left-0` utility this used to be paired with lives in Tailwind's utilities
-     layer and outranks anything declared here, so the banners never actually
-     cleared the sidebar. The utility is gone from the markup; this is the only
-     rule setting their left edge now. */
+
+
   .md\:left-sidebar {
     left: 0;
     @media (min-width: 768px) { left: var(--sidebar-w); }
   }
 
-  /* ── Safe-area padding ── */
+
   .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
 
-  /* ── Pagination tile ── */
+
   .tile-btn {
-    width: 2.125rem; height: 2.125rem;   /* 34px */
+    width: 2.125rem; height: 2.125rem;
     display: grid; place-items: center;
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border);
@@ -2314,12 +2117,12 @@
   .reader-cp-track { transition: transform var(--motion-base) ease; }
 }
 
-/* ── Spinner-free number inputs (used in reader slider rows) ──────────────── */
+
 .no-spinners::-webkit-inner-spin-button,
 .no-spinners::-webkit-outer-spin-button { display: none; }
 .no-spinners { -moz-appearance: textfield; appearance: textfield; }
 
-/* ── View-transition crossfade (theme / accent switches) ─────────────────── */
+
 @media (prefers-reduced-motion: no-preference) {
   ::view-transition-old(root),
   ::view-transition-new(root) {

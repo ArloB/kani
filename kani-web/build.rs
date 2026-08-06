@@ -68,7 +68,6 @@ fn stage_assets_for_embedding() {
         }
     }
 
-    // Single files the router serves by explicit route.
     for name in [
         "index.prod.html",
         "manifest.webmanifest",

@@ -11,6 +11,8 @@ use thiserror::Error;
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
 #[derive(Error, Debug)]
+/// Web-layer failure classified into an HTTP status and safe client response.
+/// Internal variants are logged with detail but expose only a generic message.
 pub enum AppError {
     #[error("Internal Server Error: {0}")]
     InternalServerError(String),
@@ -134,7 +136,6 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            // Client errors: safe to surface the message
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             Self::Unauthorized(msg) | Self::PasswordError(msg) => {
@@ -143,7 +144,6 @@ impl IntoResponse for AppError {
             Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             Self::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
 
-            // Internal errors: log details, return generic message
             Self::SqlxError(e) => {
                 tracing::error!("Database error: {e}");
                 (

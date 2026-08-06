@@ -23,8 +23,6 @@ const BACKUP_CODE_LEN: usize = 8;
 const BACKUP_CODE_COUNT: usize = 8;
 
 impl AppService {
-    // ── Setup ──────────────────────────────────────────────────────────────────
-
     /// Begin TOTP setup: generate a new secret, store it unverified, and return
     /// the base32 secret and otpauth URI for QR code display.
     ///
@@ -35,7 +33,6 @@ impl AppService {
         user_id: UserId,
         username: &str,
     ) -> Result<(Secret<String>, String, String)> {
-        // Refuse if already verified.
         let verified: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM user_totp WHERE user_id = ? AND verified_at IS NOT NULL",
         )
@@ -50,7 +47,6 @@ impl AppService {
             ));
         }
 
-        // Generate secret.
         let secret_bytes = totp_rs::Secret::generate_secret();
         let secret_b32 = secret_bytes.to_encoded().to_string();
         let totp = build_totp(&secret_b32, username)?;
@@ -60,7 +56,6 @@ impl AppService {
             .map_err(|e| ServiceError::Internal(format!("QR generation failed: {e}")))?;
         let qr_svg = format!("data:image/png;base64,{qr_png_b64}");
 
-        // Encrypt and store.
         let stored = self.maybe_encrypt(&secret_b32);
         sqlx::query(
             "INSERT INTO user_totp (user_id, secret, verified_at) VALUES (?, ?, NULL) \
@@ -89,7 +84,6 @@ impl AppService {
             ));
         }
 
-        // Mark as verified.
         sqlx::query(
             "UPDATE user_totp SET verified_at = unixepoch() WHERE user_id = ? AND verified_at IS NULL",
         )
@@ -97,14 +91,11 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        // Generate and store backup codes.
         let codes = generate_backup_codes();
         self.store_backup_codes(user_id, &codes).await?;
 
         Ok(codes)
     }
-
-    // ── Verification ──────────────────────────────────────────────────────────
 
     /// Verify a TOTP code for login step-up.
     pub async fn verify_totp_code(&self, user_id: UserId, code: &str) -> Result<bool> {
@@ -127,7 +118,6 @@ impl AppService {
         // Only if exactly one matches do we consume it.
         let mut matched_id: Option<String> = None;
         for row_id in &rows {
-            // Re-fetch the hash for this specific row.
             let hash: Option<String> =
                 sqlx::query_scalar("SELECT code_hash FROM user_backup_codes WHERE id = ?")
                     .bind(row_id)
@@ -155,8 +145,6 @@ impl AppService {
             Ok(false)
         }
     }
-
-    // ── Disable / manage ──────────────────────────────────────────────────────
 
     /// Disable TOTP after confirming the current TOTP code.
     pub async fn disable_totp(&self, user_id: UserId, totp_code: &str) -> Result<()> {
@@ -188,8 +176,6 @@ impl AppService {
         Ok(codes)
     }
 
-    // ── Internal helpers ──────────────────────────────────────────────────────
-
     async fn get_unverified_totp_secret(&self, user_id: UserId) -> Result<String> {
         let stored: Option<String> = sqlx::query_scalar(
             "SELECT secret FROM user_totp WHERE user_id = ? AND verified_at IS NULL",
@@ -215,7 +201,6 @@ impl AppService {
     }
 
     async fn store_backup_codes(&self, user_id: UserId, codes: &[String]) -> Result<()> {
-        // Delete existing unused codes for this user.
         sqlx::query("DELETE FROM user_backup_codes WHERE user_id = ?")
             .bind(user_id)
             .execute(&self.db)

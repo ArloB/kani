@@ -1,8 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Migration is job-shaped: the endpoint queues work and answers 202 with a job
-// id rather than blocking on network I/O against the target source. These tests
-// pin that contract before 1.0 freezes it, and pin the guard that stops a second
-// migration racing the first over the same chapter rows and CBZs.
 
 mod common;
 use axum::http::StatusCode;
@@ -85,12 +81,7 @@ async fn migrating_is_accepted_and_answers_with_a_job_id() {
     );
 }
 
-/// Puts a migration job for `manga_id` in the queue, without running it.
-///
-/// Submitting a real one and racing it does not work: with no backend installed
-/// the job fails in microseconds, so the pending row is gone before a second
-/// request arrives. The guard reads this table, so seeding it is what actually
-/// exercises the guard.
+/// Seeds the durable running-job state inspected by the duplicate-submission guard.
 async fn seed_pending_migration(db: &sqlx::SqlitePool, manga_id: i64) {
     sqlx::query(
         "INSERT INTO jobs (id, job_type, status, priority, description, params_json, created_at) \
@@ -105,8 +96,6 @@ async fn seed_pending_migration(db: &sqlx::SqlitePool, manga_id: i64) {
 
 #[tokio::test]
 async fn a_second_migration_of_the_same_manga_is_refused() {
-    // Two migrations of one series race over the same chapter rows and CBZs;
-    // the loser can delete files the winner just re-matched.
     let state = test_state().await;
     let db = state.service.db.clone();
     let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
@@ -134,7 +123,6 @@ async fn a_second_migration_of_the_same_manga_is_refused() {
 
 #[tokio::test]
 async fn an_in_flight_migration_does_not_block_a_different_series() {
-    // The guard is keyed on the series, so it must not serialise the library.
     let state = test_state().await;
     let db = state.service.db.clone();
     let (_, busy_manga) = seed_manga(&db, "origin", "m1").await;
@@ -177,9 +165,6 @@ async fn migrating_unauthenticated_is_401() {
 
 #[tokio::test]
 async fn migrating_without_library_manage_is_403() {
-    // `library:manage` is seeded to the default `user` role in this app, so a
-    // standard account can migrate by design. Stripping the role is what proves
-    // the endpoint is gated at all rather than merely authenticated.
     let state = test_state().await;
     let db = state.service.db.clone();
     let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
@@ -232,8 +217,6 @@ async fn a_malformed_migration_body_is_rejected() {
 
 #[tokio::test]
 async fn the_chapter_listing_can_ask_for_orphans() {
-    // Chapters kept by "keep downloaded chapters" are hidden by default; the
-    // filter is the only way the user reaches files the migration preserved.
     let state = test_state().await;
     let db = state.service.db.clone();
     let (_, manga_id) = seed_manga(&db, "origin", "m1").await;

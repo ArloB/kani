@@ -1,3 +1,5 @@
+//! Prometheus metric registration, runtime gauge synchronization, and authenticated scraping.
+
 use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
@@ -7,10 +9,8 @@ use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
 use std::sync::OnceLock;
 
-/// Collapses paths that axum could not match to a route. Without this every
-/// content-hashed asset filename becomes its own Prometheus time series, and
-/// every rebuild mints a fresh set — an unbounded cardinality leak. Real routes
-/// are unaffected: they carry a MatchedPath and never reach this.
+/// Bounds metric cardinality by grouping unmatched static assets and SPA fallbacks.
+/// Matched routes carry a `MatchedPath` and do not pass through this function.
 fn collapse_unmatched_path(path: &str) -> String {
     for prefix in ["/js/", "/css/", "/fonts/", "/icons/", "/locales/"] {
         if path.starts_with(prefix) {
@@ -90,6 +90,7 @@ pub fn router(state: crate::state::AppState) -> Router {
 }
 
 #[derive(Clone)]
+/// Router state pairing the Prometheus renderer with application authorization state.
 pub struct MetricsState {
     handle: PrometheusHandle,
     app: crate::state::AppState,

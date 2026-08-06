@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for the self-service API-token CRUD at /rest/me/api-tokens.
 
 mod common;
 use axum::http::StatusCode;
@@ -36,7 +35,6 @@ async fn create_list_revoke_roundtrip() {
     let app = build_test_app_with_opds(state).await;
     let cookie = login(&app, u, p).await;
 
-    // Create.
     let res = app
         .clone()
         .oneshot(authed_post(
@@ -52,7 +50,6 @@ async fn create_list_revoke_roundtrip() {
     let id = created["id"].as_str().unwrap().to_owned();
     assert!(raw.starts_with("kani_"));
 
-    // List shows it, without any raw token or hash.
     let res = app
         .clone()
         .oneshot(authed_get("/rest/me/api-tokens", &cookie))
@@ -66,7 +63,6 @@ async fn create_list_revoke_roundtrip() {
     assert!(arr[0].get("raw_token").is_none());
     assert!(arr[0].get("token_hash").is_none());
 
-    // Revoke.
     let res = app
         .clone()
         .oneshot(authed_delete(&format!("/rest/me/api-tokens/{id}"), &cookie))
@@ -74,7 +70,6 @@ async fn create_list_revoke_roundtrip() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
-    // List is now empty.
     let res = app
         .clone()
         .oneshot(authed_get("/rest/me/api-tokens", &cookie))
@@ -123,7 +118,6 @@ async fn revoked_token_no_longer_authenticates_on_opds() {
     let raw = created["raw_token"].as_str().unwrap().to_owned();
     let id = created["id"].as_str().unwrap().to_owned();
 
-    // Token works against OPDS before revoke.
     let res = app
         .clone()
         .oneshot(
@@ -137,7 +131,6 @@ async fn revoked_token_no_longer_authenticates_on_opds() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Revoke, then it is rejected.
     app.clone()
         .oneshot(authed_delete(&format!("/rest/me/api-tokens/{id}"), &cookie))
         .await
@@ -167,7 +160,6 @@ async fn users_are_isolated_from_each_others_tokens() {
     let admin_cookie = login(&app, au, ap).await;
     let bob_cookie = login(&app, bu, bp).await;
 
-    // Admin creates a token.
     let res = app
         .clone()
         .oneshot(authed_post(
@@ -179,7 +171,6 @@ async fn users_are_isolated_from_each_others_tokens() {
         .unwrap();
     let id = body_json(res).await["id"].as_str().unwrap().to_owned();
 
-    // Bob cannot see it.
     let res = app
         .clone()
         .oneshot(authed_get("/rest/me/api-tokens", &bob_cookie))
@@ -187,7 +178,6 @@ async fn users_are_isolated_from_each_others_tokens() {
         .unwrap();
     assert!(body_json(res).await.as_array().unwrap().is_empty());
 
-    // Bob cannot revoke it → 404.
     let res = app
         .clone()
         .oneshot(authed_delete(

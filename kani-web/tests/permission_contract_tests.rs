@@ -89,8 +89,6 @@ fn every_permission_the_ui_checks_exists_on_the_server() {
 
 #[test]
 fn the_scan_would_notice_a_typo() {
-    // Guards the guard: if the extractor silently found nothing, the test above
-    // would pass no matter how badly the strings drifted.
     assert!("library:view".parse::<Permission>().is_ok());
     assert!(
         "libary:view".parse::<Permission>().is_err(),

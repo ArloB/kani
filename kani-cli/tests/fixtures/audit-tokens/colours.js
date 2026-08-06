@@ -1,5 +1,3 @@
-// Hard-coded colour fixture — used by audit_tokens_tests.rs.
-// Lines 3-7 have violations; lines 8-9 are semantically-named tokens (clean).
 const hexShort = '#fff';
 const hexFull = '#e8545a';
 const rgbLiteral = 'rgb(0, 0, 0)';

@@ -1,8 +1,12 @@
+//! Transport middleware shared by the main router.
+
+/// Request-ID generation and propagation.
 pub mod trace_id {
     use axum::http::{HeaderValue, Request};
     use tower_http::request_id::{MakeRequestId, RequestId};
 
     #[derive(Clone, Copy, Default)]
+    /// Generates a fresh UUID v4 request identifier for each request.
     pub struct UuidRequestId;
 
     impl MakeRequestId for UuidRequestId {

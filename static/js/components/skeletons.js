@@ -1,5 +1,4 @@
 // @ts-check
-// Skeleton loader factories — return HTML strings for each skeleton type.
 
 /**
  * Grid of manga card skeletons.
@@ -28,7 +27,8 @@ export function skeletonSourceList(count = 6) {
       <div class="skeleton h-3 w-1/2 rounded"></div>
       <div class="skeleton h-8 w-24 rounded-md"></div>
     </div>`;
-  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${card.repeat(count)}</div>`; /* justified: auto-fill grid, no token equivalent */
+  // The auto-fill track depends on viewport width and has no fixed grid token.
+  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${card.repeat(count)}</div>`;
 }
 
 /**
@@ -40,21 +40,19 @@ export function skeletonSourceList(count = 6) {
  * @returns {string}
  */
 export function skeletonMangaHero() {
-  // Meta rows: title line + several label lines (match status/author/artist/etc.)
   const metaRows = [
-    'h-5 w-3/4',   // title
-    'h-3 w-full',  // line
-    'h-3 w-4/5',   // line
-    'h-3 w-full',  // line
-    'h-3 w-3/5',   // line
-    'h-3 w-full',  // line
+    'h-5 w-3/4',
+    'h-3 w-full',
+    'h-3 w-4/5',
+    'h-3 w-full',
+    'h-3 w-3/5',
+    'h-3 w-full',
   ].map(c => `<div class="skeleton ${c} rounded"></div>`).join('');
 
   const tagChips = [56, 80, 64, 48, 72, 60].map(w =>
     `<div class="skeleton h-6 rounded-full" style="width:${w}px"></div>`
   ).join('');
 
-  // 10 chapter rows with a gap between them to suggest separators
   const listRows = Array.from({ length: 10 }, () =>
     `<div class="skeleton h-14 w-full rounded-md"></div>`
   ).join('');

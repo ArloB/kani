@@ -1,12 +1,8 @@
 //! Tower middleware that enforces per-session revocation and maintains the
 //! `user_sessions` sidecar table.
 //!
-//! Revocation used to be written and never read: `revoke_session` set
-//! `revoked_at`, the row disappeared from the session-inventory UI, and the
-//! cookie went on working indefinitely. The one function written to close the
-//! loop had no callers. This is where the loop closes — it is the only
-//! middleware that already holds both the resolved user and the tower-sessions
-//! id.
+//! This middleware holds both the resolved user and tower-sessions id, allowing
+//! it to enforce revocation before touching the session sidecar.
 
 use axum::{
     body::Body,

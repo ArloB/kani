@@ -115,7 +115,6 @@ export function mountRepoManager(container) {
     else listEl.appendChild(bannerEl);
   }
 
-  // ── List pane ──────────────────────────────────────────────────────────────
 
   function _buildListPane() {
     listEl.innerHTML = '';
@@ -151,7 +150,6 @@ export function mountRepoManager(container) {
     />`, container);
   }
 
-  // ── Detail pane ───────────────────────────────────────────────────────────
 
   function _renderDetailPrompt() {
     _detailStatus = 'prompt';
@@ -233,7 +231,6 @@ export function mountRepoManager(container) {
     />`, detailEl);
   }
 
-  // ── Load ──────────────────────────────────────────────────────────────────
 
   async function _loadRepos() {
     try {
@@ -244,7 +241,6 @@ export function mountRepoManager(container) {
     if (listContent) _renderRepoList(/** @type {HTMLElement} */ (listContent));
   }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
 
   function _onSse(e) {
     const d = /** @type {any} */ (e).detail;
@@ -273,7 +269,6 @@ export function mountRepoManager(container) {
   };
 }
 
-// ── Components ────────────────────────────────────────────────────────────────
 
 function AddRepoForm({ onAdd }) {
   async function handleSubmit(e) {
@@ -447,7 +442,6 @@ function ExtensionRow({ ext, repoId, sources, onInstalled }) {
   `;
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
 
 function _countExtensions(repo) {
   if (!repo.index_cache) return 0;

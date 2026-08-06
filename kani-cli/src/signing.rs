@@ -1,3 +1,5 @@
+//! Ed25519 artifact signing, verification, and maintainer-key loading.
+
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -12,6 +14,7 @@ pub fn key_fingerprint(pubkey_bytes: &[u8; 32]) -> String {
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Failure to decode, validate, or verify repository signing material.
 pub enum SigningError {
     #[error("invalid base64: {0}")]
     Base64(#[from] base64::DecodeError),

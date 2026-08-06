@@ -1,10 +1,8 @@
 #![allow(clippy::unwrap_used)]
 //! Behaviour that only appears against a real, misbehaving HTTP origin.
 //!
-//! Everything here was previously unverifiable. The upgrade confirmation probe
-//! had never executed against a source at all; the `Content-Range` fallback
-//! needs a server that ignores `Range`, which no real source will do on
-//! request; re-upload detection needs a listing that *changes* between scans.
+//! The `Content-Range` fallback needs a server that ignores `Range`, while
+//! re-upload detection needs a listing that changes between scans.
 //! `TestOrigin` supplies all three.
 
 mod common;
@@ -22,8 +20,6 @@ use kani_yaml::yaml::model::{
     ValidatedTotalPages,
 };
 use kani_yaml::yaml::schema::ResponseType;
-
-// ── YAML source plumbing ─────────────────────────────────────────────────────
 
 fn json_field(name: &str, pointer: &str, optional: bool) -> ValidatedField {
     ValidatedField {
@@ -162,8 +158,6 @@ async fn held_chapter_with_pages(
     chapter
 }
 
-// ── 1. The confirmation probe, against a live source ─────────────────────────
-
 #[tokio::test]
 async fn the_confirmation_probe_measures_a_real_candidate_and_upgrades_on_resolution() {
     let origin = TestOrigin::start().await;
@@ -172,7 +166,6 @@ async fn the_confirmation_probe_measures_a_real_candidate_and_upgrades_on_resolu
     let manga = insert_manga(&svc.db, source_id, "m1", "Probed").await;
     wire_source(&svc, source_id, &origin.base());
 
-    // On disk: two small pages. At the source: five much larger ones.
     let held_pages = vec![jpeg_page(800, 1200, false, 80); 2];
     let chapter = held_chapter_with_pages(&svc, manga, "Probed", "ch-1", 1.0, &held_pages).await;
 
@@ -210,7 +203,6 @@ async fn the_confirmation_probe_measures_a_real_candidate_and_upgrades_on_resolu
     );
     assert_eq!(c.reason_key, "upgrade.reason.resolution");
 
-    // The probe samples, it does not download: three of five pages, by header.
     assert!(
         origin.total_hits() <= 5,
         "a confirmation must not cost as much as a download, got {} requests",
@@ -226,8 +218,6 @@ async fn a_probed_downgrade_is_reported_as_reassurance_not_a_prompt() {
     let manga = insert_manga(&svc.db, source_id, "m1", "Worse").await;
     wire_source(&svc, source_id, &origin.base());
 
-    // More pages, but each one smaller — a re-split of a worse scan. Page count
-    // alone would call this an upgrade; the probe is what prevents that.
     let held_pages = vec![jpeg_page(1600, 2400, false, 85); 2];
     let chapter = held_chapter_with_pages(&svc, manga, "Worse", "ch-1", 1.0, &held_pages).await;
     serve_chapter(&origin, "ch-1", &vec![jpeg_page(800, 1200, false, 85); 6]);
@@ -260,9 +250,6 @@ async fn a_colour_release_is_detected_as_an_upgrade_over_a_monochrome_copy() {
     let manga = insert_manga(&svc.db, source_id, "m1", "Colour").await;
     wire_source(&svc, source_id, &origin.base());
 
-    // Same resolution both sides; the only difference is colour. The held side
-    // is judged from decoded pixels via its manifest, the candidate from PNG
-    // headers — the one image format whose colour type is conclusive.
     let held_pages = vec![greyscale_jpeg(1600, 2400, 85); 3];
     let chapter = held_chapter_with_pages(&svc, manga, "Colour", "ch-1", 1.0, &held_pages).await;
     serve_chapter(&origin, "ch-1", &vec![png_page(1600, 2400, true); 4]);
@@ -286,8 +273,6 @@ async fn a_colour_release_is_detected_as_an_upgrade_over_a_monochrome_copy() {
     );
     assert_eq!(found[0].kind, UpgradeKind::QualityReupload);
 }
-
-// ── 2. The Content-Range fallback ────────────────────────────────────────────
 
 #[tokio::test]
 async fn a_server_that_ignores_range_still_yields_a_usable_measurement() {
@@ -331,7 +316,6 @@ async fn an_honoured_range_reports_the_full_page_size_not_the_slice() {
         .collect();
     let score = svc.probe_page_quality(&urls, 3).await.unwrap();
 
-    // Three pages of `full_len` bytes at 1600x2400 each.
     let expected = (full_len * 3) as f64 / ((1600.0 * 2400.0 * 3.0) / 1_000_000.0);
     let ratio = score.bytes_per_megapixel as f64 / expected;
     assert!(
@@ -342,8 +326,6 @@ async fn an_honoured_range_reports_the_full_page_size_not_the_slice() {
     );
 }
 
-// ── 3. Re-upload detection across two scans ──────────────────────────────────
-
 #[tokio::test]
 async fn a_listing_that_grows_between_scans_is_detected_as_a_reupload() {
     let origin = TestOrigin::start().await;
@@ -352,8 +334,6 @@ async fn a_listing_that_grows_between_scans_is_detected_as_a_reupload() {
     let manga = insert_manga(&svc.db, source_id, "m1", "Growing").await;
     wire_source(&svc, source_id, &origin.base());
 
-    // The same chapter, listed first with 3 pages and then with 5 — the thing
-    // that cannot be arranged against a real source.
     origin.script(
         "/chapters/m1",
         vec![
@@ -420,12 +400,9 @@ async fn a_grown_listing_against_a_held_chapter_raises_a_candidate() {
     assert_eq!(found[0].candidate_page_count, Some(5));
 }
 
-// ── 4. Pathological images ───────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_truncated_header_does_not_poison_the_measurement() {
     let origin = TestOrigin::start().await;
-    // Two readable pages and one cut off before its dimensions are complete.
     let good = jpeg_page(1600, 2400, false, 80);
     origin.set("/img/a.jpg", Response::image(good.clone()));
     origin.set("/img/b.jpg", Response::image(good));
@@ -607,8 +584,6 @@ async fn encoder_quality_is_read_from_the_header_and_ordered_correctly() {
     );
 }
 
-// ── 5. safe_get across a redirect, and under a declared rate limit ───────────
-
 /// A route that echoes back the headers it was asked with, so a test can prove
 /// what actually arrived rather than what was intended.
 fn echo_headers_route(origin: &TestOrigin, path: &str) {
@@ -620,7 +595,6 @@ async fn a_range_request_survives_a_redirect() {
     let origin = TestOrigin::start().await;
     let page = jpeg_page(1600, 2400, false, 85);
 
-    // /img/a.jpg redirects to /cdn/a.jpg — the ordinary CDN shape.
     origin.set(
         "/img/a.jpg",
         Response::redirect(302, &origin.url("/cdn/a.jpg")),
@@ -634,10 +608,6 @@ async fn a_range_request_survives_a_redirect() {
         .expect("the probe must still read the redirected page");
 
     assert_eq!(score.median_long_edge_px, 2400);
-    // The decisive assertion: the origin honours Range, so if the header
-    // survived the hop the recorded size is the *whole* page from
-    // Content-Range, not the 4 KB slice. A dropped Range would make
-    // bytes-per-megapixel collapse to the prefix size.
     let expected = page.len() as f64 / ((1600.0 * 2400.0) / 1_000_000.0);
     let ratio = score.bytes_per_megapixel as f64 / expected;
     assert!(
@@ -673,9 +643,6 @@ async fn a_declared_rate_limit_applies_to_page_fetches_not_only_catalogue_calls(
     }
     let elapsed = started.elapsed();
 
-    // Six requests at five per second with a burst of one cannot complete in
-    // under a second. Before the fix `safe_get` never touched the limiter, so
-    // this finished in milliseconds.
     assert!(
         elapsed >= std::time::Duration::from_millis(800),
         "page fetches must be governed by the source's declared rate limit, \
@@ -686,7 +653,6 @@ async fn a_declared_rate_limit_applies_to_page_fetches_not_only_catalogue_calls(
 
 #[tokio::test]
 async fn credentials_are_not_carried_across_a_cross_host_redirect() {
-    // Two origins: the first redirects to the second, which records what it got.
     let first = TestOrigin::start().await;
     let second = TestOrigin::start().await;
     echo_headers_route(&second, "/landing");
@@ -702,9 +668,6 @@ async fn credentials_are_not_carried_across_a_cross_host_redirect() {
         rquest::header::HeaderValue::from_static("bytes=0-99"),
     );
 
-    // TestOrigins are on loopback; production refuses redirects to private
-    // hosts, so this must opt into private egress to exercise the cross-host
-    // credential-stripping behaviour at all.
     let client = kani_core::http::SmartClient::new(None)
         .unwrap()
         .with_allow_private_egress(true);
@@ -717,15 +680,12 @@ async fn credentials_are_not_carried_across_a_cross_host_redirect() {
     );
 }
 
-// ── 6. Resume must not seal a truncated page into the archive ────────────────
-
 #[tokio::test]
 async fn an_interrupted_page_is_not_treated_as_downloaded_on_the_next_run() {
     let origin = TestOrigin::start().await;
     let page = jpeg_page(800, 1200, false, 80);
     let announced = page.len();
 
-    // First attempt dies mid-body; the retry serves the whole thing.
     origin.script(
         "/img/0001.jpg",
         vec![
@@ -741,7 +701,6 @@ async fn an_interrupted_page_is_not_treated_as_downloaded_on_the_next_run() {
     let staging = tempfile::tempdir().unwrap();
     let client = kani_core::http::SmartClient::new(None).unwrap();
 
-    // A truncated transfer must leave nothing a resume would trust.
     let first = kani_core::downloader::DownloaderManager::download_page_for_test(
         &client,
         &origin.url("/img/0001.jpg"),
@@ -793,8 +752,6 @@ async fn a_complete_page_is_staged_and_reusable() {
     );
 }
 
-// ── 7. Pagination must not stop at one page of already-known chapters ────────
-
 #[tokio::test]
 async fn a_scan_looks_past_a_page_of_chapters_it_already_has() {
     let origin = TestOrigin::start().await;
@@ -803,8 +760,6 @@ async fn a_scan_looks_past_a_page_of_chapters_it_already_has() {
     let manga = insert_manga(&svc.db, source_id, "m1", "Interleaved").await;
     wire_paginated_source(&svc, source_id, &origin.base());
 
-    // Page 2 is entirely chapters page 1 already introduced — the shape an
-    // oldest-first or upload-date-interleaved listing produces routinely.
     origin.set(
         "/paged/m1/1",
         Response::json(r#"{"chapters":[{"id":"ch-1","number":1},{"id":"ch-2","number":2}]}"#),
@@ -868,8 +823,6 @@ fn wire_paginated_source(svc: &kani_app::service::AppService, source_id: i64, ba
     svc.sources
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 }
-
-// ── 8. Retry policy: permanent statuses, and the server's own Retry-After ────
 
 #[tokio::test]
 async fn a_permanent_status_is_not_retried() {
@@ -939,9 +892,6 @@ async fn the_servers_retry_after_survives_into_the_error_classification() {
     let origin = TestOrigin::start().await;
     origin.set(
         "/img/limited.jpg",
-        // Kept small: `send_request` honours this header for its own internal
-        // retries before the error ever surfaces, so a large value makes the
-        // test sleep for exactly that long.
         Response::status(429).header("Retry-After", "1"),
     );
 
@@ -976,8 +926,6 @@ async fn the_servers_retry_after_survives_into_the_error_classification() {
         other => panic!("expected a status error, got {other:?}"),
     }
 }
-
-// ── 9. Content-type guessing, health recording, aggregate search ─────────────
 
 #[tokio::test]
 async fn a_png_served_as_octet_stream_is_not_stored_as_jpg() {
@@ -1040,7 +988,6 @@ async fn a_failing_search_is_recorded_against_the_sources_health() {
     wire_source(&svc, source_id, &origin.base());
     origin.set("/chapters/whatever", Response::status(500));
 
-    // No search endpoint is configured, so the call fails inside the backend.
     let _ = svc.search_manga(source_id, "anything", 1, 20, None).await;
 
     let errors: Option<i64> =
@@ -1077,8 +1024,6 @@ async fn a_successful_page_fetch_is_recorded_against_the_sources_health() {
     assert!(ok.is_some(), "a successful page fetch must count as health");
 }
 
-// ── 10. The confirmation probe must not read through the page cache ──────────
-
 #[tokio::test]
 async fn the_probe_confirms_against_the_current_listing_not_a_cached_one() {
     let origin = TestOrigin::start().await;
@@ -1087,16 +1032,13 @@ async fn the_probe_confirms_against_the_current_listing_not_a_cached_one() {
     let manga = insert_manga(&svc.db, source_id, "m1", "Cached").await;
     wire_source(&svc, source_id, &origin.base());
 
-    // Two small pages on disk.
     let held_pages = vec![jpeg_page(800, 1200, false, 80); 2];
     let chapter = held_chapter_with_pages(&svc, manga, "Cached", "ch-1", 1.0, &held_pages).await;
 
-    // The listing the app sees first: two pages, same size as what we hold.
     serve_chapter(&origin, "ch-1", &vec![jpeg_page(800, 1200, false, 80); 2]);
     svc.get_pages(source_id, "m1", "ch-1").await.unwrap();
     let hits_after_warm = origin.hits("/pages/ch-1");
 
-    // The source re-uploads at double the resolution.
     serve_chapter(&origin, "ch-1", &vec![jpeg_page(1600, 2400, false, 80); 5]);
     sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
         .bind(chapter.0)
@@ -1125,8 +1067,6 @@ async fn the_probe_confirms_against_the_current_listing_not_a_cached_one() {
         "the measurement must describe the new upload, not the cached one"
     );
 }
-
-// ── A1. Filters must reach the wire on the interpreted path ─────────────────
 
 /// A search endpoint that maps a `genre` filter onto a `g` query parameter.
 fn wire_filtering_source(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
@@ -1167,11 +1107,6 @@ fn wire_filtering_source(svc: &kani_app::service::AppService, source_id: i64, ba
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 }
 
-// ── I2. A preference change propagates to the next eval without a restart ────
-
-// The interpreted evaluator reads `$pref:key` from a HostState rebuilt per call
-// (yaml_source.rs re-reads prefs into it each eval), so update_preferences must
-// be visible to the very next extraction on the *same* source instance.
 #[tokio::test]
 async fn a_preference_change_propagates_without_a_restart() {
     let origin = TestOrigin::start().await;
@@ -1180,8 +1115,6 @@ async fn a_preference_change_propagates_without_a_restart() {
         Response::html(r#"<html><body><div class="item" data-id="m1"></div></body></html>"#),
     );
 
-    // Title is read straight from the `region` preference so a change is visible
-    // in the extracted output.
     let popular = ValidatedEndpoint {
         route: "/popular".into(),
         container: ".item".into(),
@@ -1229,7 +1162,6 @@ async fn a_preference_change_propagates_without_a_restart() {
     let first = source.get_popular_manga(1, 50, &[]).await.unwrap();
     assert_eq!(first.manga[0].title, "US", "the initial preference is used");
 
-    // Change the preference on the running instance — no rebuild.
     source.update_preferences(HashMap::from([("region".to_string(), "JP".to_string())]));
 
     let second = source.get_popular_manga(1, 50, &[]).await.unwrap();
@@ -1239,13 +1171,6 @@ async fn a_preference_change_propagates_without_a_restart() {
     );
 }
 
-// ── I1. A preference reaches the next request's headers ──────────────────────
-
-// For a YAML source, `$pref:` only resolves inside the extraction DSL — it never
-// touches the plain route/query/header path. Getting a preference onto the wire
-// is therefore a `pre_request` hook's job. This proves the whole chain: the hook
-// reads the pref, sets a header, the header arrives at the origin — and after
-// `update_preferences` the *next* request carries the new value.
 #[tokio::test]
 async fn a_preference_change_reaches_the_next_request() {
     let origin = TestOrigin::start().await;
@@ -1293,8 +1218,6 @@ async fn a_preference_change_reaches_the_next_request() {
         "the pre_request hook put the preference on the wire"
     );
 
-    // Change the preference on the running source — the next request must carry
-    // the new value, with no rebuild.
     source.update_preferences(HashMap::from([("region".to_string(), "JP".to_string())]));
     source.get_popular_manga(1, 20, &[]).await.unwrap();
 
@@ -1308,8 +1231,6 @@ async fn a_preference_change_reaches_the_next_request() {
     );
     assert_eq!(origin.hits("/popular"), 2, "both requests were real");
 }
-
-// ── I4. A sort option maps into the request via the SortPair format ──────────
 
 /// A search endpoint whose `sort` filter is a SortPair: the sort field goes
 /// into a templated key and the direction into its own parameter.
@@ -1328,7 +1249,6 @@ fn wire_sorting_source(svc: &kani_app::service::AppService, source_id: i64, base
         "sort".to_string(),
         FilterMappingEntry::SortPair {
             kind: SortPairKind::SortPair,
-            // Bracket-free so the query key isn't percent-encoded on the wire.
             key_template: "sort_{}".into(),
             direction_param: Some("dir".into()),
         },
@@ -1355,8 +1275,6 @@ fn wire_sorting_source(svc: &kani_app::service::AppService, source_id: i64, base
     svc.sources
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 }
-
-// ── I3 / I5. A fetched option set populates (or degrades) the filter panel ──
 
 /// Register a source with a `genre` select filter whose options are fetched from
 /// `{origin}/genres` (a JSON array of `{name,value}`).
@@ -1419,8 +1337,6 @@ async fn wire_fetched_options_source(
     svc.sources
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 
-    // inject_fetched_options reads base_url + unrestricted_http from the DB row
-    // (not the in-memory config) to bound where an option-set may be fetched.
     sqlx::query("UPDATE sources SET base_url = ?, unrestricted_http = 1 WHERE id = ?")
         .bind(base_url)
         .bind(source_id)
@@ -1457,10 +1373,6 @@ async fn a_fetched_option_set_populates_the_filter_panel() {
     );
 }
 
-// I5 — a broken option-set fetch leaves that filter's options empty but does not
-// fail the whole panel: the source's other filters and the panel itself survive.
-// (Documents the deliberate graceful-degrade — a down option-set endpoint must
-// not take out the entire filter UI.)
 #[tokio::test]
 async fn a_broken_option_set_degrades_gracefully_without_failing_the_panel() {
     let origin = TestOrigin::start().await;
@@ -1496,7 +1408,6 @@ async fn a_sort_option_maps_into_the_request() {
     let source_id = insert_source(&svc.db, "sorting-source").await;
     wire_sorting_source(&svc, source_id, &origin.base());
 
-    // A `field:direction` selection is the SortPair input shape.
     let filters = vec![ActiveFilter {
         filter_name: "sort".into(),
         state: FilterState::Selection {
@@ -1625,8 +1536,6 @@ async fn an_unmapped_filter_is_ignored_rather_than_guessed_at() {
     );
 }
 
-// ── A4/A5. A degenerate migration target must not delete downloads ───────────
-
 /// A source with the manga_details + chapter_list endpoints a migration target
 /// needs. The chapter listing is scriptable so a test can make it degenerate.
 fn wire_migration_target(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
@@ -1726,7 +1635,6 @@ async fn seed_migration_scenario(
     let home_source = insert_source(&svc.db, "home-source").await;
     let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
 
-    // One downloaded chapter with a real CBZ on disk.
     let pages = vec![jpeg_page(800, 1200, false, 80); 2];
     let held = held_chapter_with_pages(svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
     let cbz = svc.chapter_cbz_path(held).await.unwrap().path;
@@ -1777,7 +1685,6 @@ async fn an_empty_target_listing_does_not_delete_downloads() {
 async fn a_target_whose_numbers_do_not_parse_does_not_delete_downloads() {
     let origin = TestOrigin::start().await;
     let svc = test_service().await;
-    // Chapter numbers as strings collapse to 0.0 and match nothing.
     let (manga, target, cbz) = seed_migration_scenario(
         &origin,
         &svc,
@@ -1797,7 +1704,6 @@ async fn a_target_whose_numbers_do_not_parse_does_not_delete_downloads() {
 async fn a_migration_that_matches_is_still_allowed() {
     let origin = TestOrigin::start().await;
     let svc = test_service().await;
-    // The target genuinely carries chapter 1 — a real, matching migration.
     let (manga, target, _cbz) = seed_migration_scenario(
         &origin,
         &svc,
@@ -1814,12 +1720,6 @@ async fn a_migration_that_matches_is_still_allowed() {
     );
 }
 
-// ── K10. A captured manifest survives the migration rename ───────────────────
-
-// Migration is the one flow that moves files on disk: a differently-titled
-// target renames the manga directory, so every stored `file_path` has to follow
-// or the manifest points at nothing. Driven with a manifest captured from a real
-// CBZ (`record_chapter_manifest`) rather than a hand-written row.
 #[tokio::test]
 async fn a_manifest_survives_the_migration_rename() {
     let origin = TestOrigin::start().await;
@@ -1841,7 +1741,6 @@ async fn a_manifest_survives_the_migration_rename() {
 
     let target_source = insert_source(&svc.db, "target-source").await;
     wire_migration_target(&svc, target_source, &origin.base());
-    // The target calls the series something else, which forces the rename.
     origin.set(
         "/target/tgt-1",
         Response::json(r#"{"manga":[{"id":"tgt-1","title":"Renamed Series"}]}"#),
@@ -1872,13 +1771,6 @@ async fn a_manifest_survives_the_migration_rename() {
     );
 }
 
-// ── J3. A truncated target listing must not orphan the remainder ─────────────
-
-// `fetch_all_chapter_pages` stops at a 500-page ceiling. It used to return that
-// partial listing as if it were complete, so migration treated every chapter it
-// had simply never fetched as absent from the target — and deleted its
-// download. Same family as A4/A5: never destroy data on the strength of a
-// listing you know is incomplete.
 #[tokio::test]
 async fn a_partial_target_listing_does_not_orphan_the_remainder() {
     let origin = TestOrigin::start().await;
@@ -1887,16 +1779,12 @@ async fn a_partial_target_listing_does_not_orphan_the_remainder() {
     let home_source = insert_source(&svc.db, "home-source").await;
     let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
     let pages = vec![jpeg_page(400, 600, false, 80); 1];
-    // Chapter 1 matches the target; chapter 2 is downloaded and never appears in
-    // the truncated listing.
     held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
     let orphan = held_chapter_with_pages(&svc, manga, "Held Series", "ch-2", 2.0, &pages).await;
     let orphan_cbz = svc.chapter_cbz_path(orphan).await.unwrap().path;
     assert!(orphan_cbz.exists());
 
     let target_source = insert_source(&svc.db, "target-source").await;
-    // A target that always claims another page — the listing can only ever be
-    // truncated at the ceiling.
     wire_endless_migration_target(&svc, target_source, &origin.base());
     origin.set(
         "/target/tgt-1",
@@ -1924,8 +1812,6 @@ async fn a_partial_target_listing_does_not_orphan_the_remainder() {
         "the download survives a truncated listing"
     );
 
-    // And the user can still proceed deliberately: keeping orphaned downloads
-    // removes the risk the guard exists to prevent.
     svc.migrate_manga(manga, target_source, "tgt-1".into(), true)
         .await
         .expect("keep-orphaned migration is still allowed");
@@ -1935,14 +1821,6 @@ async fn a_partial_target_listing_does_not_orphan_the_remainder() {
     );
 }
 
-// ── J5. A failed migration must not have already destroyed downloads ─────────
-
-// Orphaned CBZs were deleted *before* `tx.commit()`. If the transaction then
-// failed, the database rolled back but the files were already gone — permanent
-// data loss with no record of it. The failure here is realistic: a target
-// listing that reuses one id across two chapter numbers makes both matched rows
-// UPDATE to the same `source_chapter_id`, violating UNIQUE(manga_id,
-// source_chapter_id) partway through the transaction.
 #[tokio::test]
 async fn a_failed_migration_does_not_delete_downloads_before_committing() {
     let origin = TestOrigin::start().await;
@@ -1952,8 +1830,6 @@ async fn a_failed_migration_does_not_delete_downloads_before_committing() {
     let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
     let pages = vec![jpeg_page(400, 600, false, 80); 1];
 
-    // Chapters 1 and 2 will match the target; chapter 3 has no match, so it
-    // orphans and its download is what the old code deleted up front.
     held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
     held_chapter_with_pages(&svc, manga, "Held Series", "ch-2", 2.0, &pages).await;
     let orphan = held_chapter_with_pages(&svc, manga, "Held Series", "ch-3", 3.0, &pages).await;
@@ -1966,7 +1842,6 @@ async fn a_failed_migration_does_not_delete_downloads_before_committing() {
         "/target/tgt-1",
         Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
     );
-    // Both target chapters carry the SAME id — the collision that fails the tx.
     origin.set(
         "/target/tgt-1/chapters",
         Response::json(r#"{"chapters":[{"id":"dup","number":1},{"id":"dup","number":2}]}"#),
@@ -1987,10 +1862,6 @@ async fn a_failed_migration_does_not_delete_downloads_before_committing() {
     );
 }
 
-// The other half of J5: a migration that *succeeds* must still delete the
-// orphaned downloads. Without this, moving the deletion after `tx.commit()`
-// could have dropped the cleanup entirely and every existing test would still
-// have passed.
 #[tokio::test]
 async fn a_successful_migration_deletes_orphaned_downloads() {
     let origin = TestOrigin::start().await;
@@ -2011,7 +1882,6 @@ async fn a_successful_migration_deletes_orphaned_downloads() {
         "/target/tgt-1",
         Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
     );
-    // The target carries chapter 1 only, so chapter 2 orphans.
     origin.set(
         "/target/tgt-1/chapters",
         Response::json(r#"{"chapters":[{"id":"t-1","number":1}]}"#),
@@ -2027,14 +1897,10 @@ async fn a_successful_migration_deletes_orphaned_downloads() {
     );
 }
 
-// ── J1. Chapters are matched by number across sources ────────────────────────
-
 #[tokio::test]
 async fn migration_matches_chapters_by_number_across_sources() {
     let origin = TestOrigin::start().await;
     let svc = test_service().await;
-    // The target carries number 1 (as "t-1") and number 2 ("t-2"); the held
-    // chapter is number 1.0.
     let (manga, target, _cbz) = seed_migration_scenario(
         &origin,
         &svc,
@@ -2046,7 +1912,6 @@ async fn migration_matches_chapters_by_number_across_sources() {
         .await
         .unwrap();
 
-    // The series now belongs to the target source.
     let src: i64 = sqlx::query_scalar("SELECT source_id FROM manga WHERE id = ?")
         .bind(manga)
         .fetch_one(&svc.db)
@@ -2057,8 +1922,6 @@ async fn migration_matches_chapters_by_number_across_sources() {
         "the manga's source pointer moved to the target"
     );
 
-    // The held chapter (number 1.0) was matched to the target's number-1 chapter
-    // — same DB row, source_chapter_id remapped to the target's id.
     let scid: String = sqlx::query_scalar(
         "SELECT source_chapter_id FROM chapters WHERE manga_id = ? AND chapter_number = 1.0",
     )
@@ -2072,15 +1935,10 @@ async fn migration_matches_chapters_by_number_across_sources() {
     );
 }
 
-// ── J2. keep_orphaned_downloads = true preserves files on the safe branch ────
-
 #[tokio::test]
 async fn keep_orphaned_downloads_true_preserves_files() {
     let origin = TestOrigin::start().await;
     let svc = test_service().await;
-    // A target that matches nothing (empty listing) — refused with
-    // keep_orphaned=false (A4). With keep_orphaned=true the user accepts it and
-    // the downloaded file is preserved, the chapter kept as an orphan.
     let (manga, target, cbz) = seed_migration_scenario(&origin, &svc, r#"{"chapters":[]}"#).await;
 
     svc.migrate_manga(manga, target, "tgt-1".into(), true)
@@ -2103,8 +1961,6 @@ async fn keep_orphaned_downloads_true_preserves_files() {
     );
 }
 
-// ── J4. Reading progress survives a migration ────────────────────────────────
-
 #[tokio::test]
 async fn read_progress_survives_a_migration() {
     let origin = TestOrigin::start().await;
@@ -2117,7 +1973,6 @@ async fn read_progress_survives_a_migration() {
     .await;
     let user = common::insert_user(&svc.db, "reader").await;
 
-    // The held chapter (number 1.0) has read progress at page 5.
     let held: i64 =
         sqlx::query_scalar("SELECT id FROM chapters WHERE manga_id = ? AND chapter_number = 1.0")
             .bind(manga)
@@ -2138,7 +1993,6 @@ async fn read_progress_survives_a_migration() {
         .await
         .unwrap();
 
-    // The matched chapter keeps its row id, so its progress is untouched.
     let page: Option<i64> = sqlx::query_scalar(
         "SELECT last_page_read FROM user_chapter_tracking WHERE chapter_id = ? AND user_id = ?",
     )

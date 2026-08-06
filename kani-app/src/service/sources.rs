@@ -262,10 +262,6 @@ impl AppService {
             .await?;
 
         if enabled {
-            // Re-instantiate the WASM module and insert it into the in-memory sources
-            // map. Without this, re-enabling a source that was disabled before (or across
-            // a restart) would result in "Source {id} not found" errors for all requests
-            // because the map is only populated at startup for enabled sources.
             let source = sqlx::query!(
                 "SELECT name, base_url, unrestricted_http FROM sources WHERE id = ? AND deleted_at IS NULL",
                 id
@@ -276,11 +272,6 @@ impl AppService {
 
             let wasm_storage_path = self.settings.read().await.wasm_storage_path.clone();
 
-            // Interpreted-YAML sources have no `.wasm` file. Re-enabling one used
-            // to fall straight into the WASM path below, fail to read a
-            // nonexistent `{name}.wasm`, and leave the registry empty — so every
-            // later call reported "Source not found". Rebuild the YAML backend
-            // the same way startup does.
             let yaml_path = wasm_storage_path.join(format!("{}.yaml", source.name));
             if yaml_path.exists() {
                 let text = tokio::fs::read_to_string(&yaml_path)
@@ -373,8 +364,6 @@ impl AppService {
 
             self.sources.insert(id, backend);
         } else {
-            // Remove from the in-memory map immediately so in-flight requests fail fast
-            // rather than operating on a disabled source.
             if let Ok(base_url) = self.get_source_base_url(id).await
                 && let Some(domain) = base_url
                     .parse::<rquest::Url>()
@@ -544,10 +533,6 @@ impl AppService {
         mut filter_list: kani_core::WitFilterList,
         defs: &[kani_shared::FilterFetchDef],
     ) -> kani_core::WitFilterList {
-        // The source's own HTTP policy governs where an option-set may be
-        // fetched from — a fetched-option def must not escape the source's host
-        // (unless the source is unrestricted). Missing/failed lookup → treat as
-        // the safe default (restricted, empty base) so a bad def can't reach out.
         let (base_url, unrestricted_http) = sqlx::query!(
             "SELECT base_url, unrestricted_http AS \"unrestricted_http: bool\" \
              FROM sources WHERE id = ?",
@@ -764,10 +749,9 @@ impl AppService {
                 let source_name = source_name.clone();
 
                 tokio::spawn(async move {
-                    // One unresponsive source must not hold the whole aggregate
-                    // hostage for the client's full timeout. Every other source
-                    // has already answered; this one reports as failed and the
-                    // results ship.
+                    // One unresponsive source must not hold the whole aggregate hostage for the
+                    // client's full timeout. Every other source has already answered; this one
+                    // reports as failed and the results ship.
                     let result = match tokio::time::timeout(
                         per_source_timeout,
                         state.search_manga(source_id, &q, page, page_size, None),
@@ -849,9 +833,7 @@ impl AppService {
 
     /// Records health for a call whose result we already have.
     ///
-    /// Only `get_metadata` and `get_filter_list` used to do this, so the health
-    /// panel was blind to search, page fetches and chapter listings — the paths
-    /// users actually exercise and the ones that actually break.
+    /// All source operations must report through this path to keep health complete.
     pub(crate) async fn record_source_call<T>(
         &self,
         source_id: i64,
@@ -1522,10 +1504,6 @@ mod tests {
         );
     }
 
-    // Group G — a failed fetch must not be cached as a (successful) result. A
-    // poisoned cache would serve the failure/empty on the next call instead of
-    // re-fetching once the origin recovers. Driven with a 500 from a TestOrigin
-    // (fast, non-retryable) rather than an unresolvable host.
     #[tokio::test]
     async fn a_failed_option_set_fetch_does_not_write_the_cache() {
         use kani_shared_test::origin::{Response, TestOrigin};
@@ -1545,10 +1523,6 @@ mod tests {
         );
     }
 
-    // G2 — a declared option-set cache TTL is honoured end-to-end: within the
-    // TTL the cached values are served without re-hitting the origin; once it
-    // elapses the entry expires and the next resolve re-fetches. Driven through
-    // resolve_option_set with a 1s TTL against a TestOrigin.
     #[tokio::test]
     async fn a_declared_option_set_cache_ttl_is_honoured() {
         use kani_shared_test::origin::{Response, TestOrigin};
@@ -1564,12 +1538,10 @@ mod tests {
         def.route = origin.url("/genres");
         def.cache_ttl = 1;
 
-        // First resolve fetches and populates the cache.
         let first = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
         assert_eq!(first.expect("first fetch succeeds").len(), 1);
         assert_eq!(origin.hits("/genres"), 1);
 
-        // Within the TTL: served from cache, no new origin hit.
         let cached = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
         assert_eq!(cached.expect("cache hit").len(), 1);
         assert_eq!(
@@ -1578,7 +1550,6 @@ mod tests {
             "within the declared TTL the cache is honoured, no re-fetch"
         );
 
-        // Past the TTL: the entry expires and the next resolve re-fetches.
         tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
         let refetched = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
         assert_eq!(refetched.expect("re-fetch succeeds").len(), 1);

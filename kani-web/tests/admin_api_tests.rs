@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for /rest/admin/* endpoints: user CRUD, role grant/revoke, audit log.
 
 mod common;
 use axum::http::StatusCode;
@@ -111,7 +110,6 @@ async fn admin_create_user_returns_400_for_short_password() {
         .await
         .unwrap();
 
-    // Password < 8 chars → 400 ValidationError.
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -127,7 +125,6 @@ async fn admin_audit_log_returns_200_for_admin() {
         .await
         .unwrap();
 
-    // Audit log always returns 200 (may be empty or contain login events).
     assert_eq!(res.status(), StatusCode::OK);
 }
 
@@ -162,10 +159,6 @@ async fn admin_audit_log_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── Last-admin protection ─────────────────────────────────────────────────────
-
-/// When there is only one admin, that admin must not be able to revoke their own
-/// admin role — doing so would lock everyone out.
 #[tokio::test]
 async fn admin_revoke_last_admin_role_returns_400() {
     let state = test_state().await;
@@ -173,7 +166,6 @@ async fn admin_revoke_last_admin_role_returns_400() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // Get own user ID.
     let users_res = app
         .clone()
         .oneshot(authed_get("/rest/admin/users", &cookie))
@@ -187,7 +179,6 @@ async fn admin_revoke_last_admin_role_returns_400() {
         .as_i64()
         .unwrap();
 
-    // Try to revoke the admin role from the only admin.
     let res = app
         .oneshot(authed_delete(
             &format!("/rest/admin/users/{admin_id}/roles/admin"),
@@ -201,13 +192,11 @@ async fn admin_revoke_last_admin_role_returns_400() {
     assert_eq!(body["code"], serde_json::json!("validation_error"));
 }
 
-/// When two admins exist, revoking the admin role from one should succeed.
 #[tokio::test]
 async fn admin_revoke_admin_role_succeeds_with_multiple_admins() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
 
-    // Create a second admin directly through the backend.
     let backend = kani_web::auth::AuthBackend::new(state.db.clone());
     let second = backend
         .create_user("admin2", "admin2@test.local", "Password1234!")
@@ -218,7 +207,6 @@ async fn admin_revoke_admin_role_succeeds_with_multiple_admins() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // Revoke admin from the second admin — should be allowed (two admins exist).
     let res = app
         .oneshot(authed_delete(
             &format!("/rest/admin/users/{}/roles/admin", second.id),
@@ -230,22 +218,17 @@ async fn admin_revoke_admin_role_succeeds_with_multiple_admins() {
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }
 
-/// After revoking the admin role from a second admin, the sole remaining admin
-/// must not be able to revoke their own admin role.
 #[tokio::test]
 async fn admin_revoke_own_admin_role_blocked_after_second_admin_demoted() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
 
-    // Create second admin then immediately strip their role via direct DB call
-    // (simulating the state after a legitimate demotion through the API).
     let backend = kani_web::auth::AuthBackend::new(state.db.clone());
     let second = backend
         .create_user("admin2", "admin2@test.local", "Password1234!")
         .await
         .unwrap();
     backend.grant_role(second.id, "admin", None).await.unwrap();
-    // Revoke second admin's role directly (bypassing guard) to leave only one admin.
     sqlx::query!(
         "DELETE FROM user_roles WHERE user_id = ? AND role_slug = 'admin'",
         second.id
@@ -257,7 +240,6 @@ async fn admin_revoke_own_admin_role_blocked_after_second_admin_demoted() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // Get own ID.
     let users_res = app
         .clone()
         .oneshot(authed_get("/rest/admin/users", &cookie))
@@ -268,7 +250,6 @@ async fn admin_revoke_own_admin_role_blocked_after_second_admin_demoted() {
         .as_i64()
         .unwrap();
 
-    // Now the sole admin tries to revoke their own admin role — must be blocked.
     let res = app
         .oneshot(authed_delete(
             &format!("/rest/admin/users/{admin_id}/roles/admin"),
@@ -282,7 +263,6 @@ async fn admin_revoke_own_admin_role_blocked_after_second_admin_demoted() {
     assert_eq!(body["code"], serde_json::json!("validation_error"));
 }
 
-/// Deleting one admin when two exist is allowed.
 #[tokio::test]
 async fn admin_delete_second_admin_succeeds() {
     let state = test_state().await;
@@ -298,7 +278,6 @@ async fn admin_delete_second_admin_succeeds() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // Delete the second admin — should succeed (two admins, so one remains).
     let res = app
         .oneshot(authed_delete(
             &format!("/rest/admin/users/{}", second.id),
@@ -309,8 +288,6 @@ async fn admin_delete_second_admin_succeeds() {
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }
-
-// ── Source circuit-breaker endpoints ─────────────────────────────────────────
 
 #[tokio::test]
 async fn list_source_circuits_returns_200_for_admin() {
@@ -411,14 +388,11 @@ async fn reset_source_circuit_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
-/// A user with `user:manage` permission (but without the admin role) must not
-/// be able to delete the only admin, as that would create a lockout.
 #[tokio::test]
 async fn admin_delete_last_admin_returns_400_for_manager_user() {
     let state = test_state().await;
     let (admin_username, _admin_password) = create_admin(&state).await;
 
-    // Create a custom role with user:manage permission but without the admin role.
     sqlx::query!("INSERT INTO roles (slug, parent) VALUES ('manager', null)")
         .execute(&state.db)
         .await
@@ -443,7 +417,6 @@ async fn admin_delete_last_admin_returns_400_for_manager_user() {
     let app = build_test_app(state.clone()).await;
     let manager_cookie = login(&app, "manager_user", "Password1234!").await;
 
-    // Get the admin's user ID.
     let users_res = app
         .clone()
         .oneshot(authed_get("/rest/admin/users", &manager_cookie))
@@ -457,7 +430,6 @@ async fn admin_delete_last_admin_returns_400_for_manager_user() {
         .as_i64()
         .unwrap();
 
-    // Manager tries to delete the only admin — must be blocked.
     let res = app
         .oneshot(authed_delete(
             &format!("/rest/admin/users/{admin_id}"),

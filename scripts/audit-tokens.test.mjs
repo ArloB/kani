@@ -1,8 +1,3 @@
-// Ported from kani-cli/tests/audit_tokens_tests.rs when the scan moved out of
-// Rust. Runs against the same fixture, so the assertions still describe the
-// same behaviour rather than a re-specification of it.
-//
-//   node --test scripts/audit-tokens.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,8 +56,6 @@ test('without --check it reports but does not fail', () => {
 });
 
 test('a line-level audit-ignore opts that line out', () => {
-  // The fixture's ignored line carries a literal that would otherwise be
-  // flagged; if the directive stopped working the count above would change.
   const literals = literalsOf(run([]).out);
   assert.equal(literals.length, 5);
 });

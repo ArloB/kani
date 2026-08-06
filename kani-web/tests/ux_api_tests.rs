@@ -6,8 +6,6 @@ use kani_shared_test::{insert_manga, insert_source};
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── POST /rest/library/scan-all — converged job_id return ────────────────────
-
 #[tokio::test]
 async fn scan_all_library_returns_job_id() {
     let state = common::test_state().await;
@@ -45,8 +43,6 @@ async fn scan_all_library_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── POST /rest/manga/:id/refresh — converged job_id return ───────────────────
 
 #[tokio::test]
 async fn refresh_manga_returns_job_id() {
@@ -109,8 +105,6 @@ async fn refresh_manga_returns_404_for_missing_manga() {
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
-
-// ── POST /rest/manga/untrash — hardened undo token ───────────────────────────
 
 #[tokio::test]
 async fn untrash_by_token_returns_401_without_auth() {
@@ -206,7 +200,6 @@ async fn untrash_by_token_round_trip_restores_manga() {
     let cookie = common::login(&app, "admin", "Password1234!").await;
     let app = common::build_test_app(state).await;
 
-    // Soft-delete the manga; response must include undo_token.
     let del = app
         .clone()
         .oneshot(common::authed_delete(
@@ -223,7 +216,6 @@ async fn untrash_by_token_round_trip_restores_manga() {
         .expect("delete must return an undo_token")
         .to_string();
 
-    // Restore via the opaque token.
     let restore = app
         .oneshot(common::authed_post(
             "/rest/manga/untrash",
@@ -263,7 +255,6 @@ async fn notify_prefs_lists_only_the_muted_manga() {
     let app = common::build_test_app(state).await;
     let cookie = common::login(&app, u, p).await;
 
-    // Mute the first, explicitly un-mute the second.
     for (id, notify) in [(ids[0], false), (ids[1], true)] {
         let res = app
             .clone()

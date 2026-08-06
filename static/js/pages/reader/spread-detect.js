@@ -43,7 +43,6 @@ export function spreadPairVerdict(a, b, { hasServerAnalysis = false, isServerDou
     return 'pair';
   }
 
-  // Either page already landscape → not a portrait spread pair.
   if (a.w >= a.h * 0.95 || b.w >= b.h * 0.95) return 'not-pair';
   const ratio = (a.w + b.w) / Math.max(a.h, b.h);
   if (ratio < WIDE_RATIO || ratio > 2.5) return 'not-pair';

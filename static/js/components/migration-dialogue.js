@@ -1,5 +1,4 @@
 // @ts-check
-// Migration dialogue — multi-step manga source migration flow.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -57,7 +56,6 @@ export function MigrationDialogue({
   // holding a setState on an unmounted tree.
   useEffect(() => () => unsubscribeRef.current?.(), []);
 
-  // Auto-search when query/scope changes
   useEffect(() => {
     if (!query.trim()) { setSearchResults([]); return; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -72,7 +70,6 @@ export function MigrationDialogue({
     setSearchError(null);
     try {
       const res = await api.globalSearch(query, scope, 1, 20, abortRef.current.signal);
-      // globalSearch returns GlobalSearchResult[] — already grouped by source
       const grouped = Array.isArray(res?.results) ? res.results
         : Array.isArray(res)                       ? res
         : [];
@@ -139,7 +136,6 @@ export function MigrationDialogue({
     }
   }
 
-  // searchResults is GlobalSearchResult[] — each element is already a source group
   /** @type {Map<string, { sourceName: string, sourceId: number, items: any[] }>} */
   const bySource = new Map();
   for (const sourceResult of searchResults) {

@@ -28,8 +28,6 @@ use kani_yaml::yaml::model::{
 };
 use kani_yaml::yaml::schema::ResponseType;
 
-// ── Shared HTML contract (identical selectors to the fixture extension) ────────
-
 const POPULAR_HTML: &str = r#"<html><body>
     <div class="item" data-id="manga-1"><span class="title">First</span></div>
     <div class="item" data-id="manga-2"><span class="title">Second</span></div>
@@ -60,8 +58,6 @@ fn seed_happy_path(origin: &TestOrigin) {
     origin.set("/manga/manga-1/chapters", Response::html(CHAPTERS_HTML));
     origin.set("/manga/manga-1/chapter/ch-1", Response::html(PAGES_HTML));
 }
-
-// ── Backend builders ──────────────────────────────────────────────────────────
 
 fn fixture_wasm_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -104,7 +100,7 @@ fn wasm_backend_with_client(origin_base: &str, client: SmartClient) -> Option<So
         instance_pre,
         client,
         None,
-        true, // unrestricted_http → reach loopback
+        true,
         false,
         prefs,
         Arc::new(InMemoryCache::new()),
@@ -219,8 +215,6 @@ fn yaml_backend(origin_base: &str) -> SourceBackend {
     )
 }
 
-// ── Parity: happy paths ───────────────────────────────────────────────────────
-
 macro_rules! wasm_or_skip {
     ($origin:expr) => {
         match wasm_backend(&$origin.base()) {
@@ -323,12 +317,6 @@ async fn pages_parity() {
     assert_eq!(w.pages[0].url, "https://cdn.example.com/p1.jpg");
 }
 
-// ── Parity: error kinds ───────────────────────────────────────────────────────
-//
-// A15 made the interpreted-YAML backend report typed HTTP error kinds. The
-// compiled-WASM backend must not silently diverge back to a bare parse error —
-// the evaluator's `__http_status__:` sentinel has to survive the guest boundary.
-
 fn err_kind<T: std::fmt::Debug>(r: kani_core::error::Result<T>) -> ExtensionErrorKind {
     match r {
         Err(kani_core::error::Error::Extension(e)) => e.kind,
@@ -369,18 +357,12 @@ async fn error_404_is_empty_in_both_backends() {
     let wasm = wasm_or_skip!(origin);
     let yaml = yaml_backend(&origin.base());
 
-    // 404 is deliberately not a typed HTTP error — the body is extracted and
-    // yields an empty list. Both backends must agree on that.
     let w = wasm.get_popular_manga(1, 20, &[]).await.unwrap();
     let y = yaml.get_popular_manga(1, 20, &[]).await.unwrap();
     assert!(w.manga.is_empty());
     assert!(y.manga.is_empty());
 }
 
-// ── Group O — the WASM path against a live origin ────────────────────────────
-
-// O2 — the compiled guest builds the request it declared: a search issues a GET
-// to /search carrying the query the guest assembled, verified on the wire.
 #[tokio::test]
 async fn a_wasm_source_builds_the_request_it_declared() {
     let origin = TestOrigin::start().await;
@@ -401,9 +383,6 @@ async fn a_wasm_source_builds_the_request_it_declared() {
     );
 }
 
-// O3 — a preference change reaches a running WASM instance: the fixture reads
-// its origin from the `base_url` preference on every call, so updating that
-// preference redirects the very next call, no re-instantiation.
 #[tokio::test]
 async fn a_preference_change_reaches_a_running_wasm_instance() {
     let first = TestOrigin::start().await;
@@ -416,7 +395,6 @@ async fn a_preference_change_reaches_a_running_wasm_instance() {
     assert_eq!(first.hits("/popular"), 1);
     assert_eq!(second.hits("/popular"), 0);
 
-    // Point the running instance at the second origin via a preference update.
     wasm.update_preferences(HashMap::from([("base_url".to_string(), second.base())]));
     wasm.get_popular_manga(1, 20, &[]).await.unwrap();
 
@@ -427,10 +405,6 @@ async fn a_preference_change_reaches_a_running_wasm_instance() {
     );
 }
 
-// O1 — the compiled guest applies a selected filter. The WASM counterpart to A1,
-// which was a real silent-wrong bug on the interpreted path: a source can render
-// the filter panel, accept the user's selection, and then send an unfiltered
-// query. Only the wire tells you which happened.
 #[tokio::test]
 async fn a_wasm_source_applies_selected_filters() {
     use kani_shared::types::{ActiveFilter, FilterState};
@@ -439,7 +413,6 @@ async fn a_wasm_source_applies_selected_filters() {
     origin.set("/search", Response::html(SEARCH_HTML));
     let wasm = wasm_or_skip!(origin);
 
-    // The guest must advertise the filter before a client could select it.
     let (filters, _fetched_defs) = wasm.get_filter_list_with_options().await.unwrap();
     let genre = filters
         .filters
@@ -477,22 +450,11 @@ async fn a_wasm_source_applies_selected_filters() {
     );
 }
 
-// O9 — the rate limit a guest declares is honoured on the compiled path, end to
-// end: read it out of the guest's own metadata, register it exactly as
-// `service/sources.rs` does at load time, then prove it governs the requests the
-// guest actually issues.
-//
-// The registration is done here rather than by the service because the service
-// keys the limiter on the host in `metadata.base_url`, while a test necessarily
-// redirects the guest to a local origin via the `base_url` preference. Deriving
-// the config from the guest's declared metadata (never hardcoding it) keeps the
-// thing under test honest: it is the guest's own declaration that must bite.
 #[tokio::test]
 async fn a_wasm_source_honours_its_declared_rate_limit() {
     let origin = TestOrigin::start().await;
     origin.set("/popular", Response::html(POPULAR_HTML));
 
-    // 1. What does the guest declare? (Also proves the limit survives the ABI.)
     let probe = wasm_or_skip!(origin);
     let raw = probe.get_metadata().await.unwrap();
     let meta: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -504,7 +466,6 @@ async fn a_wasm_source_honours_its_declared_rate_limit() {
         "declared limit must be usable, got {declared:?}"
     );
 
-    // 2. Register it the way the loader does, against the host the guest calls.
     let host = origin
         .base()
         .parse::<rquest::Url>()
@@ -519,8 +480,6 @@ async fn a_wasm_source_honours_its_declared_rate_limit() {
         None => return,
     };
 
-    // 3. Enough calls that the declared rate makes a measurable floor: with
-    //    burst `b` and `r` per second, `n` calls cost at least (n - b) / r.
     let calls = 6u32;
     let floor = std::time::Duration::from_secs_f32(
         (calls.saturating_sub(declared.burst) as f32 / declared.requests_per_second) * 0.8,
@@ -545,16 +504,9 @@ async fn a_wasm_source_honours_its_declared_rate_limit() {
     );
 }
 
-// O7 — a call already in flight completes across a hot swap. This is the
-// integration half of the lease coordinator that `kani-lease` proves under loom:
-// `drain()` must wait for the outstanding lease rather than tearing the instance
-// out from under a running call. A regression here surfaces as a request that
-// dies mid-flight whenever a source is reloaded — exactly when the user is
-// least able to explain it.
 #[tokio::test]
 async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
     let origin = TestOrigin::start().await;
-    // Slow enough that the drain necessarily begins while the call is running.
     origin.set(
         "/popular",
         Response::html(POPULAR_HTML).delay(std::time::Duration::from_millis(300)),
@@ -562,7 +514,6 @@ async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
 
     let backend = std::sync::Arc::new(wasm_or_skip!(origin));
 
-    // Start the call, then begin draining while it is still outstanding.
     let calling = {
         let b = std::sync::Arc::clone(&backend);
         tokio::spawn(async move { b.get_popular_manga(1, 20, &[]).await })
@@ -587,14 +538,11 @@ async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
         "and return its real results, not a truncated set"
     );
 
-    // The drain must have observed the lease and waited it out rather than
-    // timing out, so it finishes promptly once the call lets go.
     tokio::time::timeout(std::time::Duration::from_secs(5), drained)
         .await
         .expect("drain must finish once the in-flight lease is released")
         .unwrap();
 
-    // And once drained, the instance refuses new leases — the swap can proceed.
     let after = backend.get_popular_manga(1, 20, &[]).await;
     assert!(
         after.is_err(),
@@ -602,10 +550,6 @@ async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
     );
 }
 
-// O8 — the per-call HTTP budget is charged identically on both backends. The
-// interpreted side is covered by `io_budget_tests`; this proves the compiled
-// guest is held to the same 32-request cap rather than being able to fan out
-// without limit through the host ABI.
 #[tokio::test]
 async fn the_io_budget_is_charged_identically_on_both_backends() {
     let origin = TestOrigin::start().await;
@@ -617,35 +561,26 @@ async fn the_io_budget_is_charged_identically_on_both_backends() {
     }
     let wasm = wasm_or_skip!(origin);
 
-    // Comfortably inside the cap: the guest fans out and succeeds.
     wasm.search_manga("__fanout__:10", 1, 20, &[])
         .await
         .expect("10 sub-fetches are within the per-call budget");
 
-    // Past the cap: the host must stop it, exactly as it stops a YAML source.
     let over = wasm.search_manga("__fanout__:40", 1, 20, &[]).await;
     assert!(
         over.is_err(),
         "40 sub-fetches in one call must exceed the budget on the compiled path too"
     );
 
-    // And the budget is per call, not cumulative: a fresh call still works.
     wasm.search_manga("__fanout__:10", 1, 20, &[])
         .await
         .expect("the budget resets per call on the compiled path");
 }
 
-// O10 — a composite id survives the round trip: the host hands the guest an
-// encoded id, the guest decodes it and builds the request its parts describe.
-// A break here sends every detail request to the wrong URL while still looking
-// like a valid id everywhere it is displayed.
 #[tokio::test]
 async fn composite_id_encoding_round_trips_through_a_live_call() {
     use base64::Engine as _;
 
     let origin = TestOrigin::start().await;
-    // The id encodes series=berserk, volume=12 — only a correct decode reaches
-    // this route.
     origin.set(
         "/series/berserk/vol/12",
         Response::html(r#"<div class="manga" data-id="berserk"><h1>Berserk Vol. 12</h1></div>"#),

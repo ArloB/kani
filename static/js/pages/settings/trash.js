@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Trash: list trashed manga, restore, or permanently purge.
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

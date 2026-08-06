@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{error::CliError, signing};
 
 #[derive(Debug, Serialize, Deserialize, Default)]
+/// Signed repository index written as `index.json`.
 pub struct RepoIndex {
     pub name: String,
     pub maintainer_key: String,
@@ -13,6 +14,7 @@ pub struct RepoIndex {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+/// One installable extension artifact and its integrity/signature metadata.
 pub struct RepoEntry {
     pub id: String,
     pub name: String,

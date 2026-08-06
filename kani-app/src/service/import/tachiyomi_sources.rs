@@ -16,6 +16,6 @@ pub fn tachiyomi_sync_id_to_tracker_name(sync_id: i32) -> Option<&'static str> {
     match sync_id {
         1 => Some("MyAnimeList"),
         2 => Some("AniList"),
-        _ => None, // 3=Kitsu, 6=MangaUpdates, 8=Kitsu, 14=Shikimori — not in Kani
+        _ => None,
     }
 }

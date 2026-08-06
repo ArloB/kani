@@ -1,13 +1,11 @@
+//! ComicInfo XML serialization and spread-metadata parsing for CBZ archives.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 fn is_false(b: &bool) -> bool {
     !b
 }
-
-// ---------------------------------------------------------------------------
-// Serialisation types (write path — creating ComicInfo.xml inside CBZ)
-// ---------------------------------------------------------------------------
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename = "Page")]
@@ -84,10 +82,6 @@ pub fn build_xml(info: &ComicInfo) -> crate::error::Result<String> {
     Ok(buf)
 }
 
-// ---------------------------------------------------------------------------
-// Deserialisation types (read path — parsing ComicInfo.xml from existing CBZ)
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Debug)]
 struct ParsedComicPage {
     #[serde(rename = "@Image")]
@@ -107,10 +101,6 @@ struct ParsedComicInfo {
     #[serde(rename = "Pages")]
     pages: Option<ParsedComicPages>,
 }
-
-// ---------------------------------------------------------------------------
-// Public helpers
-// ---------------------------------------------------------------------------
 
 /// Returns `true` if the XML string contains a `<Pages>` element with at
 /// least one `<Page>` child — i.e., spread metadata has already been written.
@@ -203,8 +193,6 @@ mod tests {
             ..minimal()
         };
         let xml = build_xml(&info).unwrap();
-        // quick-xml serialises f64: 3.0 should not produce "3.0" with trailing zero fraction
-        // — accept either "3" or "3.0" as long as the chapter parses back correctly.
         assert!(xml.contains("<Number>3</Number>") || xml.contains("<Number>3.0</Number>"));
     }
 
@@ -248,10 +236,6 @@ mod tests {
         assert!(xml.contains("<Web>https://example.com</Web>"));
     }
 
-    // -----------------------------------------------------------------------
-    // Pages / spread serialisation
-    // -----------------------------------------------------------------------
-
     #[test]
     fn pages_block_absent_when_none() {
         let xml = build_xml(&minimal()).unwrap();
@@ -261,7 +245,7 @@ mod tests {
 
     #[test]
     fn double_page_attribute_omitted_when_false() {
-        let flags: HashSet<usize> = HashSet::new(); // no spreads
+        let flags: HashSet<usize> = HashSet::new();
         let info = ComicInfo {
             pages: Some(ComicPages::from_flags(3, &flags)),
             ..minimal()
@@ -281,15 +265,10 @@ mod tests {
         };
         let xml = build_xml(&info).unwrap();
         assert!(xml.contains(r#"Image="1" DoublePage="true""#));
-        // pages 0, 2, 3 must not have DoublePage
         assert!(!xml.contains(r#"Image="0" DoublePage"#));
         assert!(!xml.contains(r#"Image="2" DoublePage"#));
         assert!(!xml.contains(r#"Image="3" DoublePage"#));
     }
-
-    // -----------------------------------------------------------------------
-    // Parsing round-trips
-    // -----------------------------------------------------------------------
 
     #[test]
     fn parse_double_pages_returns_flagged_indices() {
@@ -299,7 +278,6 @@ mod tests {
             ..minimal()
         };
         let xml = build_xml(&info).unwrap();
-        // Strip the XML declaration before parsing (quick_xml::de may not handle it)
         let body = xml
             .strip_prefix(r#"<?xml version="1.0" encoding="utf-8"?>"#)
             .unwrap_or(&xml)
@@ -345,7 +323,6 @@ mod tests {
 
     #[test]
     fn parse_double_pages_from_external_xml() {
-        // Simulate a ComicInfo.xml produced by another tool (Komga, etc.)
         let xml = r#"<ComicInfo>
   <Series>Test</Series>
   <Pages>

@@ -1,5 +1,4 @@
 // @ts-check
-// Global app-shell header — mounted once by app.js, updated per-page via setPageHeader().
 
 import { navigate } from '../router.js';
 import { iconEllipsisVertical } from '../icons.js';

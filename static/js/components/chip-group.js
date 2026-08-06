@@ -1,5 +1,4 @@
 // @ts-check
-// Chip group — multi-select filter chips.
 
 /**
  * @typedef {{ id: string | number, label: string }} ChipItem

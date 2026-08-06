@@ -123,16 +123,6 @@ impl AppService {
 
         let new_count = unmatched_new.len();
 
-        // Guard against a degenerate target listing destroying downloads. A
-        // migration deletes the CBZs of chapters the target does not carry, on
-        // the assumption the target is an equivalent source. But a target that
-        // returns an empty listing, or one whose chapter numbers all collapse
-        // to 0.0 (e.g. the source changed to string numbers), matches nothing —
-        // so *every* existing chapter orphans and every download is deleted. A
-        // source hiccup must not cost the user their library. If the target
-        // matches none of the existing chapters yet downloads would be lost,
-        // refuse; the user can still migrate with keep-orphaned-downloads on,
-        // which preserves the files.
         if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && matched.is_empty() {
             return Err(ServiceError::Validation(format!(
                 "The target source matches none of this series' {} existing chapters, so \
@@ -142,12 +132,6 @@ impl AppService {
             )));
         }
 
-        // The same principle for a listing cut short by the page ceiling: a
-        // chapter missing from a *truncated* listing may exist on the target and
-        // simply never have been fetched. Orphaning on that basis deletes
-        // downloads over an artefact of pagination, so refuse while any download
-        // is at stake. Matching chapters still migrate once the user opts to
-        // keep the orphaned files.
         if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && listing_truncated {
             return Err(ServiceError::Validation(format!(
                 "The target source's chapter listing was cut short at the page ceiling, so \
@@ -176,11 +160,6 @@ impl AppService {
             .filter(|id| !downloaded_orphan_ids.contains(id))
             .collect();
 
-        // Resolve the paths now — the chapter rows are deleted inside the
-        // transaction below, so their names are unavailable afterwards — but do
-        // not touch the filesystem yet. Deleting before the commit meant a
-        // transaction that later failed left the database rolled back and the
-        // user's downloads already destroyed, with nothing recording the loss.
         let mut orphaned_cbz_paths: Vec<std::path::PathBuf> = Vec::new();
         if !keep_orphaned_downloads {
             for orphan_id in &downloaded_orphan_ids {
@@ -310,10 +289,9 @@ impl AppService {
             if old_path.exists() {
                 match tokio::fs::rename(&old_path, &new_path).await {
                     Ok(()) => {
-                        // Migration is the one flow that actually moves files on
-                        // disk, so stored paths have to follow. Exact-prefix
-                        // matching rather than LIKE: a manga name can contain
-                        // % or _, which LIKE would treat as wildcards.
+                        // Migration is the one flow that actually moves files on disk, so stored
+                        // paths have to follow. Exact-prefix matching rather than LIKE: a manga
+                        // name can contain % or _, which LIKE would treat as wildcards.
                         let old_prefix = format!("{old_dir_name}/");
                         let new_prefix = format!("{new_dir_name}/");
                         if let Err(e) = sqlx::query!(

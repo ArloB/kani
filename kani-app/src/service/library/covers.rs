@@ -1,8 +1,6 @@
 use super::super::*;
 use crate::ids::{MangaId, UserId};
 
-// Cover download, retry, upload and override management.
-
 impl AppService {
     /// Resize and JPEG-compress cover bytes. Used for downloaded (non-user) covers.
     fn compress_cover_bytes(bytes: &[u8], max_dim: u32) -> Vec<u8> {
@@ -140,8 +138,6 @@ impl AppService {
             .cover_max_dimension
             .unwrap_or(800) as u32;
 
-        // Resize and compress to JPEG on a blocking thread.
-        // Falls back to raw bytes if decode/encode fails so the cover is never lost.
         let final_bytes =
             tokio::task::spawn_blocking(move || Self::compress_cover_bytes(&bytes, max_dim))
                 .await
@@ -149,7 +145,6 @@ impl AppService {
                     ServiceError::Internal(format!("Cover compress task panicked: {e}"))
                 })?;
 
-        // Always store as JPEG after compression.
         let filename = format!("{}.jpg", manga_row_id);
         let cover_path = covers_dir.join(&filename);
         let relative = format!("covers/{}", filename);
@@ -244,7 +239,6 @@ impl AppService {
         content_type: &str,
         user_id: UserId,
     ) -> Result<()> {
-        // 1. Explicit SVG rejection — check both declared Content-Type and magic bytes.
         if content_type.contains("svg") || content_type.contains("xml") {
             return Err(ServiceError::Validation(
                 "SVG images are not permitted as covers".into(),
@@ -256,7 +250,6 @@ impl AppService {
             ));
         }
 
-        // 2. MIME sniffing via magic bytes — ignore the client-supplied Content-Type.
         let inferred_mime = infer::get(&bytes).map(|t| t.mime_type()).unwrap_or("");
         if !matches!(
             inferred_mime,
@@ -283,7 +276,6 @@ impl AppService {
             .cover_max_dimension
             .unwrap_or(800) as u32;
 
-        // 3. Spawn with decode limits to guard against decompression bombs.
         let final_bytes = tokio::task::spawn_blocking(move || {
             Self::compress_cover_bytes_with_limits(&bytes, max_dim)
         })
@@ -402,11 +394,8 @@ mod cover_tests {
         ]
     }
 
-    // ── upload_manga_cover validation ──────────────────────────────────────
-
     /// Helper: call only the validation-and-limits path, not the full service method.
     fn validate_cover(bytes: Vec<u8>, content_type: &str) -> crate::error::Result<()> {
-        // Replicate the validation logic from upload_manga_cover.
         if content_type.contains("svg") || content_type.contains("xml") {
             return Err(ServiceError::Validation(
                 "SVG images are not permitted as covers".into(),
@@ -467,7 +456,6 @@ mod cover_tests {
     fn compress_cover_bytes_with_limits_accepts_jpeg() {
         let out = AppService::compress_cover_bytes_with_limits(&tiny_jpeg(), 800);
         assert!(!out.is_empty(), "compressed output should not be empty");
-        // JPEG output starts with 0xFF 0xD8
         assert_eq!(&out[..2], &[0xFF, 0xD8], "output must be a JPEG");
     }
 }

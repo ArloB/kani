@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for /rest/settings: GET and PATCH round-trips.
 
 mod common;
 use axum::http::StatusCode;
@@ -23,15 +22,12 @@ async fn get_settings_returns_200_for_authed_user() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    // Settings object always contains auto_scan.
     assert!(
         body.get("auto_scan").is_some(),
         "settings must include auto_scan"
     );
 }
 
-/// `settings:view` belongs to the default `user` role, so this payload is read
-/// by every account on the instance. It must not describe the deployment.
 #[tokio::test]
 async fn a_plain_user_cannot_read_the_infrastructure_settings() {
     let state = test_state().await;
@@ -39,7 +35,6 @@ async fn a_plain_user_cannot_read_the_infrastructure_settings() {
     let (user_u, user_p) = create_regular_user(&state, "plain").await;
     let app = build_test_app(state).await;
 
-    // The admin configures an SMTP relay and a solver on the internal network.
     let admin_cookie = login(&app, admin_u, admin_p).await;
     let res = app
         .clone()
@@ -93,14 +88,12 @@ async fn a_plain_user_cannot_read_the_infrastructure_settings() {
         "no infrastructure host may appear anywhere in the payload: {serialised}"
     );
 
-    // The toggles the UI keys off are still readable, or the app breaks.
     assert!(body.get("auto_scan").is_some());
     assert_eq!(
         body.get("email_enabled").and_then(|v| v.as_bool()),
         Some(true)
     );
 
-    // And an admin still sees the real values.
     let res = app
         .oneshot(authed_get("/rest/settings", &admin_cookie))
         .await
@@ -174,7 +167,6 @@ async fn patch_settings_returns_401_without_auth() {
         .await
         .unwrap();
 
-    // auth_guard rejects the request (no valid session).
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
@@ -185,7 +177,6 @@ async fn patch_settings_invalid_body_returns_4xx() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // Wrong type for auto_scan (string instead of bool) → JSON deserialize error.
     let res = app
         .oneshot(authed_patch(
             "/rest/settings",

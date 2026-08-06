@@ -179,7 +179,6 @@ pub fn build_range_response_headers(
     out
 }
 
-/// Build an opaque proxy URL for use in `src` attributes.
 /// Tunable knobs for the image proxy's fetch path. Production uses
 /// [`ProxyConfig::default`]; tests override it on `AppState` to drive the retry,
 /// timeout, coalescing and cap paths without multi-second backoff or 50 MB bodies.
@@ -233,8 +232,6 @@ mod tests {
     use super::*;
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
-    // ── load_or_persist_secret tests ──────────────────────────────────────────
-
     #[test]
     fn persists_on_first_boot_and_same_on_second() {
         let dir = tempfile::tempdir().unwrap();
@@ -255,14 +252,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let known: [u8; 32] = [0x55u8; 32];
         let encoded = URL_SAFE_NO_PAD.encode(known);
-        // Write a different key to the file first.
         std::fs::write(
             dir.path().join("proxy.key"),
             URL_SAFE_NO_PAD.encode([0xAAu8; 32]),
         )
         .unwrap();
-        // Now set the env var (unsafe in Rust 2024 due to signal-safety concerns in tests).
-        // SAFETY: This test is single-threaded for this env mutation; no concurrent access.
         unsafe { std::env::set_var("KANI_PROXY_SECRET", &encoded) };
         let result = load_or_persist_secret(dir.path());
         unsafe { std::env::remove_var("KANI_PROXY_SECRET") };

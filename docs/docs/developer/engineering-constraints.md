@@ -1,0 +1,223 @@
+# Engineering Constraints
+
+This register holds durable implementation knowledge that is useful during development but too
+large, historical, or cross-cutting to live in source comments. Revalidate an entry when its named
+tool, dependency, workflow, or subsystem changes.
+
+## Frontend and CSS
+
+### Tailwind layer order can override authored selectors
+
+**Constraint.** A selector in Tailwind's utilities layer wins over the same selector in Kani's
+authored component layer because layer order is considered before specificity. Authored component
+selectors must not reuse Tailwind utility names.
+
+**Evidence.** The `.list-item` collision was encountered in four separate UI changes before the
+component was renamed `.li-row`. The generated stylesheet placed the utility after the authored
+rule even when the authored selector appeared more specific during local inspection.
+
+**Consequence.** Layout declarations can disappear without an invalid rule or an obvious cascade
+warning.
+
+**Enforcement.** Keep authored component names semantic and Kani-specific. Inspect the generated
+stylesheet and computed styles when a declaration is present in source but absent at runtime.
+
+**Revalidate when.** Tailwind, its standalone CLI, or the CSS layer structure changes.
+
+## Container builds
+
+### cargo-chef preserves the workspace linker configuration
+
+**Constraint.** `cargo chef cook` receives `.cargo/config.toml`, whose target configuration invokes
+`scripts/fast-linker.sh`. The linker script must therefore be copied into the builder before the
+cook step.
+
+**Failure signature.** When the script is absent, foundational build dependencies such as
+`proc-macro2`, `quote`, `serde`, and `libc` fail to link together. The errors look like unrelated
+crate failures rather than a missing workspace script.
+
+**Enforcement.** The Docker builder copies `scripts/fast-linker.sh` before dependency cooking, and
+the production-image workflow builds the same Dockerfile.
+
+**Revalidate when.** The Docker stages, cargo-chef, `.cargo/config.toml`, or linker selection changes.
+
+### Browser-assisted sources materially increase the image size
+
+**Constraint.** Chromium and `puppeteer-core` are optional runtime dependencies used only by
+sources that capture browser-issued tokens. The standard image omits them.
+
+**Evidence.** Including the browser-assisted source dependencies added approximately 250 MB to
+the container image when measured during the Docker image split. Restarting an idle Chromium
+process added approximately two seconds during the same browser-runtime testing.
+
+**Enforcement.** The standard and browser-enabled Docker targets remain separate, and Compose
+requires an explicit profile to select the browser-enabled target.
+
+**Revalidate when.** Chromium, puppeteer, the browser source set, or the image base changes.
+
+## HTTP routing
+
+### Static source capabilities must coexist with the parameterized route
+
+**Constraint.** `/sources/capabilities` must resolve to the bulk handler while
+`/sources/{id}/capabilities` continues to resolve per-source capabilities. Router composition must
+not interpret the literal `capabilities` segment as a source ID.
+
+**Failure signature.** The bulk endpoint returns `400` or `404` because the parameterized handler
+attempts to parse `capabilities` as an ID.
+
+**Enforcement.** `bulk_route_is_not_swallowed_by_the_per_source_route` exercises both endpoints in
+the same router.
+
+**Revalidate when.** Axum, route syntax, or source-router composition changes.
+
+### Interactive navigation requires rate-limit burst headroom
+
+**Constraint.** The global request limiter must accommodate a normal authenticated navigation
+burst while still enforcing its sustained rate over time.
+
+**Evidence.** A library page generated 21 REST calls and a manga page generated 24, arriving at
+about seven calls per second while each page settled. A login followed by eight ordinary page
+navigations generated 148 calls. A previous configuration interpreted 50 requests per second as
+one request every 50 seconds, making it roughly ten times stricter than intended.
+
+**Enforcement.** The limiter uses an explicit per-second rate and a burst allowance sized above
+the measured navigation sequence.
+
+**Revalidate when.** Frontend request fan-out, startup fetching, or rate-limiter configuration
+changes.
+
+## Scan and search limits
+
+### Scans release the write connection during source I/O
+
+**Constraint.** Chapter pages are collected before opening the single-connection write
+transaction. The transaction performs one batch write after all source requests finish.
+
+**Evidence.** Holding the write transaction across page fetches, retries, backoff, and challenge
+handling blocked a recurring job for 28.8 seconds during a library scan.
+
+**Enforcement.** The scan workflow separates collection from `insert_chapters_batch` and refreshes
+page counts within the final transaction.
+
+**Revalidate when.** Write-pool sizing, scan collection, source retry behavior, or chapter batch
+insertion changes.
+
+### Barren-page tolerance is relevant only to page-granular sources
+
+**Constraint.** A scan stops after three consecutive pages containing only known chapters unless
+the source ends pagination first. Each additional tolerance unit costs at most one request per
+manga and scan.
+
+**Evidence.** Cubari and WeebCentral return a complete chapter list in one response; a roughly
+200-chapter series therefore completed in two requests and never reached the guard. Page-granular
+sources can hide new chapters beyond a run of known pages, so lowering the value risks omissions.
+
+**Enforcement.** `scan_barren_page_tolerance` remains runtime-configurable with a default of three.
+
+**Revalidate when.** Source pagination behavior or the chapter-scan stopping rule changes.
+
+### Global search retains measured timeout headroom
+
+**Constraint.** One source receives six seconds before global search returns the other sources'
+results. Operators can raise the value for slow links or challenge-heavy sources.
+
+**Evidence.** Thirty anonymous searches across five installed sources measured a 0.46-second
+median, 1.05-second p90, and 1.46-second maximum. A Cloudflare-blocked source failed in 0.47
+seconds. Six seconds retains roughly four times the slowest observed latency.
+
+**Enforcement.** `global_search_timeout_secs` is runtime-configurable and defaults to six.
+
+**Revalidate when.** The source set, challenge handling, transport behavior, or global-search
+fan-out changes.
+
+### Tracker synchronization spaces calls per access token
+
+**Constraint.** Tracker synchronization spaces calls for the same access token by 700 milliseconds
+and extends that delay when a provider returns `Retry-After`.
+
+**Evidence.** AniList documents a normal limit of 90 requests per minute and response headers for
+remaining quota and retry timing. Its documentation also warns that incident limits may be reduced;
+as of 2026-08-06 it reports a temporary 30-request-per-minute degraded limit. See the
+[AniList rate-limit contract](https://docs.anilist.co/guide/rate-limiting).
+
+**Consequence.** A single global throttle needlessly couples users, while ignoring provider backoff
+causes repeated failed syncs. Static spacing alone cannot guarantee compliance during a degraded
+provider limit.
+
+**Enforcement.** `TokenThrottle` keys spacing and backoff by access token, and tracker responses feed
+`Retry-After` into its backoff window. Each recurring run also has a bounded entry count.
+
+**Revalidate when.** Provider quotas, tracker response handling, batch size, scheduling frequency,
+or per-token throttle behavior changes.
+
+## Delivery workflows
+
+### Matrix outputs cannot carry per-architecture digests
+
+**Constraint.** A GitHub Actions matrix exposes one last-writer-wins job output rather than an
+independent value for each matrix member. Per-architecture image digests must cross the job
+boundary as artifacts.
+
+**Consequence.** Using one matrix job output silently loses one architecture and produces an
+incomplete manifest.
+
+**Enforcement.** Each image build uploads a digest artifact; the merge job downloads both named
+artifacts, rejects a missing digest, creates the multi-architecture manifest, and signs its digest.
+
+**Revalidate when.** GitHub Actions changes matrix-output semantics or the Docker workflow stops
+using separate architecture jobs.
+
+## Storage and recovery
+
+### Lease coordination uses one atomic word for modelability
+
+**Constraint.** The draining flag and active-lease count share one atomic word, and acquisition
+uses compare-and-exchange while the draining bit is clear.
+
+**Evidence.** Splitting the state across two atomics creates a StoreLoad ordering problem requiring
+a global sequentially consistent order. Loom treats sequential consistency as acquire/release and
+reports a false positive for that design, while it models one atomic location's modification order
+precisely. Keeping `kani-lease` as a leaf crate also avoids applying Loom's global configuration to
+Tokio dependencies.
+
+**Consequence.** Separate draining and count atomics either weaken the algorithm or make the valid
+algorithm impossible to verify with the project's model checker.
+
+**Enforcement.** Run `RUSTFLAGS="--cfg loom" cargo test -p kani-lease`; the model covers acquisition,
+release, and drain interleavings.
+
+**Revalidate when.** Lease state representation, memory ordering, source hot-swapping, Loom, or the
+crate dependency graph changes.
+
+### JPEG encoder estimates require a noise margin
+
+**Constraint.** Upgrade comparison treats encoder-quality differences below twelve points as
+equivalent.
+
+**Evidence.** Inversion of libjpeg quantisation-table scaling was tested against JPEGs produced by
+the `image` crate and differed from the requested quality by approximately eight points. Encoder
+table choices and rounding make the estimate useful for ordering, not as an absolute quality value.
+
+**Consequence.** Comparing raw estimates without headroom would report ordinary encoder variation
+as an upgrade or downgrade.
+
+**Enforcement.** `ENCODER_MARGIN` gates the encoder axis in quality comparison tests.
+
+**Revalidate when.** JPEG parsing, quantisation-table inversion, fixture encoders, or upgrade-axis
+ranking changes.
+
+### Chapter upgrades preserve the replaced archive
+
+**Constraint.** Applying an upgrade moves the held CBZ into `.replaced/` before clearing chapter
+metadata and queuing the replacement download. A cross-filesystem move falls back to copy-then-
+remove only after the copy succeeds.
+
+**Consequence.** Deleting the held archive directly would make an upgrade irreversible if the new
+download failed or proved worse.
+
+**Enforcement.** Upgrade integration tests require the old archive to survive in `.replaced/` and
+verify its retention purge separately.
+
+**Revalidate when.** Upgrade application, library paths, download replacement, trash retention, or
+recovery behavior changes.

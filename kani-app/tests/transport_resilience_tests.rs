@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group C — the SmartClient circuit breaker and transport-error retry, driven by
-//! real origin responses for the first time (previously only ever hand-driven via
-//! `record_failure`). `Timings` shortens the retry backoff/jitter and the circuit
+//! SmartClient circuit-breaker and transport-error retry behavior, driven by
+//! real origin responses. `Timings` shortens the retry backoff/jitter and the circuit
 //! cooldown so these exercise the production code paths in milliseconds.
 
 use kani_core::http::{SmartClient, Timings};
@@ -10,7 +9,7 @@ use kani_shared_test::origin::{Body, Response, TestOrigin};
 use std::time::Duration;
 
 /// Near-instant retries so the real retry/circuit loop runs without minute-long
-/// waits. `cooldown` is separated out because C10 needs a specific short value.
+/// waits. `cooldown` remains separate so recovery timing can vary by scenario.
 fn fast_timings(cooldown: Duration) -> Timings {
     Timings {
         retry_base_delay: Duration::from_millis(1),
@@ -26,15 +25,12 @@ fn fast_client() -> SmartClient {
         .with_timings(fast_timings(Duration::from_secs(30)))
 }
 
-// C9 — after the failure threshold, the circuit opens and further calls are
-// rejected before a socket is opened.
 #[tokio::test]
 async fn the_circuit_opens_after_repeated_real_failures() {
     let site = TestOrigin::start().await;
     site.set("/x", Response::status(502));
     let client = fast_client();
 
-    // Five 502 responses → five recorded failures → the circuit opens (threshold 5).
     for _ in 0..5 {
         let _ = client.get(&site.url("/x")).await;
     }
@@ -50,8 +46,6 @@ async fn the_circuit_opens_after_repeated_real_failures() {
     );
 }
 
-// C10 — once the cooldown elapses the circuit lets a call through again, and a
-// success resets it.
 #[tokio::test]
 async fn the_circuit_recovers_after_the_cooldown() {
     let site = TestOrigin::start().await;
@@ -68,7 +62,6 @@ async fn the_circuit_recovers_after_the_cooldown() {
         "the circuit is open immediately after the threshold"
     );
 
-    // Recover the origin, then wait out the (shortened) cooldown.
     site.set("/x", Response::html("<html>ok</html>"));
     tokio::time::sleep(Duration::from_millis(120)).await;
 
@@ -80,14 +73,9 @@ async fn the_circuit_recovers_after_the_cooldown() {
     assert_eq!(status.as_u16(), 200);
 }
 
-// H9 — a body that never arrives trips the per-attempt request timeout and
-// retries out to an error, rather than hanging the caller forever.
 #[tokio::test]
 async fn a_slow_body_hits_the_request_timeout_not_a_hang() {
     let site = TestOrigin::start().await;
-    // Stall accepts the connection and holds it open without ever writing the
-    // response head, so `execute` only unblocks when the client's own timeout
-    // fires.
     site.set("/x", Response::status(200).body(Body::Stall));
     let client = SmartClient::new(None).unwrap().with_timings(Timings {
         retry_base_delay: Duration::from_millis(1),
@@ -110,7 +98,6 @@ async fn a_slow_body_hits_the_request_timeout_not_a_hang() {
     );
 }
 
-// C11 — a connection reset mid-request is retried rather than surfaced.
 #[tokio::test]
 async fn a_connection_reset_mid_request_is_retried() {
     let site = TestOrigin::start().await;

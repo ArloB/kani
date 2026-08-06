@@ -197,8 +197,6 @@ fn the_document_describes_nothing_the_router_does_not_serve() {
 
 #[test]
 fn the_scan_recognises_the_shapes_the_routers_use() {
-    // Guards the guard: if the parser silently matched nothing, the coverage
-    // test above would pass no matter how far the spec drifted.
     let sample = r#"
         Router::new()
             .route("/settings", get(get_settings).patch(update_settings))
@@ -218,15 +216,11 @@ fn the_scan_recognises_the_shapes_the_routers_use() {
     );
     assert!(mentions_method(&calls[2].1, "post"));
 
-    // A method name embedded in an identifier is not a mount.
     assert!(!mentions_method(", forget(handler)", "get"));
 }
 
 #[test]
 fn every_operation_is_tagged_with_a_declared_tag() {
-    // Swagger groups by tag, and a tag used but never declared in `tags(...)`
-    // gets no description and sorts into an unnamed group at the bottom — the
-    // endpoints are there, but nobody finds them.
     let doc = kani_web::openapi::ApiDoc::openapi();
     let declared: BTreeSet<String> = doc.tags.iter().flatten().map(|t| t.name.clone()).collect();
 

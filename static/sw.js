@@ -32,7 +32,6 @@ const SHELL_URLS = [
   '/manifest.webmanifest',
 ];
 
-// ── Install ───────────────────────────────────────────────────────────────────
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -43,7 +42,6 @@ self.addEventListener('install', e => {
   self.skipWaiting();
 });
 
-// ── Activate ──────────────────────────────────────────────────────────────────
 
 self.addEventListener('activate', e => {
   e.waitUntil(
@@ -58,7 +56,6 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 self.addEventListener('fetch', e => {
   const { request } = e;
@@ -102,7 +99,6 @@ self.addEventListener('fetch', e => {
   // Everything else (API, auth, etc.) — network-first, no caching.
 });
 
-// ── Message ───────────────────────────────────────────────────────────────────
 
 self.addEventListener('message', e => {
   if (!e.data) return;
@@ -125,7 +121,6 @@ self.addEventListener('message', e => {
   }
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
  * Navigations: try the network, fall back to the cached shell so the SPA can
@@ -190,7 +185,7 @@ async function _cacheChapter(chapterId, pageCount, maxBytes) {
     try {
       const resp = await fetch(url);
       if (resp.ok) await cache.put(url, resp);
-    } catch { /* ignore individual page failures */ }
+    } catch { }
   }
 
   const clients = await self.clients.matchAll();

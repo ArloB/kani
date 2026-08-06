@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// YAML validation tests: accept valid YAML, reject invalid with expected errors.
 
 use kani_cli::yaml::{schema::YamlExtension, validate};
 use std::path::Path;
@@ -33,8 +32,6 @@ fn assert_invalid_containing(yaml: &str, needle: &str) {
         }
     }
 }
-
-// ── Valid fixtures ───────────────────────────────────────────────────────────
 
 #[test]
 fn valid_minimal_extension() {
@@ -177,8 +174,6 @@ fn valid_full_example_fixture() {
     assert!(validate::validate(&ext, &src, path).is_ok());
 }
 
-// ── Invalid: missing required fields ────────────────────────────────────────
-
 #[test]
 fn invalid_popular_missing_title() {
     assert_invalid_containing(
@@ -275,8 +270,6 @@ endpoints:
     );
 }
 
-// ── Invalid: missing route ────────────────────────────────────────────────────
-
 #[test]
 fn invalid_endpoint_missing_route() {
     assert_invalid_containing(
@@ -295,8 +288,6 @@ endpoints:
         "route",
     );
 }
-
-// ── Invalid: unknown route variable ──────────────────────────────────────────
 
 #[test]
 fn invalid_route_unknown_variable() {
@@ -318,8 +309,6 @@ endpoints:
     );
 }
 
-// ── Invalid: bad DSL expression ───────────────────────────────────────────────
-
 #[test]
 fn invalid_dsl_parse_error() {
     assert_invalid_containing(
@@ -340,8 +329,6 @@ endpoints:
     );
 }
 
-// ── Invalid: delegated popular with bad target ────────────────────────────────
-
 #[test]
 fn invalid_delegated_popular_bad_target() {
     assert_invalid_containing(
@@ -357,8 +344,6 @@ endpoints:
         "delegate_to",
     );
 }
-
-// ── Filter ID validation ──────────────────────────────────────────────────────
 
 const FILTER_BASE: &str = r#"
 id: filter-test
@@ -489,8 +474,6 @@ filters:
     );
 }
 
-// ── filter_format ────────────────────────────────────────────────────────────
-
 #[test]
 fn valid_filter_format_full() {
     assert_valid(&format!(
@@ -546,8 +529,6 @@ endpoints:
     );
 }
 
-// ── filter_mapping: tuple_split ──────────────────────────────────────────────
-
 #[test]
 fn valid_tuple_split_filter_mapping() {
     assert_valid(&format!(
@@ -576,8 +557,6 @@ endpoints:
         FILTER_BASE
     ));
 }
-
-// ── option_sets + options_ref ────────────────────────────────────────────────
 
 #[test]
 fn valid_static_option_set_ref() {
@@ -704,8 +683,6 @@ filters:
     );
 }
 
-// ── int_range / date_range filters ───────────────────────────────────────────
-
 #[test]
 fn valid_int_range_filter() {
     assert_valid(&format!(
@@ -737,8 +714,6 @@ filters:
         "min",
     );
 }
-
-// ── id_encoding ──────────────────────────────────────────────────────────────
 
 #[test]
 fn valid_id_encoding_full_fixture() {
@@ -996,8 +971,6 @@ endpoints:
     );
 }
 
-// ── cache ────────────────────────────────────────────────────────────────────
-
 const CACHE_BASE: &str = r#"
 id: cache-test
 name: CacheTest
@@ -1107,8 +1080,6 @@ cache:
         "'key_template' must not be empty",
     );
 }
-
-// ── metadata / schema_version ───────────────────────────────────────────────
 
 const METADATA_BASE: &str = r#"
 id: metadata-test
@@ -1280,8 +1251,6 @@ fn base64_text(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s.as_bytes())
 }
 
-// ── chapter_sort ─────────────────────────────────────────────────────────────
-
 const CHAPTER_SORT_BASE: &str = r#"
 id: sort-test
 name: SortTest
@@ -1364,8 +1333,6 @@ chapter_sort:
         "default 'missing' is not listed in options",
     );
 }
-
-// ── then / for_each chaining ──────────────────────────────────────────────────
 
 #[test]
 fn valid_for_each_step() {
@@ -1537,8 +1504,6 @@ base_url: "https://example.com""#
         "merge_as",
     );
 }
-
-// ── Phase 9: options_fetched_by validation ───────────────────────────────────
 
 #[test]
 fn valid_fetched_option_set() {

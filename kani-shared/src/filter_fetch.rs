@@ -1,3 +1,5 @@
+//! Schema for filter options that the host fetches when rendering an extension's filter panel.
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

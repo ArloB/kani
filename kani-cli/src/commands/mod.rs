@@ -1,3 +1,5 @@
+//! Clap command schema and top-level dispatch for `kani-cli`.
+
 pub mod archive;
 pub mod build;
 pub mod css;

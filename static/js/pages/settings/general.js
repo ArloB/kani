@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — General section (display, reading, notifications).
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -75,7 +74,7 @@ export function GeneralSection() {
   };
 
   useEffect(() => {
-    syncServerThemes().then(refresh).catch(() => { /* cache stays valid */ });
+    syncServerThemes().then(refresh).catch(() => { });
   }, []);
 
   const applyTheme = (/** @type {string} */ th, /** @type {string} */ dn, /** @type {string} */ ac) => {

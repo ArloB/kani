@@ -45,25 +45,13 @@ const PROXY_RATE_DEBUG: u64 = 450;
 const PROXY_BURST_RELEASE: u32 = 600;
 const PROXY_BURST_DEBUG: u32 = 6000;
 
-// Compile-time guards on the shipped defaults.
-//
-// These were `assert!` inside a test, which clippy correctly flagged as
-// constant-valued: comparing two consts is decided at compile time, so the test
-// added nothing a const assertion does not. As const assertions they are
-// stronger — lowering a default is a build failure, not a test failure that
-// could be skipped or filtered out.
 const _: () = {
-    // Measured: a library page costs 21 REST calls and a manga page 24, both
-    // arriving at about 7/s while the page settles. The sustained release rate
-    // has to clear that or the bucket drains faster than it fills.
     const OBSERVED_PEAK_PER_SECOND: u64 = 8;
     assert!(
         API_RATE_RELEASE > OBSERVED_PEAK_PER_SECOND,
         "release API rate does not clear measured browsing"
     );
 
-    // A login plus eight navigations cost 148 calls; the burst must absorb a
-    // session like that without the sustained rate having to keep up.
     const OBSERVED_SESSION_CALLS: u32 = 148;
     assert!(
         API_BURST_RELEASE > OBSERVED_SESSION_CALLS,
@@ -85,22 +73,9 @@ const _: () = {
         "debug proxy rate must exceed release"
     );
 
-    // Measured against the proxy bucket, which serves image_proxy, the reader's
-    // per-page route and manga covers — three routes, one budget, which is not
-    // obvious from their names:
-    //
-    //     library grid          2 requests, peak  2/s
-    //     source browse        18 requests, peak 18/s   <- the peak
-    //     reading, paging      19 requests, peak  7/s
-    //     fast scrubbing       36 requests, peak 12/s
-    //
-    // The cover grid dominates because a page of covers arrives at once, while
-    // reader pages serialise behind decode and network.
     const OBSERVED_PROXY_PEAK: u64 = 18;
 
-    // Both buckets clear their measured peak with the same margin. Stating the
-    // rule rather than the numbers is what stops one bucket being tuned to a
-    // different standard than the other by accident.
+    // Both buckets use the same headroom rule so their release profiles cannot drift.
     const HEADROOM: u64 = 2;
     assert!(
         API_RATE_RELEASE >= OBSERVED_PEAK_PER_SECOND * HEADROOM,
@@ -321,24 +296,6 @@ async fn main() {
     }
     kani_app::jobs::recurring::spawn_recurring_scheduler(&state);
 
-    // Rate limiter settings.
-    // API: enough for normal UI use while protecting against abuse. Measured
-    // rather than guessed — a library page costs 21 REST calls and a manga page
-    // 24, both arriving at 7/s while the page settles, and a login plus eight
-    // navigations costs 148. A 5/s sustained rate is therefore *below* what
-    // ordinary browsing draws: the bucket drains faster than it fills and the
-    // burst is three-quarters gone after eight page views. 20/s leaves real
-    // headroom over that while still capping a single token or address at
-    // 1200 requests a minute.
-    // Proxy: much more permissive — the reader fires many concurrent image
-    // requests; the per-host semaphore in rest.rs already throttles upstream.
-    //
-    // A debug build raises both by an order of magnitude. Automated browsing —
-    // a Playwright sweep, a load of the whole settings tree — drains the release
-    // budget in seconds, and every subsequent call 429s, which reads as a pile
-    // of application bugs rather than the limiter doing its job. The release
-    // defaults are what ships; `KANI_API_RATE_PER_SECOND` and friends override
-    // either build.
     let dev_build = cfg!(debug_assertions);
     let env_u64 = |name: &str, default: u64| -> u64 {
         std::env::var(name)
@@ -386,12 +343,6 @@ async fn main() {
         },
     );
 
-    // These are rates — requests per second — and every name here says so. The
-    // builder's `per_second` takes the opposite: the *interval* at which one
-    // cell is replenished. Passing a rate to it inverted the whole scheme, so
-    // release replenished one request every five seconds (0.2/s, not 5/s) and
-    // the "relaxed" debug build replenished one every fifty, ten times stricter
-    // than the build it was meant to loosen. Convert once, here.
     let api_period = replenish_period(api_rate_per_second);
     let proxy_period = replenish_period(proxy_rate_per_second);
 
@@ -607,9 +558,7 @@ async fn main() {
     // because "every page 404s" is otherwise hard to attribute.
     let assets = kani_web::assets::Assets::resolve();
 
-    // Release builds serve the production bundle (bundled/minified JS, no import map).
-    // Debug builds serve raw source files so changes are picked up without rebuilding.
-    // Debug serves raw modules through an import map; release serves the bundle.
+    // Debug serves raw modules through an import map; release serves the bundled entry point.
     let index_name = if cfg!(debug_assertions) {
         "index.html"
     } else {
@@ -617,7 +566,6 @@ async fn main() {
     };
 
     let app = Router::new()
-        // PWA — manifest and service worker need explicit Content-Type headers
         .route(
             "/manifest.webmanifest",
             axum::routing::get({
@@ -775,10 +723,6 @@ async fn main() {
             }),
         );
 
-    // Swagger UI, debug builds only. Merged here rather than inside the chain
-    // above so it sits outside the auth layers — the UI is a plain static page
-    // that fetches the spec, and an auth redirect would break it. `build_app`
-    // mounts its own copy for tests; this is the one the server actually serves.
     #[cfg(debug_assertions)]
     let app = {
         use utoipa::OpenApi;
@@ -849,11 +793,6 @@ async fn main() {
 /// to reach it over the local network creates the administrator through the
 /// in-app setup screen (`POST /rest/auth/setup`), which closes the moment that
 /// account exists.
-///
-/// This replaced a generated `admin` password written to the data directory. The
-/// file had to be found and copy-pasted, and the wizard then made the operator
-/// change it — which invalidated their session mid-setup — so the first
-/// experience was two logins and a file hunt.
 async fn announce_first_run(
     backend: &kani_web::auth::AuthBackend,
 ) -> Result<(), kani_web::error::AppError> {
@@ -883,8 +822,6 @@ mod rate_limit_config_tests {
 
     #[test]
     fn a_higher_rate_is_never_a_stricter_limit() {
-        // The bug this replaced: `per_second(50)` was ten times harsher than
-        // `per_second(5)`, so the debug build throttled harder than release.
         let mut previous = replenish_period(1);
         for rate in [2, 5, 30, 50, 300, 500, 20_000] {
             let period = replenish_period(rate);
@@ -903,11 +840,6 @@ mod rate_limit_config_tests {
 
     #[test]
     fn the_period_helper_is_used_by_both_buckets() {
-        // The constants themselves are guarded at compile time below; this only
-        // confirms the conversion is applied rather than bypassed.
-        // Derived from the constants rather than written out. Hard-coding the
-        // expected period meant this went stale the moment a rate moved, and
-        // then failed for a reason unrelated to the behaviour it guards.
         for rate in [super::API_RATE_RELEASE, super::PROXY_RATE_RELEASE] {
             assert_eq!(
                 replenish_period(rate),
@@ -915,7 +847,6 @@ mod rate_limit_config_tests {
                 "the period must be the reciprocal of the rate"
             );
         }
-        // A rate is requests per second, so a higher rate is a shorter period.
         assert!(
             replenish_period(super::PROXY_RATE_RELEASE) < replenish_period(super::API_RATE_RELEASE)
         );

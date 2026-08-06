@@ -4,10 +4,9 @@ import assert from 'node:assert/strict';
 import { clampPan, zoomStep, ZOOM_MAX } from './zoom.js';
 
 test('clampPan: within bounds unchanged, beyond bounds clamped', () => {
-  // viewport 100x100 at scale 2 → content 200x200; min offset = 100*(1-2) = -100.
   assert.deepEqual(clampPan(100, 100, 2, -50, -50), { tx: -50, ty: -50 });
-  assert.deepEqual(clampPan(100, 100, 2, -200, -200), { tx: -100, ty: -100 }); // clamped to min
-  assert.deepEqual(clampPan(100, 100, 2, 50, 50), { tx: 0, ty: 0 });          // clamped to max (0)
+  assert.deepEqual(clampPan(100, 100, 2, -200, -200), { tx: -100, ty: -100 });
+  assert.deepEqual(clampPan(100, 100, 2, 50, 50), { tx: 0, ty: 0 });
 });
 
 test('zoomStep: zoom out to <=1 snaps to identity', () => {
@@ -16,8 +15,6 @@ test('zoomStep: zoom out to <=1 snaps to identity', () => {
 });
 
 test('zoomStep: zoom in keeps the focal point stationary', () => {
-  // From identity, zoom 2x about focal (50,50) in content space.
-  // ntx = cx - (next/prev)*(cx - tx) = 50 - 2*(50-0) = -50.
   const r = zoomStep({ scale: 1, tx: 0, ty: 0 }, 2, 50, 50, { viewportW: 100, viewportH: 100 });
   assert.equal(r.scale, 2);
   assert.equal(r.tx, -50);
@@ -30,7 +27,6 @@ test('zoomStep: clamps to ZOOM_MAX', () => {
 });
 
 test('zoomStep: pan result is clamped to bounds', () => {
-  // Focal at (0,0): ntx = 0 - 2*(0-0) = 0, clamped to 0 (max). ty likewise.
   const r = zoomStep({ scale: 1, tx: 0, ty: 0 }, 2, 0, 0, { viewportW: 100, viewportH: 100 });
   assert.equal(r.scale, 2);
   assert.equal(r.tx, 0);

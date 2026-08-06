@@ -305,10 +305,9 @@ pub fn emit_pages(
         emit_fn_args(ep)
     );
 
-    // Un-underscore `manga_id` when the pages route actually uses it (most
-    // sources key pages on chapter_id alone, but a route like
-    // `/manga/$manga_id$/chapter/$chapter_id$` needs it) or a composite decode
-    // consumes it.
+    // Un-underscore `manga_id` when the pages route actually uses it (most sources key pages on
+    // chapter_id alone, but a route like `/manga/$manga_id$/chapter/$chapter_id$` needs it) or a
+    // composite decode consumes it.
     let manga_param = if ep.route.contains("$manga_id$")
         || ep.composite_id_decodes.iter().any(|d| d.role == "manga")
     {
@@ -365,8 +364,6 @@ pub fn emit_pages(
         )
     }
 }
-
-// ── Result assembly helpers ──────────────────────────────────────────────────
 
 fn emit_manga_list_method(
     method_name: &str,
@@ -445,13 +442,6 @@ fn emit_manga_list_method(
         )
     }
 }
-
-// ── has_next_page / total_pages spec (shared unpack) ─────────────────────────
-//
-// Emit the HasNextPage / TotalPages spec the shared `unpack_*` consumes. The
-// mapping matches the interpreter's `hnp_spec` / `total_pages_spec` exactly, so
-// both engines agree: a static value stays static, anything else reads the
-// scalar (which the paginated extractor and `Scalar` blueprints populate).
 
 /// Emit the `FnArgs` slice for the shared unpacker: fields whose value is a
 /// method argument (`id: "$manga_id$"`) rather than extracted. The guest can't

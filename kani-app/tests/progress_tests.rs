@@ -40,8 +40,6 @@ async fn set_chapter_progress_higher_page_marks_read() {
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
     let ch_id = insert_chapter(&svc.db, manga_id, "ch1", 1.0).await;
 
-    // Set page_count so the COALESCE inside set_chapter_progress can decide is_read.
-    // page_count = 10, so reading page 9 (last page) should mark is_read = true.
     sqlx::query("UPDATE chapters SET page_count = 10 WHERE id = ?")
         .bind(ch_id)
         .execute(&svc.db)

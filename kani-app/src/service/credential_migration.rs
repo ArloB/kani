@@ -159,7 +159,6 @@ impl AppService {
             }
         }
 
-        // Reload tracker registry so it uses fresh credentials.
         if secrets_migrated > 0 {
             self.reload_tracker_registry().await?;
         }

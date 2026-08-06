@@ -28,7 +28,7 @@ WASM-only extension members sit beside the runtime crates.
 utility, preferences, extraction, cache, and scripting interfaces into the guest. The guest exports
 `manga-provider`.
 
-Host calls are genuinely asynchronous. Guest bindings look synchronous for most imports, but
+Host calls are asynchronous. Guest bindings appear synchronous for most imports, but
 Wasmtime suspends the component fiber while the host awaits I/O. The chapter-list stream export is
 a component-model async stream; the default guest bridge produces it from page-granular chapter
 calls.

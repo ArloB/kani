@@ -1,8 +1,7 @@
-//! Shared data types for manga information.
+//! Serializable domain models exchanged by the web, application, host-runtime, and extension
+//! layers. WIT-owned boundary types remain authoritative in [`crate::wit_types`].
 
 use crate::bindings::kani::extension::types as wit_types;
-
-// ── Host-only imports ───────────────────────────────────────────────────────
 
 #[cfg(feature = "host")]
 use serde::de::{self, SeqAccess, Visitor};
@@ -10,8 +9,6 @@ use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 #[cfg(feature = "host")]
 use std::fmt;
-
-// ── Always-available types (WASM-safe, no serde/ts-rs dependency) ──────────
 
 /// Manga publication status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,19 +153,16 @@ pub struct CacheNamespace {
     pub key_template: Option<&'static str>,
 }
 
-// ── filter_list! macro ──────────────────────────────────────────────────────
-// Produces `$crate::wit_types::FilterList` directly (no intermediate type).
-
+/// Builds a [`FilterList`](crate::wit_types::FilterList) from semicolon-separated
+/// filter declarations. A declaration may provide separate identifier and label
+/// expressions or use one expression for both; selection options accept either
+/// `(label, value)` pairs or values used as both label and value.
 #[macro_export]
 macro_rules! filter_list {
-    // 1. Base Case
     (@munch [ $($output:tt)* ]) => {
         $crate::wit_types::FilterList { filters: vec![ $($output)* ] }
     };
 
-    // -------------------------------------------------------------------------
-    // INTERNAL SUB-MUNCHER: Parses mixed arrays item-by-item
-    // -------------------------------------------------------------------------
     (@opts $id:expr, [ $($accum:tt)* ] ) => { vec![ $($accum)* ] };
 
     (@opts $id:expr, [ $($accum:tt)* ] ( $n:expr, $v:expr ) $(, $($rest:tt)*)? ) => {
@@ -193,9 +187,6 @@ macro_rules! filter_list {
         ] $($($rest)*)? )
     };
 
-    // -------------------------------------------------------------------------
-    // INTERNAL BUILDER
-    // -------------------------------------------------------------------------
     (@build [ $($output:tt)* ] $id:expr, $display:expr, $kind:ident, $opts:expr, $def:expr, $sem:expr $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [
             $($output)*
@@ -210,10 +201,6 @@ macro_rules! filter_list {
         ] $($($rest)*)?)
     };
 
-    // ==========================================
-    // SELECT & SORT
-    // ==========================================
-    // 2-arg, Tuple Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, $kind:ident, [ $($opts:tt)* ], default: ( $def_n:expr, $def_v:expr ) $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, $kind,
             filter_list!(@opts $id, [] $($opts)*),
@@ -225,11 +212,9 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 2-arg, Flat Default (Translates to Tuple)
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, $kind:ident, [ $($opts:tt)* ], default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $id, $display, $kind, [ $($opts)* ], default: ($def, $def) $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 2-arg, No Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, $kind:ident, [ $($opts:tt)* ] $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, $kind,
             filter_list!(@opts $id, [] $($opts)*),
@@ -239,23 +224,16 @@ macro_rules! filter_list {
         )
     };
 
-    // 1-arg, Tuple Default
     (@munch [ $($output:tt)* ] $display:expr, $kind:ident, [ $($opts:tt)* ], default: ( $def_n:expr, $def_v:expr ) $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, $kind, [ $($opts)* ], default: ($def_n, $def_v) $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 1-arg, Flat Default
     (@munch [ $($output:tt)* ] $display:expr, $kind:ident, [ $($opts:tt)* ], default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, $kind, [ $($opts)* ], default: ($def, $def) $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 1-arg, No Default
     (@munch [ $($output:tt)* ] $display:expr, $kind:ident, [ $($opts:tt)* ] $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, $kind, [ $($opts)* ] $(, semantic: $sem)? $(; $($rest)*)? )
     };
 
-    // ==========================================
-    // CHECKBOX
-    // ==========================================
-    // 2-arg, With Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, Checkbox, default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, Checkbox,
             vec![],
@@ -264,7 +242,6 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 2-arg, No Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, Checkbox $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, Checkbox,
             vec![],
@@ -273,19 +250,13 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 1-arg, With Default
     (@munch [ $($output:tt)* ] $display:expr, Checkbox, default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, Checkbox, default: $def $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 1-arg, No Default
     (@munch [ $($output:tt)* ] $display:expr, Checkbox $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, Checkbox $(, semantic: $sem)? $(; $($rest)*)? )
     };
 
-    // ==========================================
-    // TEXT INPUT
-    // ==========================================
-    // 2-arg, With Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, TextInput, default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, TextInput,
             vec![],
@@ -294,7 +265,6 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 2-arg, No Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, TextInput $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, TextInput,
             vec![],
@@ -303,19 +273,13 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 1-arg, With Default
     (@munch [ $($output:tt)* ] $display:expr, TextInput, default: $def:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, TextInput, default: $def $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 1-arg, No Default
     (@munch [ $($output:tt)* ] $display:expr, TextInput $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, TextInput $(, semantic: $sem)? $(; $($rest)*)? )
     };
 
-    // ==========================================
-    // MULTISELECT
-    // ==========================================
-    // 2-arg, No Default
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, Multiselect, [ $($opts:tt)* ] $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, Multiselect,
             filter_list!(@opts $id, [] $($opts)*),
@@ -324,19 +288,10 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 1-arg, No Default
     (@munch [ $($output:tt)* ] $display:expr, Multiselect, [ $($opts:tt)* ] $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, Multiselect, [ $($opts)* ] $(, semantic: $sem)? $(; $($rest)*)? )
     };
 
-    // ==========================================
-    // SPLICE — dynamic &[(&str, &str)] slices
-    // ==========================================
-    // Compiles to a single iterator loop instead of N inline struct constructors,
-    // which is more efficient in WASM when the same large slice is reused across
-    // multiple call sites (e.g. genres_include / genres_exclude sharing GENRES).
-    //
-    // 2-arg Multiselect
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, Multiselect, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, Multiselect,
             $opts.iter().map(|(n, v)| $crate::wit_types::FilterOption {
@@ -349,11 +304,9 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 1-arg Multiselect
     (@munch [ $($output:tt)* ] $display:expr, Multiselect, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, Multiselect, splice: $opts $(, semantic: $sem)? $(; $($rest)*)? )
     };
-    // 2-arg Select
     (@munch [ $($output:tt)* ] $id:expr, $display:expr, Select, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@build [ $($output)* ] $id, $display, Select,
             $opts.iter().map(|(n, v)| $crate::wit_types::FilterOption {
@@ -366,14 +319,10 @@ macro_rules! filter_list {
             $(; $($rest)*)?
         )
     };
-    // 1-arg Select
     (@munch [ $($output:tt)* ] $display:expr, Select, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
         filter_list!(@munch [ $($output)* ] $display, $display, Select, splice: $opts $(, semantic: $sem)? $(; $($rest)*)? )
     };
 
-    // ==========================================
-    // ERROR CATCHER & ENTRY POINTS
-    // ==========================================
     (@munch $($invalid:tt)*) => {
         compile_error!(concat!("Invalid filter syntax. Stuck on: ", stringify!($($invalid)*)))
     };
@@ -381,29 +330,14 @@ macro_rules! filter_list {
     ($first:expr, $($rest:tt)*) => { filter_list!(@munch [] $first, $($rest)*) };
 }
 
-// ── chapter_sort_list! macro ────────────────────────────────────────────────
-// Produces `Vec<$crate::wit_types::SortOption>`.
-//
-// Syntax (entries separated by `;`):
-//   "field_id", "Display Name"          — auto-generates a descending and
-//                                         ascending SortOption pair
-//   raw: <expr>                          — inserts a single SortOption
-//                                         as-is, for edge-case singlets
-//
-// The auto-generated IDs follow the `{field_id}_desc` / `{field_id}_asc`
-// convention.  Extensions that need to recover the field and direction from
-// the sort string should split on the *last* underscore (via `rsplit_once`)
-// so that field IDs containing underscores (e.g. `created_at`) are handled
-// correctly.
-
 #[macro_export]
+/// Builds chapter sort options. Each `id, label` declaration expands to
+/// descending and ascending options; `raw: expression` inserts one option.
 macro_rules! chapter_sort_list {
-    // Base case: nothing left to process
     (@munch [$($output:tt)*]) => {
         vec![$($output)*]
     };
 
-    // Pair entry: "field_id", "Display Name" → desc + asc options
     (@munch [$($output:tt)*] $id:literal, $name:literal $(; $($rest:tt)*)?) => {
         chapter_sort_list!(@munch [
             $($output)*
@@ -418,7 +352,6 @@ macro_rules! chapter_sort_list {
         ] $($($rest)*)?)
     };
 
-    // Raw entry: raw: <expr> → single option inserted verbatim
     (@munch [$($output:tt)*] raw: $expr:expr $(; $($rest:tt)*)?) => {
         chapter_sort_list!(@munch [
             $($output)*
@@ -426,7 +359,6 @@ macro_rules! chapter_sort_list {
         ] $($($rest)*)?)
     };
 
-    // Error catcher & entry points
     (@munch $($invalid:tt)*) => {
         compile_error!(concat!("Invalid chapter_sort_list syntax. Stuck on: ", stringify!($($invalid)*)))
     };
@@ -434,31 +366,14 @@ macro_rules! chapter_sort_list {
     ($($rest:tt)+) => { chapter_sort_list!(@munch [] $($rest)+) };
 }
 
-// ── preference_list! macro ──────────────────────────────────────────────────
-// Produces `Vec<$crate::wit_types::PreferenceSpec>`.
-//
-// Syntax (each entry separated by `;`):
-//   "key", "Label", Toggle, default: <bool>                    // explicit key
-//   "key", "Label", Select, [("Label1","v1"), ...], default: "v"
-//   "key", "Label", Text, default: "value"
-//   "key", "Label", MultiValueList                             // default is always []
-//   "Label", Toggle, default: <bool>                           // key = label
-//   "Label", Select, [("Label1","v1"), ...], default: "v"
-//   "Label", Text, default: "value"
-//   "Label", MultiValueList
-// Optional modifiers (order matters for Text):
-//   , description: "..."
-//   , secret: true                      (Text only; false by default)
-//   , description: "...", secret: true
-// MultiValueList-specific modifier (before description):
-//   , placeholder: "..."
-
 #[macro_export]
+/// Builds preference specifications from semicolon-separated declarations.
+/// The label may also serve as the key; text preferences may be secret, and
+/// multi-value preferences always use `[]` as their serialized default while
+/// storing an optional placeholder in the options list.
 macro_rules! preference_list {
-    // Base case: no more entries
     (@munch [ $($output:tt)* ]) => { vec![ $($output)* ] };
 
-    // ── Option accumulator for Select ───────────────────────────────────────
     (@opts [ $($accum:tt)* ]) => { vec![ $($accum)* ] };
     (@opts [ $($accum:tt)* ] ( $l:expr, $v:expr ) $(, $($rest:tt)*)? ) => {
         preference_list!(@opts [
@@ -467,7 +382,6 @@ macro_rules! preference_list {
         ] $($($rest)*)? )
     };
 
-    // ── Internal builder ────────────────────────────────────────────────────
     (@build [ $($output:tt)* ] $key:expr, $label:expr, $kind:ident, $opts:expr, $def:expr, $desc:expr, $secret:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [
             $($output)*
@@ -483,124 +397,97 @@ macro_rules! preference_list {
         ] $($($rest)*)?)
     };
 
-    // ── Toggle ──────────────────────────────────────────────────────────────
-    // 2-arg, with description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Toggle, default: $def:expr, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Toggle,
             vec![], if $def { "true" } else { "false" }, Some($desc.to_string()), false
             $(; $($rest)*)?
         )
     };
-    // 2-arg, no description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Toggle, default: $def:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Toggle,
             vec![], if $def { "true" } else { "false" }, None, false
             $(; $($rest)*)?
         )
     };
-    // 1-arg (forward to 2-arg)
     (@munch [ $($output:tt)* ] $label:expr, Toggle, default: $def:expr $(, description: $desc:expr)? $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, Toggle, default: $def $(, description: $desc)? $(; $($rest)*)? )
     };
 
-    // ── Select ──────────────────────────────────────────────────────────────
-    // 2-arg, with description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Select, [ $($opts:tt)* ], default: $def:expr, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Select,
             preference_list!(@opts [] $($opts)*), $def, Some($desc.to_string()), false
             $(; $($rest)*)?
         )
     };
-    // 2-arg, no description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Select, [ $($opts:tt)* ], default: $def:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Select,
             preference_list!(@opts [] $($opts)*), $def, None, false
             $(; $($rest)*)?
         )
     };
-    // 1-arg (forward to 2-arg)
     (@munch [ $($output:tt)* ] $label:expr, Select, [ $($opts:tt)* ], default: $def:expr $(, description: $desc:expr)? $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, Select, [ $($opts)* ], default: $def $(, description: $desc)? $(; $($rest)*)? )
     };
 
-    // ── Text ────────────────────────────────────────────────────────────────
-    // 2-arg, description + secret: true
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Text, default: $def:expr, description: $desc:expr, secret: true $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Text, vec![], $def, Some($desc.to_string()), true $(; $($rest)*)?)
     };
-    // 2-arg, description only
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Text, default: $def:expr, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Text, vec![], $def, Some($desc.to_string()), false $(; $($rest)*)?)
     };
-    // 2-arg, secret: true only
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Text, default: $def:expr, secret: true $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Text, vec![], $def, None, true $(; $($rest)*)?)
     };
-    // 2-arg, no modifiers
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, Text, default: $def:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, Text, vec![], $def, None, false $(; $($rest)*)?)
     };
-    // 1-arg (forward to 2-arg)
     (@munch [ $($output:tt)* ] $label:expr, Text, default: $def:expr $(, $($mods:tt)*)? $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, Text, default: $def $(, $($mods)*)? $(; $($rest)*)? )
     };
 
-    // ── MultiValueList ───────────────────────────────────────────────────────
-    // Default is always "[]" (empty JSON array); placeholder stored in options.
-    // 2-arg: with placeholder, with description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, MultiValueList, placeholder: $ph:expr, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, MultiValueList,
             vec![("placeholder".to_string(), $ph.to_string())], "[]", Some($desc.to_string()), false
             $(; $($rest)*)?
         )
     };
-    // 2-arg: with placeholder, no description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, MultiValueList, placeholder: $ph:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, MultiValueList,
             vec![("placeholder".to_string(), $ph.to_string())], "[]", None, false
             $(; $($rest)*)?
         )
     };
-    // 2-arg: no placeholder, with description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, MultiValueList, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, MultiValueList,
             vec![], "[]", Some($desc.to_string()), false
             $(; $($rest)*)?
         )
     };
-    // 2-arg: no placeholder, no description
     (@munch [ $($output:tt)* ] $key:expr, $label:expr, MultiValueList $(; $($rest:tt)*)? ) => {
         preference_list!(@build [ $($output)* ] $key, $label, MultiValueList,
             vec![], "[]", None, false
             $(; $($rest)*)?
         )
     };
-    // 1-arg: with placeholder, with description
     (@munch [ $($output:tt)* ] $label:expr, MultiValueList, placeholder: $ph:expr, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, MultiValueList, placeholder: $ph, description: $desc $(; $($rest)*)? )
     };
-    // 1-arg: with placeholder, no description
     (@munch [ $($output:tt)* ] $label:expr, MultiValueList, placeholder: $ph:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, MultiValueList, placeholder: $ph $(; $($rest)*)? )
     };
-    // 1-arg: no placeholder, with description
     (@munch [ $($output:tt)* ] $label:expr, MultiValueList, description: $desc:expr $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, MultiValueList, description: $desc $(; $($rest)*)? )
     };
-    // 1-arg: no placeholder, no description
     (@munch [ $($output:tt)* ] $label:expr, MultiValueList $(; $($rest:tt)*)? ) => {
         preference_list!(@munch [ $($output)* ] $label, $label, MultiValueList $(; $($rest)*)? )
     };
 
-    // ── Error catcher & entry points ─────────────────────────────────────────
     (@munch $($invalid:tt)*) => {
         compile_error!(concat!("Invalid preference syntax. Stuck on: ", stringify!($($invalid)*)))
     };
     () => { vec![] };
     ($first:expr, $($rest:tt)*) => { preference_list!(@munch [] $first, $($rest)*) };
 }
-
-// ── Host-only types ─────────────────────────────────────────────────────────
 
 /// Deserializes `Vec<NamedItem>` from either an array of objects or plain strings.
 #[cfg(feature = "host")]
@@ -1227,8 +1114,7 @@ pub struct AppSettings {
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
-    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
-    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    /// OPDS-PSE `?page=` numbering: `false` is one-based and `true` is zero-based.
     pub opds_page_index_zero_based: bool,
     #[serde(default = "default_barren_page_tolerance")]
     pub scan_barren_page_tolerance: i64,
@@ -1400,8 +1286,7 @@ pub struct AdvancedSettings {
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
-    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
-    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    /// OPDS-PSE `?page=` numbering: `false` is one-based and `true` is zero-based.
     pub opds_page_index_zero_based: bool,
     #[serde(default = "default_global_search_timeout_secs")]
     pub global_search_timeout_secs: i64,
@@ -1549,8 +1434,6 @@ mod tests {
         assert_eq!(*v, back);
     }
 
-    // ── MangaStatus ──────────────────────────────────────────────────────────
-
     #[test]
     fn manga_status_json_variants_are_lowercase() {
         for (status, expected) in [
@@ -1593,8 +1476,6 @@ mod tests {
         assert_eq!(i64::from(MangaStatus::Unknown), 4i64);
     }
 
-    // ── FilterState ──────────────────────────────────────────────────────────
-
     #[test]
     fn filter_state_json_round_trip_all_variants() {
         for v in &[
@@ -1611,8 +1492,6 @@ mod tests {
         }
     }
 
-    // ── ActiveFilter ─────────────────────────────────────────────────────────
-
     #[test]
     fn active_filter_json_round_trip() {
         json_rt(&ActiveFilter {
@@ -1620,8 +1499,6 @@ mod tests {
             state: FilterState::Checkbox(false),
         });
     }
-
-    // ── MangaListItem ─────────────────────────────────────────────────────────
 
     #[test]
     fn manga_list_item_json_round_trip() {
@@ -1641,8 +1518,6 @@ mod tests {
         assert_eq!(item.new_chapter_count, 0);
     }
 
-    // ── MangaList ─────────────────────────────────────────────────────────────
-
     #[test]
     fn manga_list_json_round_trip() {
         json_rt(&MangaList {
@@ -1657,8 +1532,6 @@ mod tests {
             total_pages: Some(5),
         });
     }
-
-    // ── MangaInfo & custom named-item deserializer ────────────────────────────
 
     #[test]
     fn manga_info_json_round_trip_with_named_item_objects() {
@@ -1700,8 +1573,6 @@ mod tests {
         assert_eq!(info.authors[0].id, 0);
     }
 
-    // ── Chapter ───────────────────────────────────────────────────────────────
-
     #[test]
     fn chapter_json_round_trip() {
         json_rt(&Chapter {
@@ -1732,8 +1603,6 @@ mod tests {
         assert!(ch.last_page_read.is_none());
     }
 
-    // ── ChapterList ───────────────────────────────────────────────────────────
-
     #[test]
     fn chapter_list_json_round_trip() {
         json_rt(&ChapterList {
@@ -1743,8 +1612,6 @@ mod tests {
             total: None,
         });
     }
-
-    // ── ChapterSortOrder ──────────────────────────────────────────────────────
 
     #[test]
     fn chapter_sort_order_default_is_chapter_desc() {
@@ -1770,8 +1637,6 @@ mod tests {
             assert_eq!(*order, back, "failed round-trip for {order:?}");
         }
     }
-
-    // ── MangaSortOrder ────────────────────────────────────────────────────────
 
     #[test]
     fn manga_sort_order_default_is_name_desc() {
@@ -1806,8 +1671,6 @@ mod tests {
         assert!(MangaSortOrder::LastReadDesc.needs_tracking_join());
         assert!(!MangaSortOrder::NameAsc.needs_tracking_join());
     }
-
-    // ── DownloadProgressEvent ─────────────────────────────────────────────────
 
     #[test]
     fn download_progress_event_json_round_trip_all_variants() {
@@ -1845,8 +1708,6 @@ mod tests {
             json_rt(ev);
         }
     }
-
-    // ── DownloadRuleKind ──────────────────────────────────────────────────────
 
     #[test]
     fn download_rule_kind_json_round_trip_all_variants() {
@@ -1951,8 +1812,6 @@ mod tests {
         assert!(!rule.passes(&ch_row("en", None, 1.0, Some(999_999))));
     }
 
-    // ── Source ────────────────────────────────────────────────────────────────
-
     #[test]
     fn source_json_round_trip() {
         json_rt(&Source {
@@ -1972,8 +1831,6 @@ mod tests {
             schema_version: 1,
         });
     }
-
-    // ── CacheNamespace / CacheScope ───────────────────────────────────────────
 
     #[test]
     fn cache_scope_json_round_trip_all_variants() {
@@ -2009,16 +1866,12 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    // ── SearchScope ───────────────────────────────────────────────────────────
-
     #[test]
     fn search_scope_json_round_trip_all_variants() {
         json_rt(&SearchScope::FavouritedOnly);
         json_rt(&SearchScope::AllEnabled);
         json_rt(&SearchScope::Sources(vec![1, 2, 3]));
     }
-
-    // ── MangaTrackingStatus ───────────────────────────────────────────────────
 
     #[test]
     fn manga_tracking_status_json_round_trip_all_variants() {
@@ -2043,8 +1896,6 @@ mod tests {
         assert_eq!(MangaTrackingStatus::Completed as i64, 4);
         assert_eq!(MangaTrackingStatus::Rereading as i64, 5);
     }
-
-    // ── SettingsUpdate ────────────────────────────────────────────────────────
 
     #[test]
     fn settings_update_json_round_trip_all_variants() {
@@ -2102,8 +1953,6 @@ mod tests {
             email_verification_required: false,
         }));
     }
-
-    // ── AuthenticatedUser ─────────────────────────────────────────────────────
 
     #[test]
     fn authenticated_user_role_checks() {

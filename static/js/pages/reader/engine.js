@@ -1,17 +1,3 @@
-// @ts-check
-// Reader paging engine (Wave 10 R2). Owns the render surface — #reader-pages,
-// the tint sibling, the canvas backdrop — the paging hot path (render, page
-// navigation, spread detection, preload, zoom/pan) and the presentation surface.
-// The Preact chrome (R3) drives it through this imperative API and subscribes to
-// its callbacks rather than reaching into the reader closure.
-//
-// State is the shared signal-backed `state` store (R4): the engine mutates its
-// fields imperatively while the chrome reacts via effects. The engine notifies
-// the segment bar / page overlay by bumping state.loadVersion (the loaded/failed
-// Sets can't be observed directly); currentPage/pages changes are observed
-// through their signals. Prefs are read through getPrefs; progress writing and
-// chapter navigation stay callbacks (reportProgress / navigateChapter /
-// navigateToManga).
 
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
@@ -64,12 +50,9 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
   /** @type {Array<() => void>} */
   const _cleanup = [];
 
-  // audit-ignore-file justification: the reader runs its own black/white/sepia
-  // background palette outside the theme token system (the page area is a fixed
-  // reading surface, not a themed UI surface).
-  const BG_MAP = /** @type {Record<string,string>} */ ({ black: '#000', white: '#fff', sepia: '#f5e6c8' }); // audit-ignore
+  // audit-ignore-file: reader presentation palette source.
+  const BG_MAP = /** @type {Record<string,string>} */ ({ black: '#000', white: '#fff', sepia: '#f5e6c8' }); // audit-ignore: reader palette source
 
-  // ── Presentation surface ───────────────────────────────────────────────────
 
   /** Apply CSS filter + background colour from prefs to the page container. */
   function applyPresentation() {
@@ -83,9 +66,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
       : '';
     const bgColor = BG_MAP[bg] ?? '#000'; // audit-ignore: reader background fallback
     readerRoot.style.backgroundColor = bgColor;
-    // canvasEl also needs the bg color so blend modes on pagesEl (inside the isolation
-    // context) have the colored backdrop to blend against. Without this, bgTintPage's
-    // multiply blend sees transparent (outside the isolation boundary) and has no effect.
+    // The isolated page blend context needs an opaque backdrop for tint multiplication.
     canvasEl.style.backgroundColor = bgColor;
     pagesEl.style.mixBlendMode = (bgTintPage && bg !== 'black') ? 'multiply' : '';
   }
@@ -114,7 +95,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     if (span) span.textContent = `${state.currentPage + 1} / ${state.pages.length}`;
   }
 
-  // ── Dimensions cache ────────────────────────────────────────────────────────
 
   let _dimSaveTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
 
@@ -134,7 +114,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     _saveDims();
   }
 
-  // ── Crop ────────────────────────────────────────────────────────────────────
 
   /**
    * Apply percentage-based clip-path to remove border strips from an image.
@@ -147,11 +126,10 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
    * so we scale by the natural aspect ratio (h/w) when dimensions are known.
    */
   function _applyCropToImg(/** @type {HTMLElement} */ el) {
-    // Look up aspect ratio to correct the vertical margin approximation.
     const imgEl = /** @type {HTMLImageElement} */ (el);
     const nw = imgEl.naturalWidth  || 0;
     const nh = imgEl.naturalHeight || 0;
-    const ratio = (nw > 0 && nh > 0) ? nh / nw : 1.5; // fallback: 2:3 manga page
+    const ratio = (nw > 0 && nh > 0) ? nh / nw : 1.5;
     const styles = cropStyles(getPrefs() ?? /** @type {any} */ ({}), ratio);
     if (!styles) {
       el.style.clipPath    = '';
@@ -195,7 +173,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
   }
 
-  // ── Preload (next chapter) ──────────────────────────────────────────────────
 
   function _maybePreloadNext() {
     if (state.preloadDone || !state.chapterInfo.next_chapter_id) return;
@@ -212,7 +189,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     }).catch(() => {});
   }
 
-  // ── Spread detection ────────────────────────────────────────────────────────
 
   /**
    * Returns true if pages `idxA` and `idxA+1` are a split double-page spread
@@ -296,7 +272,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     });
   }
 
-  // ── Page stop navigation ───────────────────────────────────────────────────
 
   /**
    * Returns the page index of the next stop after `from` in paged mode.
@@ -306,7 +281,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
   function _nextStop(from) {
     if (state.doublePage) {
       const spreadOffset = getPrefs()?.spreadOffset ?? false;
-      if (!spreadOffset && from === 0) return 1; // page 0 always shown alone unless offset
+      if (!spreadOffset && from === 0) return 1;
       if (_isWideImage(from) || (from + 1 < state.pages.length && _isWideImage(from + 1)))
         return from + 1;
       return from + 2;
@@ -325,12 +300,10 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
       const c = from - offset;
       if (c >= 0 && _nextStop(c) === from) return c;
     }
-    return from - 1; // fallback: -1 when from===0 signals prev-chapter navigation
+    return from - 1;
   }
 
-  // ── Prefetch ────────────────────────────────────────────────────────────────
 
-  // Rolling fetch-time log for smart preload.
   const FETCH_WINDOW = 8;
   /** @type {number[]} */
   const _fetchMsLog = [];
@@ -369,7 +342,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     }
   }
 
-  // ── Reading-stats pace tracking ─────────────────────────────────────────────
 
   const PACE_WINDOW = 10;
   /** @type {{ time: number }[]} */
@@ -408,7 +380,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     return state.cachedPreloadN;
   }
 
-  // ── Zoom & pan ─────────────────────────────────────────────────────────────
 
   let _zoomScale = 1;
   let _zoomTx    = 0;
@@ -476,7 +447,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
 
   const isZoomed = () => _zoomScale > 1;
 
-  // ── Touch: pinch-zoom, pan, swipe ──────────────────────────────────────────
 
   let _touchStartX = 0;
   let _touchStartY = 0;
@@ -529,7 +499,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
   pagesEl.addEventListener('touchend', (e) => {
     _pinchDist = 0;
     _panActive = false;
-    if (_zoomScale > 1) return; // suppress swipe nav while zoomed
+    if (_zoomScale > 1) return;
 
     const dx = e.changedTouches[0].clientX - _touchStartX;
     const dy = e.changedTouches[0].clientY - _touchStartY;
@@ -537,10 +507,8 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) _goPage(dx < 0 ? 1 : -1);
   });
 
-  // ── Wheel zoom (desktop) ────────────────────────────────────────────────────
-  // Paged + fit=both: plain wheel zooms.
-  // Paged + fit=width/height: plain wheel scrolls the overflow axis; ctrl+wheel zooms.
-  // Scroll/webtoon: wheel always scrolls; ctrl+wheel zooms.
+  // Paged + fit=both: plain wheel zooms. Paged + fit=width/height: plain wheel scrolls the
+  // overflow axis; ctrl+wheel zooms. Scroll/webtoon: wheel always scrolls; ctrl+wheel zooms.
   // When already zoomed: wheel always zooms regardless of mode/fit.
 
   pagesEl.addEventListener('wheel', (e) => {
@@ -568,7 +536,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     }
   }, { passive: false });
 
-  // ── Mouse drag-to-pan ───────────────────────────────────────────────────────
 
   let _mousePanActive = false;
   let _mousePanStartX = 0;
@@ -608,23 +575,22 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     document.removeEventListener('mouseup',   _onMouseUp);
   });
 
-  // ── Image class helpers (used by both scroll and paged renderers) ───────────
 
   /** Returns CSS classes for page images given current fit mode and layout context. */
   function _imgClass(ctx = 'scroll') {
     if (ctx === 'scroll') {
       if (state.fit === 'height') return 'max-h-screen w-auto';
       if (state.fit === 'width')  return 'max-w-full h-auto';
-      return 'max-w-full max-h-screen object-contain'; // both
+      return 'max-w-full max-h-screen object-contain';
     }
     if (ctx === 'paged-single') {
       if (state.fit === 'height') return 'max-h-full w-auto';
       if (state.fit === 'width')  return 'max-w-full h-auto';
-      return 'max-w-full max-h-full object-contain'; // both
+      return 'max-w-full max-h-full object-contain';
     }
     if (state.fit === 'height') return 'max-h-full w-auto';
     if (state.fit === 'width')  return 'max-w-[50vw] max-h-full';
-    return 'max-w-[50vw] max-h-full object-contain'; // both
+    return 'max-w-[50vw] max-h-full object-contain';
   }
 
   /** CSS classes for a spread canvas (already a bitmap — no object-contain). */
@@ -648,7 +614,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     return `flex-1 ${overflow} ${align} relative flex justify-center`;
   }
 
-  // ── End-of-chapter card ──────────────────────────────────────────────────
   /**
    * Build the end-of-chapter card. Shared by scroll mode (appended after the
    * last page) and paged/continuous modes (shown as a final screen when the
@@ -688,9 +653,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     state.loadVersion++;
   }
 
-  // ── Continuous-paged renderer ────────────────────────────────────────────
-  // Renders a window of pages as absolutely-positioned slots. Navigation snaps
-  // by translating the container — no re-render on page change.
 
   function _renderContinuousPaged() {
     const preload = _adaptivePreload();
@@ -712,7 +674,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
       const img = document.createElement('img');
       img.src           = state.pages[i] ?? '';
       img.className     = _imgClass('paged-single');
-      img.style.aspectRatio = '2/3'; // placeholder until dimensions are known
+      img.style.aspectRatio = '2/3';
       img.alt           = `Page ${i + 1}`;
       img.dataset.index = String(i);
       const _i = i;
@@ -785,7 +747,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
         const W = _cW(leftImg) + _cW(rightImg);
         const H = Math.max(_cH(leftImg), _cH(rightImg));
         const canvas = document.createElement('canvas');
-        canvas.className   = _spreadClass(); // bitmap already has correct ratio — no object-contain
+        canvas.className   = _spreadClass();
         canvas.dataset.index = String(idxA);
         canvas.width  = W;
         canvas.height = H;
@@ -812,7 +774,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
         img.className     = _imgClass('scroll');
         img.alt           = '';
         img.loading       = 'lazy';
-        img.style.aspectRatio = '2/3'; // reserve space before dimensions are known
+        img.style.aspectRatio = '2/3';
         img.dataset.index = String(i);
         const _i = i;
         img.addEventListener('load', () => {
@@ -856,7 +818,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
           reportProgress();
           _maybePreloadNext();
         }
-      // Webtoon: higher threshold for finer per-panel progress.
       }, { root: pagesEl, threshold: state.mode === 'webtoon' ? 0.5 : 0.1 });
       pagesEl.querySelectorAll('[data-index]').forEach(el => state.scrollObs?.observe(el));
 
@@ -876,11 +837,11 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
         const img     = document.createElement('img');
         img.src       = state.pages[pageIdx] ?? '';
         img.className = _imgClass(state.doublePage ? 'paged-double' : 'paged-single');
-        img.style.aspectRatio = '2/3'; // reserve space before dimensions are known
+        img.style.aspectRatio = '2/3';
         img.alt       = altText;
         img.addEventListener('load', () => {
-          img.style.aspectRatio = ''; // clear placeholder once natural size is known
-          _applyCropToImg(img);       // re-apply crop with correct aspect ratio now known
+          img.style.aspectRatio = '';
+          _applyCropToImg(img);
           state.loaded.add(pageIdx); state.failed.delete(pageIdx);
           if (img.naturalWidth > 0) {
             _setDims(pageIdx, img.naturalWidth, img.naturalHeight);
@@ -919,8 +880,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
         return img;
       }
 
-      // When spreadOffset is on, pairs start from page 0 (no lone first page).
-      // When off (default), page 0 is always shown alone to match cover convention.
       const _firstAlone = state.doublePage && !(getPrefs()?.spreadOffset ?? false);
 
       if (state.doublePage && state.pages.length > 1) {
@@ -996,7 +955,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
           };
           leftImg.addEventListener('error',  _showSpreadError);
           rightImg.addEventListener('error', _showSpreadError);
-          // Handle already-cached images (naturalWidth set synchronously).
           if (leftImg.complete && leftImg.naturalWidth)   { _lReady = true;  _setDims(leftIdx,  leftImg.naturalWidth,  leftImg.naturalHeight);  }
           if (rightImg.complete && rightImg.naturalWidth) { _rReady = true;  _setDims(rightIdx, rightImg.naturalWidth, rightImg.naturalHeight); }
           _drawSpread();
@@ -1092,7 +1050,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     state.loadVersion++;
   }
 
-  // ── Page navigation ─────────────────────────────────────────────────────────
 
   function _goPage(rawDelta) {
     if (state.mode !== 'paged' && state.mode !== 'continuous-paged') return;
@@ -1108,7 +1065,6 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
     }
     if (next >= state.pages.length) {
       api.setChapterProgress(chapterId, 0).catch(() => {});
-      // B5: with endCardInPaged on, show the end card instead of auto-advancing.
       if (getPrefs()?.endCardInPaged) {
         _showPagedEndCard();
         return;
@@ -1132,7 +1088,7 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
       if (state.currentPage >= first && state.currentPage <= last) {
         _cpSnapToPage(state.currentPage, first);
         state.loadVersion++;
-        return; // no re-render needed; page already in DOM
+        return;
       }
     }
     _renderPages();

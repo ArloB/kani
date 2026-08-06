@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-Please **do not** open a public GitHub issue for security vulnerabilities.
+Do **not** report security vulnerabilities in public GitHub issues.
 
 Report a vulnerability through:
 
@@ -22,8 +22,8 @@ Report a vulnerability through:
 | Initial assessment | 14 days |
 | Fix / coordinated disclosure | 90 days from report |
 
-We practice coordinated disclosure: we ask that you not publish details publicly until 90 days
-after the report, or until a fix is released, whichever comes first.
+Do not publish vulnerability details until a fix is released or 90 days have passed since the
+report, whichever occurs first.
 
 ## Scope
 

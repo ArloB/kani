@@ -1,13 +1,3 @@
--- `sources.streaming_chapters` was read as a permission gate in two places and
--- written by nothing, so it was permanently 0: the capability endpoint always
--- reported false, the informational blurb it gated never rendered, and
--- `POST /rest/manga/{id}/chapter-stream/{source_id}` always refused.
---
--- The distinction it encoded does not exist. Incremental chapter delivery is
--- host-side: `fetch_and_store_chapters_impl` polls `get_chapter_list` per page
--- and emits `ChapterListPartial`/`Complete`/`Error` for *every* source, on
--- every scan. There is no per-source variation to record.
---
--- (Distinct from the CM_ASYNC `get-chapter-list-stream` guest export, which is
--- built, proven and deliberately unconsumed — see CLAUDE.md.)
+-- Incremental chapter delivery is host-side and applies to every source. This
+-- unwritten flag permanently denied a capability that does not vary by source.
 ALTER TABLE sources DROP COLUMN streaming_chapters;

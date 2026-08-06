@@ -26,7 +26,7 @@ function LoginPage() {
     fetch('/rest/auth/setup-state', { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (d?.needs_setup && d?.allowed_from_here) navigate('/setup'); })
-      .catch(() => { /* an unreachable server is the login form's own problem */ });
+      .catch(() => {});
     getRegistrationEnabled().then(d => setCanRegister(!!d?.enabled)).catch(() => {});
     getPasswordResetEnabled().then(d => setCanReset(!!d?.enabled)).catch(() => {});
   }, []);

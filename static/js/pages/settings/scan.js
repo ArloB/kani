@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Scan section.
 
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';

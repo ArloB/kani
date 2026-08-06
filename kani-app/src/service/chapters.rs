@@ -194,11 +194,6 @@ impl AppService {
             sort_order.to_sql_order()
         );
 
-        // Bind in placeholder order: the join's user_id, the manga_id, then the
-        // scanlator guard twice. This bound five values for four placeholders,
-        // which put manga_id into `? IS NULL` — never null, so the guard failed
-        // for every row and the whole call returned nothing unless a scanlator
-        // filter happened to be set.
         let ids: Vec<ChapterId> = sqlx::query_scalar::<_, i64>(&sql)
             .bind(user_id)
             .bind(manga_id)
@@ -360,7 +355,6 @@ impl AppService {
             .await?
             .map(|(page, _)| page);
 
-        // Find other downloaded chapters with the same chapter_number (different scanlators).
         let alt_rows = sqlx::query!(
             r#"SELECT id as "id: i64", scanlator, volume as "volume: i64"
                FROM chapters
@@ -480,16 +474,10 @@ impl AppService {
             let empty = list.chapters.is_empty();
             let more = list.has_next_page;
             all.extend(list.chapters);
-            // A source that always answers `has_next_page: true` would spin
-            // here forever, growing the vector without bound. This is reachable
-            // from a REST handler (`preview_migration`), so the ceiling is not
-            // hypothetical.
+            // A source that always answers `has_next_page: true` would spin here forever,
+            // growing the vector without bound. This is reachable from a REST handler
+            // (`preview_migration`), so the ceiling is not hypothetical.
             if empty || !more || page as usize >= MAX_CHAPTER_LIST_PAGES {
-                // Hitting the ceiling while the source still claims more pages
-                // means the listing is INCOMPLETE. Report that instead of
-                // pretending otherwise: a caller that deletes downloads for
-                // chapters "missing" from the listing would destroy data over
-                // chapters it simply never fetched.
                 let truncated = !empty && more && page as usize >= MAX_CHAPTER_LIST_PAGES;
                 if truncated {
                     tracing::warn!(

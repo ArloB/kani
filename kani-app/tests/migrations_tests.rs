@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Guards the migration set itself: every migration must apply cleanly to an
-// empty database, in order, with no manual repair step.
 
 use sqlx::SqlitePool;
 
@@ -29,8 +27,6 @@ async fn all_migrations_apply_to_an_empty_database() {
 async fn migrations_are_idempotent_across_a_second_run() {
     let pool = fresh_pool().await;
 
-    // Re-running the migrator on an already-migrated database must be a no-op
-    // rather than an error; this is what happens on every restart.
     sqlx::migrate!("../migrations").run(&pool).await.unwrap();
 }
 
@@ -38,8 +34,6 @@ async fn migrations_are_idempotent_across_a_second_run() {
 async fn settings_singleton_exists_with_recent_columns() {
     let pool = fresh_pool().await;
 
-    // Spot-check the newest columns: a migration that fails to add one would
-    // otherwise only surface as a query error at runtime.
     let row: (bool, i64) = sqlx::query_as(
         "SELECT update_check_enabled, browser_max_instances \
          FROM settings WHERE id = 'singleton'",

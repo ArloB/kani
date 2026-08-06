@@ -1,5 +1,4 @@
 // @ts-check
-// Manga details page — breadcrumb, hero, chapter list, tabbed manage panel.
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -39,7 +38,6 @@ import { subscribeJob } from '../sse.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-// ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
   replaceState({
@@ -54,7 +52,6 @@ function _updateUrl() {
   });
 }
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 let _isLocal = false;
 let _dbId = 0;
@@ -154,7 +151,6 @@ let _selectMode = false;
 /** @type {Array<{id:number,manga_id:number,scanlator:string,priority:number,blocked:boolean}>} */
 let _scanlatorPrefs = [];
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} container
@@ -301,17 +297,14 @@ export async function init(container, params) {
   const _mangaTitle = info?.title ?? 'Manga';
   let crumbs;
   if (!_fromSourceId && _isLocal) {
-    // Direct navigation from the library
     crumbs = [{ label: t('library.crumb'), href: '/library' }, { label: _mangaTitle }];
   } else if (source) {
-    // Navigated from a source (browsing or via source link on a library entry)
     crumbs = [
       { label: t('sources.crumb'), href: '/sources' },
       { label: source.name, href: `/source/${source.id}` },
       { label: _mangaTitle },
     ];
   } else {
-    // Direct link / unknown origin
     crumbs = [{ label: _mangaTitle }];
   }
   const _headerActions = (() => {
@@ -326,7 +319,6 @@ export async function init(container, params) {
   })();
   setPageHeader({ crumbs, actions: _headerActions });
 
-  // ── Hero: cover-derived backdrop + display-face title ──
   // The page had no heading at all — the title only appeared in the breadcrumb.
   // The backdrop sits behind the top of the content so the cover (first child of
   // leftCol) floats on it.
@@ -349,10 +341,9 @@ export async function init(container, params) {
   heroTitle.textContent = _mangaTitle;
   heroInner.appendChild(heroTitle);
   hero.appendChild(heroInner);
-  // The hero sits OUTSIDE the max-w-page wrapper: the band must bleed across
-  // the whole pane (on wide monitors a wrapper-bound band floats as an island
-  // with hard vertical seams). The inner div re-centres the title onto the
-  // same content grid as the columns below.
+  // The hero sits OUTSIDE the max-w-page wrapper: the band must bleed across the whole pane (on
+  // wide monitors a wrapper-bound band floats as an island with hard vertical seams). The inner
+  // div re-centres the title onto the same content grid as the columns below.
   container.insertBefore(hero, wrap);
 
   const layout = document.createElement('div');
@@ -514,7 +505,6 @@ export async function init(container, params) {
   };
   window.addEventListener('kani:sse', _sseListener);
 
-  // Escape leaves chapter select mode.
   _escHandler = (e) => {
     if (e.key === 'Escape' && _selectMode) {
       _selectMode = false; _selected.clear(); _allSelected = false; _renderChapterList();
@@ -523,18 +513,13 @@ export async function init(container, params) {
   document.addEventListener('keydown', _escHandler);
 }
 
-// ── Tabs (local only) ─────────────────────────────────────────────────────────
 
 function _renderTabs(wrap) {
   const tabContent = document.createElement('div');
-  // A flex column: the chapter list scrolls inside it and the pager stays put
-  // at the bottom rather than floating below the last row.
   tabContent.className = 'page-fill page-col';
   _contentSection = tabContent;
 
-  // The tab row carries the chapter controls on its right. They used to sit on
-  // their own line directly beneath, which cost a chapter row for chrome the
-  // tab row had space for.
+  // Chapter controls share the tab row to preserve vertical reading space.
   const tabRow = document.createElement('div');
   tabRow.className = 'chapter-tabrow flex items-end justify-between gap-4 flex-wrap';
 
@@ -579,7 +564,6 @@ function _renderTabs(wrap) {
   switchTab(_activeTab);
 }
 
-// ── Manage tab ────────────────────────────────────────────────────────────────
 
 async function _renderManageTab(contentEl) {
   if (_manageMounted) return;
@@ -623,7 +607,6 @@ async function _renderManageTab(contentEl) {
   _manageResizeListener = applyManageHeight;
   window.addEventListener('resize', _manageResizeListener);
 
-  // ── 0. Metadata overrides ────────────────────────────────────────────────────
 
   if (hasPermission('library:manage') && _isLocal) {
     const metaSection = document.createElement('div');
@@ -633,7 +616,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.metadata.appendChild(metaSection);
   }
 
-  // ── 0b. Enrich Metadata ──────────────────────────────────────────────────────
 
   if (hasPermission('library:manage') && _isLocal) {
     const enrichSection = document.createElement('div');
@@ -650,7 +632,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.metadata.appendChild(enrichSection);
   }
 
-  // ── 1. Library ──────────────────────────────────────────────────────────────
 
   const hasLibSection =
     hasPermission('library:refresh') ||
@@ -664,7 +645,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.library.appendChild(section);
   }
 
-  // ── 1a. Volumes ────────────────────────────────────────────────────────────
 
   if (hasPermission('library:manage') && _isLocal) {
     const volumesSection = document.createElement('div');
@@ -674,7 +654,6 @@ async function _renderManageTab(contentEl) {
     mountVolumesPanel(volumesSection, _dbId);
   }
 
-  // ── 1b–1c. Tracking ────────────────────────────────────────────────────────
 
   {
     const trackSection = document.createElement('div');
@@ -684,7 +663,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.tracking.appendChild(trackSection);
   }
 
-  // ── 1d. Notes ──────────────────────────────────────────────────────────────
 
   if (hasPermission('library:manage')) {
     const notesSection = document.createElement('div');
@@ -747,7 +725,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.metadata.appendChild(notesSection);
   }
 
-  // ── 2. Filters & Preferences ────────────────────────────────────────────────
 
   if (hasPermission('library:manage')) {
     const [cats, mangaCats, rules, scanlatorPrefs] = await Promise.allSettled([
@@ -783,7 +760,6 @@ async function _renderManageTab(contentEl) {
     manageGroups.downloads.appendChild(dlSection);
   }
 
-  // ── 3. Danger Zone ──────────────────────────────────────────────────────────
 
   const hasDangerSection =
     (hasPermission('library:manage') && _sid) ||
@@ -891,7 +867,6 @@ async function _renderManageTab(contentEl) {
   });
 }
 
-// ── Chapter helpers ───────────────────────────────────────────────────────────
 
 /** @param {any} ch */
 function _mapChapter(ch) {
@@ -971,7 +946,6 @@ function _findNextPreferredChapter() {
   return null;
 }
 
-// ── Streaming chapter counter ─────────────────────────────────────────────────
 
 function _updateStreamingCounter(received, complete) {
   if (!_streamingBannerEl) {
@@ -992,7 +966,6 @@ function _clearStreamingCounter() {
   _streamingBannerEl = null;
 }
 
-// ── Enrich metadata modal ─────────────────────────────────────────────────────
 
 function _openEnrichMetadataModal() {
   function EnrichModal({ onClose }) {
@@ -1064,7 +1037,6 @@ function _openEnrichMetadataModal() {
   const unmount = mountIntoModalRoot(html`<${EnrichModal} onClose=${() => unmount()} />`);
 }
 
-// ── Chapter notes modal ───────────────────────────────────────────────────────
 
 function _openChapterNotesModal() {
   const overlay = document.createElement('div');
@@ -1116,7 +1088,6 @@ function _openChapterNotesModal() {
   document.addEventListener('keydown', _onKey);
 }
 
-// ── Chapters ──────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} sectionEl */
 async function _fetchChapters(sectionEl) {
@@ -1204,10 +1175,6 @@ async function _fetchChapters(sectionEl) {
   }
 
   if (_isLocal) {
-    // One control rather than four chips. Four fitted at 1500 px and wrapped at
-    // 1280, which pushed the list further down than before the tab row was
-    // consolidated at all — the saving has to hold at every width or it is not
-    // a saving.
     const filterDefs = [
       {
         key: 'downloaded',
@@ -1302,20 +1269,13 @@ async function _fetchChapters(sectionEl) {
   }
 
   const listEl = document.createElement('div');
-  // flex-initial, not flex-1: a three-chapter series should not stretch its
-  // list over 486 px of empty column with the pager stranded at the bottom.
-  // The list takes the height it needs, shrinks when there is more than fits,
-  // and the pager follows the rows either way.
   listEl.className = 'page-body--fit';
   sectionEl.appendChild(listEl);
 
-  // The pager is the column's footer: it sits on the bottom edge with its own
-  // padding instead of trailing the last row wherever that happens to land.
   const paginEl = document.createElement('div');
   paginEl.className = 'md:shrink-0 md:pt-3 md:border-t md:border-border-subtle';
   if (!infinite) sectionEl.appendChild(paginEl);
 
-  // Show skeleton rows while chapters load
   listEl.innerHTML = [1,2,3,4,5].map(() => '<div class="h-14 mx-0 my-1 skeleton rounded-lg"></div>').join('');
 
   let result;
@@ -1427,18 +1387,8 @@ function _renderChapterList() {
     : `/source/${_sid}/manga/${encodeURIComponent(_mangaId)}/chapter/${encodeURIComponent(ch.source_chapter_id ?? ch.id)}`;
   const displayChapters = _filterCached ? _chapters.filter(ch => _cachedChapterIds.has(ch.id)) : _chapters;
   const paginH = _paginEl ? (_paginEl.offsetHeight + 12) : 0;
-  // The windowed list needs a pixel height, but it should be the smaller of
-  // what is available and what the rows actually need. Claiming the whole
-  // column regardless left a three-chapter series with ~490 px of empty
-  // scroller under it and the pager stranded at the bottom of the page.
-  // 1024, matching the layout: between 768 and 1023 the columns are stacked,
-  // and handing the list a windowed pixel height computed for a layout that is
-  // not on screen collapsed it to 64 px.
   const height = window.innerWidth >= 1024
     ? (() => {
-        // Measure against the column the list actually lives in, not the
-        // window with a magic 48 px of slack: the section already ends where
-        // the layout says it should.
         const section = _listContainerEl.parentElement;
         const bottom = section
           ? section.getBoundingClientRect().bottom
@@ -1635,7 +1585,6 @@ async function _loadMoreChapters() {
   _renderChapterList();
 }
 
-// ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
@@ -1667,4 +1616,3 @@ export function destroy(container) {
   clearPageHeader();
   container.innerHTML = '';
 }
-

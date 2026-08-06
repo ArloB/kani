@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Content addressing: manifest capture, and the rename-safety property that
-// stored file_path exists to provide.
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
@@ -51,9 +49,6 @@ async fn seed_downloaded_chapter(
         .await
         .unwrap();
 
-    // The manga directory has to exist before the path guard will resolve, but
-    // the filename comes from the service so this test cannot drift from the
-    // real naming scheme.
     let library = { svc.settings.read().await.library_path.clone() };
     std::fs::create_dir_all(library.join(format!(
         "{} - {}",
@@ -156,8 +151,6 @@ async fn a_library_root_that_is_not_canonical_still_stores_the_path() {
     assert!(!stored.starts_with('/'), "got {stored}");
     assert!(stored.ends_with(".cbz"), "got {stored}");
 
-    // The path has to round-trip: the whole point of storing it is that
-    // resolution stops depending on the title.
     sqlx::query("UPDATE manga SET name = 'Renamed After Storing' WHERE id = (SELECT manga_id FROM chapters WHERE id = ?)")
         .bind(chapter)
         .execute(&svc.db)
@@ -173,8 +166,6 @@ async fn a_library_root_that_is_not_canonical_still_stores_the_path() {
     let _ = std::fs::remove_file(&link);
 }
 
-/// A downloaded chapter that lives outside the library root has no storable
-/// relative path — it must stay NULL rather than gain a misleading one.
 #[tokio::test]
 async fn a_chapter_outside_the_library_root_stores_no_path() {
     let svc = test_service().await;
@@ -218,8 +209,6 @@ async fn renaming_a_manga_does_not_orphan_its_chapter() {
     let path = svc.chapter_cbz_path(chapter).await.unwrap().path;
     svc.record_chapter_manifest(chapter, path).await;
 
-    // Rename the manga. The file stays where it is; without a stored path the
-    // read-time derivation would now point at a directory that does not exist.
     sqlx::query("UPDATE manga SET name = 'Completely Different Title' WHERE id = (SELECT manga_id FROM chapters WHERE id = ?)")
         .bind(chapter)
         .execute(&svc.db)
@@ -236,7 +225,6 @@ async fn a_chapter_without_a_stored_path_still_resolves_by_derivation() {
     let svc = test_service().await;
     let (chapter, cbz) = seed_downloaded_chapter(&svc, "Pre Backfill").await;
 
-    // No record_chapter_manifest call: this is a pre-migration row.
     let resolved = svc.chapter_cbz_path(chapter).await.unwrap().path;
     assert_eq!(
         resolved, cbz,
@@ -310,10 +298,6 @@ async fn identical_chapters_share_a_content_hash() {
     );
 }
 
-/// Source migration is the one flow that physically moves files, so a stored
-/// path must follow the rename. Without the repoint this resolves to the old
-/// directory, which no longer exists — the regression that preferring
-/// file_path over title derivation would otherwise introduce.
 #[tokio::test]
 async fn migrating_a_manga_repoints_stored_chapter_paths() {
     let svc = test_service().await;
@@ -331,7 +315,6 @@ async fn migrating_a_manga_repoints_stored_chapter_paths() {
     let old_dir = library.join(format!("Old Source Title - {manga_id}"));
     let new_dir = library.join(format!("New Source Title - {manga_id}"));
 
-    // Simulate what migrate_manga does: rename the row and move the directory.
     std::fs::rename(&old_dir, &new_dir).unwrap();
     sqlx::query("UPDATE manga SET name = 'New Source Title' WHERE id = ?")
         .bind(manga_id)
@@ -366,9 +349,6 @@ async fn migrating_a_manga_repoints_stored_chapter_paths() {
     assert!(resolved.exists(), "repointed path must exist on disk");
 }
 
-/// Deleting a chapter must drop its content columns. A surviving hash makes the
-/// chapter look present to the scrub and lets exact-duplicate detection match a
-/// file that no longer exists.
 #[tokio::test]
 async fn deleting_a_chapter_clears_its_content_columns() {
     let svc = test_service().await;
@@ -403,9 +383,6 @@ async fn deleting_a_chapter_clears_its_content_columns() {
     assert!(!cbz.exists(), "the file itself should be gone");
 }
 
-/// A chapter re-downloaded after its manga was renamed lands at the new
-/// title-derived location. The stored path must describe where the file
-/// actually is, not where a previous download left one.
 #[tokio::test]
 async fn stale_stored_path_does_not_survive_a_redownload() {
     let svc = test_service().await;
@@ -424,8 +401,6 @@ async fn stale_stored_path_does_not_survive_a_redownload() {
         .await
         .unwrap();
 
-    // Stand in for the download commit: clear, then record where the downloader
-    // actually wrote (the title-derived path for the *current* name).
     let library = { svc.settings.read().await.library_path.clone() };
     let new_dir = library.join(format!("After Rename - {manga_id}"));
     std::fs::create_dir_all(&new_dir).unwrap();
@@ -444,8 +419,6 @@ async fn stale_stored_path_does_not_survive_a_redownload() {
     assert_eq!(resolved, fresh, "stored path must describe the new file");
 }
 
-// ── Scrub ────────────────────────────────────────────────────────────────────
-
 use kani_app::service::integrity::ScrubDepth;
 
 async fn seed_and_record(
@@ -457,10 +430,6 @@ async fn seed_and_record(
     (chapter, cbz)
 }
 
-/// The stored path is library-relative and the disk walk is rooted, so a scrub
-/// that compares the two forms directly calls every healthy chapter drifted —
-/// and `fix` then writes the rooted path back into a relative column, after
-/// which nothing resolves at all.
 #[tokio::test]
 async fn a_healthy_chapter_reports_no_drift() {
     let svc = test_service().await;
@@ -516,17 +485,11 @@ async fn scrub_reports_corruption_and_deep_names_the_page() {
     let svc = test_service().await;
     let (chapter, cbz) = seed_and_record(&svc, "Rotten").await;
 
-    // Flip a byte inside the archive without changing its length, so only a
-    // hash can tell.
     let mut bytes = std::fs::read(&cbz).unwrap();
     let mid = bytes.len() / 2;
     bytes[mid] ^= 0xFF;
     std::fs::write(&cbz, &bytes).unwrap();
 
-    // `full`, because the download recorded a verification moments ago and a
-    // *scheduled* scrub deliberately skips re-hashing inside the revalidation
-    // window. This asserts the detection capability, which is what a scrub the
-    // user triggers by hand performs.
     let quick = svc
         .scrub_library_inner(ScrubDepth::Quick, false, true, None)
         .await
@@ -587,9 +550,6 @@ async fn scrub_fix_repoints_path_drift() {
         .await
         .unwrap();
 
-    // Simulate a stored path that no longer matches where the file is: the row
-    // points somewhere gone, but the title-derived location still has it. The
-    // column holds a library-relative path, so the stale value is one too.
     sqlx::query("UPDATE chapters SET file_path = 'Drifter - 1/moved-away.cbz' WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
@@ -617,8 +577,6 @@ async fn scrub_fix_repoints_path_drift() {
         "a repair must store the library-relative form, got {stored}"
     );
 
-    // The repaired value has to be one resolution can use, and a second scrub
-    // must find nothing left to repair.
     assert_eq!(svc.chapter_cbz_path(chapter).await.unwrap().path, cbz);
     let again = svc
         .scrub_library(ScrubDepth::Quick, false, None)
@@ -693,9 +651,6 @@ async fn scrub_groups_byte_identical_chapters() {
         ids.push(chapter.0);
     }
 
-    // Copy rather than re-zip: the case this catches is the same file listed
-    // twice, and copying makes the archives byte-identical regardless of
-    // whatever the zip writer stamps into a fresh archive.
     write_cbz(&paths[0], &[10, 90]);
     std::fs::copy(&paths[0], &paths[1]).unwrap();
     for (chapter, path) in ids.iter().zip(paths.iter()) {
@@ -794,8 +749,6 @@ async fn a_scheduled_scrub_skips_recently_verified_chapters() {
     let svc = test_service().await;
     let (chapter, path) = seed_downloaded_chapter(&svc, "Verified").await;
 
-    // A download hashes the file and records the verification, exactly as
-    // `manifest_capture` does in production.
     svc.record_chapter_manifest(chapter, path).await;
     let verified: Option<i64> =
         sqlx::query_scalar("SELECT file_verified_at FROM chapters WHERE id = ?")
@@ -808,8 +761,6 @@ async fn a_scheduled_scrub_skips_recently_verified_chapters() {
         "a download records the verification time"
     );
 
-    // A scheduled scrub must not re-hash it — this is the whole point of the
-    // column, which was written and read by nothing.
     let second = svc
         .scrub_library(ScrubDepth::Quick, false, None)
         .await
@@ -826,7 +777,6 @@ async fn a_scheduled_scrub_skips_recently_verified_chapters() {
          not be skipped, or a file deleted after a scrub goes unnoticed"
     );
 
-    // A scrub the user asked for ignores the window.
     let manual = svc
         .scrub_library_inner(ScrubDepth::Quick, false, true, None)
         .await

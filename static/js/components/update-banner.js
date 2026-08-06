@@ -87,6 +87,5 @@ export async function maybeShowUpdateBanner(appEl) {
       mount
     );
   } catch {
-    /* non-fatal */
   }
 }

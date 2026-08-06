@@ -21,7 +21,7 @@ pub const MAX_STRING_LENGTH: usize = 1_000_000;
 
 /// Overridable ceilings for the declarative evaluator. Production uses
 /// [`EvalLimits::default`] (the `MAX_*` consts); tests shrink them via
-/// [`EvalBudget::with_limits`] to trip a cap without a giant fixture.
+/// `EvalBudget::with_limits` to trip a cap without a giant fixture.
 #[derive(Debug, Clone, Copy)]
 pub struct EvalLimits {
     pub max_iterations: u32,
@@ -1075,13 +1075,6 @@ pub async fn fetch_body(
             }
         }
 
-        // Surface a typed error for statuses whose body is never useful to
-        // extraction, so an interpreted-YAML source can report RateLimited /
-        // Auth / a retryable server error instead of collapsing every failure
-        // into a parse error. 404 is deliberately excluded: some sources return
-        // it to signal "no more pages", and the chapter-list loop treats a
-        // fatal error differently from an empty body. A source that wants a
-        // non-2xx body extracted can accept it with an `on_status` Proceed hook.
         let code = status.as_u16();
         if !proceeded && (code == 429 || code == 401 || code == 403 || (500..600).contains(&code)) {
             let ra = retry_after.map(|s| s.to_string()).unwrap_or_default();

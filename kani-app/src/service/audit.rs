@@ -87,7 +87,7 @@ impl AppService {
         }
 
         let total_pages = if has_next || page > 1 {
-            None // Expensive COUNT(*) skipped; frontend shows "next" button
+            None
         } else {
             Some(page as u32)
         };

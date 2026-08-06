@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for the OPDS-PSE chapter routes + API-token auth mounted at /opds.
 
 mod common;
 use axum::http::StatusCode;
@@ -101,7 +100,6 @@ async fn chapter_feed_auth_matrix() {
     let app = build_test_app_with_opds(state).await;
     let uri = format!("/opds/chapters/{}", ch.0);
 
-    // Session cookie.
     let cookie = login(&app, u, p).await;
     let res = app
         .clone()
@@ -116,7 +114,6 @@ async fn chapter_feed_auth_matrix() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Bearer token.
     let res = app.clone().oneshot(bearer_get(&uri, &token)).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.into_body().collect().await.unwrap().to_bytes();
@@ -125,7 +122,6 @@ async fn chapter_feed_auth_matrix() {
     assert!(text.contains(r#"pse:count="3""#));
     assert!(text.contains("page?page={pageNumber}"));
 
-    // Basic with token as password.
     let res = app
         .clone()
         .oneshot(
@@ -139,7 +135,6 @@ async fn chapter_feed_auth_matrix() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // No credentials.
     let res = app
         .clone()
         .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
@@ -168,7 +163,6 @@ async fn page_endpoint_validation() {
         .raw_token;
     let app = build_test_app_with_opds(state).await;
 
-    // Valid page — 1 is the first page.
     let res = app
         .clone()
         .oneshot(bearer_get(
@@ -179,7 +173,6 @@ async fn page_endpoint_validation() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Page 0 is not a valid 1-based page number.
     let res = app
         .clone()
         .oneshot(bearer_get(
@@ -190,7 +183,6 @@ async fn page_endpoint_validation() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
-    // Missing page param → 400.
     let res = app
         .clone()
         .oneshot(bearer_get(&format!("/opds/chapters/{}/page", ch.0), &token))
@@ -198,7 +190,6 @@ async fn page_endpoint_validation() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
-    // Unsupported format → 400.
     let res = app
         .clone()
         .oneshot(bearer_get(
@@ -209,7 +200,6 @@ async fn page_endpoint_validation() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
-    // Out-of-range page → 404.
     let res = app
         .clone()
         .oneshot(bearer_get(
@@ -242,7 +232,6 @@ async fn file_endpoint_supports_range() {
     let app = build_test_app_with_opds(state).await;
     let uri = format!("/opds/chapters/{}/file", ch.0);
 
-    // Ranged request → 206.
     let res = app
         .clone()
         .oneshot(
@@ -266,7 +255,6 @@ async fn file_endpoint_supports_range() {
     let body = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(body.len(), 100);
 
-    // Unsatisfiable range → 416.
     let res = app
         .clone()
         .oneshot(
@@ -351,7 +339,6 @@ async fn progress_push_updates_last_read() {
         .await
         .unwrap()
         .raw_token;
-    // Keep a service handle to flush the write-buffer after the POST.
     let service = state.service.clone();
     let app = build_test_app_with_opds(state).await;
 
@@ -382,10 +369,6 @@ async fn progress_push_updates_last_read() {
     assert!(text.contains(r#"pse:lastRead="2""#), "feed: {text}");
 }
 
-// The round-trip above passes under either convention, because the shift on the
-// way in cancels the shift on the way out. This pins the conversion itself: the
-// page a reader reports is 1-based, what gets stored is the 0-based index the
-// web reader also uses, and the two must not silently become the same number.
 #[tokio::test]
 async fn a_reported_page_is_stored_as_a_zero_based_index() {
     let state = test_state().await;
@@ -473,7 +456,6 @@ async fn token_semantics() {
     let ch = seed_downloaded_chapter(&state).await;
     let uid = admin_user_id(&state).await;
 
-    // A token we will revoke.
     let revoked = state
         .service
         .create_token(
@@ -491,7 +473,6 @@ async fn token_semantics() {
         .await
         .unwrap();
 
-    // An expired token.
     let expired = state
         .service
         .create_token(
@@ -509,7 +490,6 @@ async fn token_semantics() {
         .await
         .unwrap();
 
-    // A read-only token (no opds:progress).
     let readonly = state
         .service
         .create_token(
@@ -527,7 +507,6 @@ async fn token_semantics() {
         .await
         .unwrap();
 
-    // A valid token used for the wrong-username Basic check.
     let good = state
         .service
         .create_token(
@@ -543,7 +522,6 @@ async fn token_semantics() {
     let app = build_test_app_with_opds(state).await;
     let feed_uri = format!("/opds/chapters/{}", ch.0);
 
-    // Revoked → 401.
     let res = app
         .clone()
         .oneshot(bearer_get(&feed_uri, &revoked.raw_token))
@@ -551,7 +529,6 @@ async fn token_semantics() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
-    // Expired → 401.
     let res = app
         .clone()
         .oneshot(bearer_get(&feed_uri, &expired.raw_token))
@@ -559,7 +536,6 @@ async fn token_semantics() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
-    // Read-only token can read the feed…
     let res = app
         .clone()
         .oneshot(bearer_get(&feed_uri, &readonly.raw_token))
@@ -567,7 +543,6 @@ async fn token_semantics() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // …but is forbidden from pushing progress → 403.
     let res = app
         .clone()
         .oneshot(
@@ -583,7 +558,6 @@ async fn token_semantics() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    // Basic with a valid token but wrong username → 401.
     let res = app
         .clone()
         .oneshot(

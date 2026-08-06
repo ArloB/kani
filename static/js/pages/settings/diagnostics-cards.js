@@ -1,7 +1,4 @@
 // @ts-check
-// Diagnostics card registry. Later plans add cards by calling
-// registerDiagnosticsCard(def) from their own module — no edit to
-// diagnostics.js required.
 
 import { h } from 'preact';
 import { useEffect, useState } from 'preact/hooks';

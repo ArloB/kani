@@ -1,5 +1,4 @@
 // @ts-check
-// Collapsible panel component — toggle-able body section.
 
 import { iconChevronRight } from '../icons.js';
 

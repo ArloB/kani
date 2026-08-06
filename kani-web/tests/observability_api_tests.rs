@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for the observability layer: request-trace IDs on every response.
 
 mod common;
 use common::{build_test_app, get_req, test_state};
@@ -397,12 +396,6 @@ async fn system_update_requires_authentication() {
     assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
 
-// ── Group R — the Prometheus exposition, as a scraper reads it ────────────────
-//
-// The consumer is a scraper. `text.contains("# TYPE")` cannot tell a valid
-// exposition from a broken one, and a malformed body means monitoring fails
-// silently — the worst way for observability to fail. These parse the document.
-
 #[derive(Debug)]
 struct Exposition {
     /// metric base name → declared type
@@ -462,10 +455,9 @@ fn parse_exposition(body: &str) -> Exposition {
             continue;
         }
         if line.starts_with('#') {
-            continue; // a plain comment
+            continue;
         }
 
-        // A sample: `name{labels} value [timestamp]`
         let (name_and_labels, value) = line
             .rsplit_once(' ')
             .unwrap_or_else(|| panic!("line {}: sample has no value: {line}", lineno + 1));
@@ -502,7 +494,6 @@ fn base_name(sample: &str) -> String {
     sample.to_string()
 }
 
-// R1 — the whole document parses as the text exposition format.
 #[tokio::test]
 async fn the_metrics_exposition_parses_as_prometheus_text_format() {
     kani_web::metrics::describe();
@@ -514,7 +505,6 @@ async fn the_metrics_exposition_parses_as_prometheus_text_format() {
     );
 }
 
-// R2 — every sample belongs to a declared metric, and declarations are paired.
 #[tokio::test]
 async fn every_metric_has_a_matching_help_and_type_line() {
     kani_web::metrics::describe();
@@ -536,8 +526,6 @@ async fn every_metric_has_a_matching_help_and_type_line() {
     }
 }
 
-// R4 — metric names are valid identifiers. A name derived from user data (a
-// source or extension id) would break the entire scrape, not just its own line.
 #[tokio::test]
 async fn metric_names_are_valid_identifiers() {
     kani_web::metrics::describe();
@@ -555,7 +543,6 @@ async fn metric_names_are_valid_identifiers() {
             is_valid_metric_name(sample),
             "{sample} is not a valid Prometheus metric name"
         );
-        // R3 — label blocks must be well-formed: quoted values, no raw newline.
         if let Some(l) = labels {
             assert!(
                 !l.contains('\n'),
@@ -574,8 +561,6 @@ async fn metric_names_are_valid_identifiers() {
     }
 }
 
-// R5 — counters never go backwards between scrapes. A decreasing counter
-// silently corrupts every rate() built on it.
 #[tokio::test]
 async fn counters_do_not_go_backwards_across_two_scrapes() {
     kani_web::metrics::describe();
@@ -610,9 +595,6 @@ async fn counters_do_not_go_backwards_across_two_scrapes() {
     }
 }
 
-// The validator above is only worth having if it rejects things. These pin that
-// it does — a parser that accepts anything would make R1/R2/R4 vacuous.
-
 #[test]
 #[should_panic(expected = "sample value is not a number")]
 fn the_exposition_parser_rejects_a_non_numeric_sample() {
@@ -633,8 +615,6 @@ fn the_exposition_parser_rejects_an_unterminated_label_block() {
 
 #[test]
 fn a_sample_without_a_type_declaration_is_detected() {
-    // Not a panic in the parser — R2 is what catches this, so prove the shape
-    // R2 relies on is what an undeclared sample actually produces.
     let parsed = parse_exposition("# HELP x h\n# TYPE x counter\nx 1\ny 2\n");
     assert!(parsed.declared.contains_key("x"));
     assert!(

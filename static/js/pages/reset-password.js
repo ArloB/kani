@@ -1,5 +1,4 @@
 // @ts-check
-// Reset password page — validates token, then allows the user to set a new password.
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';

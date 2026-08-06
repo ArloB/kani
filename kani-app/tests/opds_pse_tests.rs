@@ -39,7 +39,6 @@ async fn seed_downloaded_chapter(svc: &AppService) -> (ChapterId, Vec<Vec<u8>>) 
         .await
         .unwrap();
 
-    // The path resolver canonicalises the manga directory, so it must exist first.
     let library_path = svc.settings.read().await.library_path.clone();
     let manga_dir = library_path.join(format!(
         "{} - {}",
@@ -84,14 +83,12 @@ async fn chapter_feed_reflects_progress() {
     let (ch, _pages) = seed_downloaded_chapter(&svc).await;
     let user = insert_user(&svc.db, "bob").await;
 
-    // No progress row → no lastRead attribute.
     let feed = svc
         .opds_chapter_feed(ch, user, "http://host")
         .await
         .unwrap();
     assert!(!feed.contains("pse:lastRead"));
 
-    // Record progress and flush the buffer.
     svc.set_chapter_progress(user, ch, 1).await.unwrap();
     svc.flush_progress_buffer().await;
 
@@ -99,17 +96,9 @@ async fn chapter_feed_reflects_progress() {
         .opds_chapter_feed(ch, user, "http://host")
         .await
         .unwrap();
-    // Stored progress is a 0-based index, so index 1 is the second page and is
-    // reported as `2` under the 1-based default.
     assert!(feed.contains(r#"pse:lastRead="2""#), "feed: {feed}");
     assert!(feed.contains("pse:lastReadDate="));
 }
-
-// ── Page numbering ────────────────────────────────────────────────────────────
-//
-// `?page=` is what an OPDS reader substituted into `{pageNumber}`. Kani used to
-// treat it as a raw 0-based index, so a reader that starts at 1 saw the second
-// page first and 404'd on the last one. Default is now 1-based.
 
 #[tokio::test]
 async fn page_one_is_the_first_page() {
@@ -130,8 +119,6 @@ async fn page_two_is_the_second_page() {
     assert_eq!(bytes, pages[1]);
 }
 
-// The regression that motivated the change: the highest page number a reader
-// derives from `pse:count` must exist.
 #[tokio::test]
 async fn the_last_page_by_pse_count_is_reachable() {
     let svc = test_service().await;
@@ -215,7 +202,6 @@ async fn chapter_page_transcode_downscales() {
     let svc = test_service().await;
     let (ch, _pages) = seed_downloaded_chapter(&svc).await;
 
-    // page 2 is 400x300; ask for width 2.
     let (bytes, ct) = svc.opds_chapter_page(ch, 3, 2, None).await.unwrap();
     assert_eq!(ct, "image/jpeg");
     let out = image::load_from_memory(&bytes).unwrap();
@@ -227,7 +213,6 @@ async fn chapter_page_width_above_clamp_does_not_upscale() {
     let svc = test_service().await;
     let (ch, _pages) = seed_downloaded_chapter(&svc).await;
 
-    // Request an absurd width; the 400px source must not be upscaled.
     let (bytes, _ct) = svc.opds_chapter_page(ch, 3, 100_000, None).await.unwrap();
     let out = image::load_from_memory(&bytes).unwrap();
     assert_eq!(out.width(), 400);

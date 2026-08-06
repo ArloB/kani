@@ -8,9 +8,7 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [0.9.0] - 2026-07-21
 
-Pre-1.0 stabilisation release. The runtime and feature set are mature; this
-series exists to prove the release, observability and data-safety machinery
-before 1.0 makes its compatibility promises.
+Pre-1.0 stabilisation release focused on release processes, observability, and data safety.
 
 ### Added
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // @ts-check
-// Scans static/js/**/*.js for t("...") / t('...') calls and verifies that
-// every referenced key exists in the base catalog (static/locales/en.js).
-// Exits 1 if any key is referenced but not defined.
-//
-// Usage: node scripts/check-i18n-keys.js
+/**
+ * Verifies that every static `t()` key exists in the base English catalog.
+ * Exits with status 1 when a referenced key is undefined.
+ */
 
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
@@ -57,10 +56,6 @@ for (const file of allFiles) {
   }
 }
 
-// The settings nav builds its labels from the section id via a template literal
-// (`settings.section.${id}.label`), which T_RE cannot see — so a section could be
-// registered with no catalog entry and CI stayed green while the nav rendered the
-// raw key. Derive the expected keys from the section ids instead.
 {
   const idx = join(ROOT, 'static/js/pages/settings/index.js');
   const src = readFileSync(idx, 'utf8');

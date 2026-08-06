@@ -1,4 +1,4 @@
-//! Server-persisted UI themes (plan 05).
+//! Server-persisted UI themes.
 //!
 //! A theme is a set of design-token overrides plus optional custom CSS. The
 //! server is the authority on what is storable: token *names* come from a fixed
@@ -20,7 +20,6 @@ use crate::service::AppService;
 /// Anything outside this list is refused by name — a theme cannot invent a
 /// custom property and have it stored.
 const TOKEN_ALLOWLIST: &[&str] = &[
-    // Core colours (mirrors CORE_TOKENS in static/js/theme.js).
     "--color-bg",
     "--color-surface",
     "--color-surface-2",
@@ -34,33 +33,27 @@ const TOKEN_ALLOWLIST: &[&str] = &[
     "--color-success",
     "--color-warn",
     "--color-danger",
-    // Derived accent tokens.
     "--color-accent-hover",
     "--color-accent-dim",
-    // Other safe colour tokens.
     "--color-surface-alt",
     "--color-on-accent",
-    // Radii.
     "--radius-sm",
     "--radius-md",
     "--radius-lg",
     "--radius-xl",
     "--radius-full",
-    // Shadows.
     "--shadow-sm",
     "--shadow-card",
     "--shadow-md",
     "--shadow-lg",
     "--shadow-popover",
     "--shadow-focus-ring",
-    // Motion.
     "--motion-fast",
     "--motion-base",
     "--motion-slow",
     "--motion-ease",
     "--motion-ease-in",
     "--motion-ease-out",
-    // Chart series.
     "--chart-1",
     "--chart-2",
     "--chart-3",
@@ -114,8 +107,6 @@ pub struct SanitizeResult {
     pub css: String,
     pub stripped: Vec<String>,
 }
-
-// ── Validation ────────────────────────────────────────────────────────────────
 
 fn validate_token_name(name: &str) -> bool {
     TOKEN_ALLOWLIST.contains(&name)
@@ -187,8 +178,6 @@ fn validate_tokens(tokens: &BTreeMap<String, String>) -> Result<()> {
     }
     Ok(())
 }
-
-// ── CSS sanitisation ──────────────────────────────────────────────────────────
 
 /// At-rules a theme may keep. `@import` is the dangerous one — it fetches — and
 /// `@font-face`/`@charset`/`@namespace` have no place in a colour theme.
@@ -281,10 +270,9 @@ fn split_top_level(input: &str) -> Vec<Block> {
                 depth = 1;
                 body.clear();
             } else if c == ';' {
-                // A statement at-rule (`@import url(x);`) has no block. Without
-                // this case `head` kept accumulating to the next `{`, so the
-                // at-rule swallowed the rule that followed it — stripping
-                // `@import` also deleted the user's actual CSS.
+                // A statement at-rule (`@import url(x);`) has no block. Without this case `head`
+                // kept accumulating to the next `{`, so the at-rule swallowed the rule that
+                // followed it — stripping `@import` also deleted the user's actual CSS.
                 let stmt = head.trim().to_string();
                 if !stmt.is_empty() {
                     let name = stmt.split_whitespace().next().unwrap_or("").to_string();
@@ -384,8 +372,6 @@ fn scope_selector(selector: &str) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
-
-// ── Service methods ───────────────────────────────────────────────────────────
 
 impl AppService {
     /// A user's own themes plus every instance-wide theme.
@@ -739,7 +725,6 @@ mod tests {
     #[test]
     fn an_unbalanced_brace_does_not_panic_or_emit_a_broken_rule() {
         let out = sanitize_custom_css(".a { color: red");
-        // Unterminated input is discarded rather than emitted half-formed.
         assert!(!out.css.contains("color: red"), "got {}", out.css);
     }
 }

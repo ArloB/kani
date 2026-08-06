@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 use crate::jobs::error::JobError;
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
-/// Minimum spacing between remote calls per access token. AniList allows ~90 req/min,
-/// so ~0.7s spacing keeps a single token comfortably under its limit.
+/// Default per-token spacing; provider `Retry-After` extends it dynamically.
 pub const MIN_TOKEN_SPACING: Duration = Duration::from_millis(700);
 
 /// Maximum number of stale entries processed in a single run, to bound work.

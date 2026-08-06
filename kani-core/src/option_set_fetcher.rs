@@ -1,3 +1,5 @@
+//! Host-side fetching and extraction of dynamically populated extension filter options.
+
 use crate::error::{Error, Result};
 use crate::http::SmartClient;
 use crate::wasm::AllowedHost;
@@ -313,7 +315,6 @@ mod tests {
 
     #[test]
     fn restricted_source_allows_its_own_host() {
-        // A relative route resolves to the source host and is permitted.
         let url = resolve_route("https://source.invalid/manga/", "/api/genres").unwrap();
         assert!(enforce_option_set_host("https://source.invalid", &url, false).is_ok());
     }

@@ -1,5 +1,4 @@
 // @ts-check
-// Preference row — renders a single source preference of any widget type.
 
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
@@ -51,8 +50,6 @@ function bumpPrefVersion(sourceId) {
  * }} props
  */
 export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail, onDirtyChange, dirty = false }) {
-  // Support both new shape (label, kind as plain string, options as [[label,val],...])
-  // and old shape (title, kind as tagged-enum object, options nested inside kind data).
   const key = descriptor.key;
   const title = descriptor.label ?? descriptor.title ?? '';
   const description = descriptor.description;
@@ -62,7 +59,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
   const kindName = typeof rawKind === 'string' ? rawKind : Object.keys(rawKind ?? {})[0] ?? '';
   const kindData = typeof rawKind === 'string' ? {} : (rawKind[kindName] ?? {});
 
-  // Options: new format [[label, value], ...] tuples, or old format {label, value} objects
   /** @type {Array<{label: string, value: string}>} */
   const selectOptions = (() => {
     const src = Array.isArray(descriptor.options) ? descriptor.options
@@ -71,7 +67,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
     return src.map(opt => Array.isArray(opt) ? { label: opt[0], value: opt[1] } : opt);
   })();
 
-  // Visibility check
   if (requires_key) {
     const dep = liveValues[requires_key];
     const isTruthy = dep === true || dep === 'true' || (typeof dep === 'string' && dep !== '' && dep !== 'false');
@@ -174,7 +169,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
     `;
   } else if (kindName === 'MultiSelect') {
     const selected = /** @type {string[]} */ (Array.isArray(currentValue) ? currentValue : []);
-    // Map selectOptions to Combobox {id, name} using index as id
     const comboOptions = selectOptions.map((o, i) => ({ id: i, name: o.label }));
     const selectedIds = selected.map(v => selectOptions.findIndex(o => o.value === v)).filter(i => i !== -1);
 

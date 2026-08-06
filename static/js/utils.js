@@ -34,7 +34,7 @@ export function getLocal(key) {
  * @param {string} value
  */
 export function setLocal(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* quota exceeded */ }
+  try { localStorage.setItem(key, value); } catch { }
 }
 
 /**
@@ -109,7 +109,6 @@ export function escapeHtml(str) {
 export function formatDate(val) {
   if (val == null || val === '') return '';
   try {
-    // Unix timestamp in seconds → convert to ms for Date constructor
     const d = typeof val === 'number' ? new Date(val * 1000) : new Date(val);
     if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('en-US', {
@@ -145,10 +144,9 @@ export function resetAllConfirmDialogs() {
 
 /**
  * Disables the given control(s) for the duration of an async operation and
- * restores their prior state in a `finally` block — the "disable before await,
- * re-enable after" contract from CLAUDE.md, in one place. Accepts a single
- * element or an iterable (NodeList/array). Returns the awaited result of `fn`;
- * errors propagate after state is restored.
+ * restores their prior state in a `finally` block. Accepts a single element or
+ * an iterable (NodeList/array). Returns the awaited result of `fn`; errors
+ * propagate after state is restored.
  * @template T
  * @param {Element | Iterable<Element>} target
  * @param {() => Promise<T>} fn

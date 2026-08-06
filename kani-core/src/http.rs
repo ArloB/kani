@@ -1,3 +1,6 @@
+//! Upstream HTTP client policy: SSRF-safe redirects, retries, caching, budgets, throttling, and
+//! source circuit breaking.
+
 use crate::{error::Result, network::ValidatingResolver};
 use arc_swap::ArcSwap;
 use futures::{TryStream, TryStreamExt};
@@ -26,8 +29,7 @@ const CIRCUIT_COOLDOWN_SECS: u64 = 30;
 /// unreachable solver cannot hang the request indefinitely.
 const SOLVER_TIMEOUT_SECS: u64 = 65;
 const REQUEST_TIMEOUT_SECS: u64 = 35;
-/// Ceiling on a whole call: 3 retries at 5/10/20 s backoff (~35 s) plus one
-/// 65 s solve, with headroom.
+/// Allows the complete retry schedule and one solver attempt to finish.
 const WHOLE_CALL_DEADLINE_SECS: u64 = 120;
 
 /// Timing knobs for the retry/circuit/solver machinery. Production uses
@@ -40,13 +42,9 @@ pub struct Timings {
     pub circuit_cooldown: std::time::Duration,
     pub solver_timeout: std::time::Duration,
     pub credential_ttl: std::time::Duration,
-    /// Per-attempt ceiling on a single request/response. Applied on top of the
-    /// client's own transport timeout so tests can bound an in-flight call
-    /// (e.g. against a stalling origin) without waiting out the 35 s default.
+    /// Per-attempt ceiling applied in addition to the client's transport timeout.
     pub request_timeout: std::time::Duration,
-    /// Wall-clock ceiling on a WHOLE call, across every retry, backoff and
-    /// challenge solve. `request_timeout` bounds one attempt; this bounds the sum
-    /// so a pathological composition can't run for minutes.
+    /// Wall-clock ceiling across all attempts, backoffs, and challenge solving.
     pub whole_call_deadline: std::time::Duration,
 }
 
@@ -71,11 +69,8 @@ impl Default for Timings {
 /// few kilobytes instead of allocating the real megabyte ceilings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budgets {
-    /// HTML buffered before the Cloudflare-challenge sniff.
     pub max_html_body_bytes: usize,
-    /// Response body handed to a guest extension.
     pub max_http_response_bytes: usize,
-    /// Operator-configured option-set fetch, used to populate a filter dropdown.
     pub max_option_set_bytes: usize,
 }
 
@@ -141,7 +136,8 @@ fn is_retryable(status: rquest::StatusCode) -> bool {
     )
 }
 
-/// Parses Retry-After (integer seconds or HTTP-date), caps at RETRY_AFTER_CAP_SECS, falls back to exponential backoff.
+/// Parses integer or HTTP-date `Retry-After`, applying the configured cap and
+/// exponential fallback.
 fn compute_delay(
     headers: Option<&rquest::header::HeaderMap>,
     attempt: u32,
@@ -336,12 +332,8 @@ impl SmartResponse {
     /// Reads at most `max_bytes` and stops, discarding the rest — a *prefix*,
     /// not a whole body that happens to be small.
     ///
-    /// `bytes_limited` treats an oversized body as an error, which is right when
-    /// the caller needs all of it. A header probe needs the opposite: it asks
-    /// for four kilobytes of a multi-megabyte image and a server that ignores
-    /// `Range` answers with the whole thing. Routing that through
-    /// `bytes_limited` rejected every such response, so against an
-    /// uncooperative host the probe measured nothing at all.
+    /// Unlike `bytes_limited`, this accepts a response larger than the requested
+    /// prefix because servers are permitted to ignore a `Range` request.
     pub async fn bytes_prefix(mut self, max_bytes: usize) -> Result<bytes::Bytes> {
         let mut buf = bytes::BytesMut::new();
         while buf.len() < max_bytes {
@@ -503,14 +495,7 @@ impl SmartClient {
         })
     }
 
-    /// Registers a per-domain rate limit config. Called at source load time.
-    /// Registers a per-host rate limit.
-    ///
-    /// The key is canonicalised through `base_domain`, because that is what
-    /// every lookup uses. Callers pass the host straight off a `base_url`, so
-    /// a source at `api.example.com` was registering under `api.example.com`
-    /// while every request looked up `example.com` — the limit existed and was
-    /// never consulted.
+    /// Registers a rate limit under the same base-domain key used by request lookup.
     pub fn register_rate_limit(&self, domain: &str, cfg: &kani_shared::extension::RateLimitConfig) {
         let domain = &base_domain(domain);
         let period_ns = (1_000_000_000.0 / cfg.requests_per_second.max(0.001)) as u64;
@@ -664,9 +649,8 @@ impl SmartClient {
             .await;
             let resp = match executed {
                 Ok(Ok(r)) => r,
-                // A redirect-policy rejection (SSRF hop / too many redirects) is
-                // terminal — retrying just re-walks the same chain (the old 35s
-                // amplification).
+                // Redirect-policy rejections are deterministic for this chain and must
+                // not consume the retry schedule.
                 Ok(Err(e)) if e.is_redirect() => return Err(e.into()),
                 // A transport error or an elapsed per-attempt timeout: retry if we can.
                 Ok(Err(_)) | Err(_)
@@ -731,11 +715,6 @@ impl SmartClient {
                     let status = resp.status();
                     let url = resp.url().clone();
                     let headers = resp.headers().clone();
-                    // Capped: this buffers *before* the challenge sniff, so any
-                    // caller's own `bytes_limited` cap is applied far too late
-                    // to matter. An origin serving a huge `text/html` body — by
-                    // accident or otherwise — would otherwise be read entirely
-                    // into memory.
                     let bytes = collect_bytes_limited(
                         Box::pin(futures::stream::unfold(resp, |mut r| async move {
                             match r.chunk().await {
@@ -903,10 +882,6 @@ impl SmartClient {
             )));
         }
 
-        // A source declares a rate limit so that *all* of its traffic honours
-        // it. `send_request` has always waited here; `safe_get` never did, which
-        // exempted the highest-volume traffic a source generates — page images,
-        // covers, probes — from the one limit meant to keep it unbanned.
         let rate_state = self
             .rate_states
             .get(&circuit_domain)
@@ -942,13 +917,6 @@ impl SmartClient {
                 req_builder = cache.apply_to(initial_url, req_builder);
             }
             if let Some(ref h) = headers {
-                // Caller headers must survive a redirect. CDN chains
-                // (origin → edge → signed URL) are the normal case, and a hop
-                // that drops `Range` turns a four-kilobyte probe into a full
-                // image download, while one that drops `Referer` collects a
-                // hotlink 403. Credentials are the exception: they are scoped
-                // to the host that issued them and must not follow the
-                // redirect off it.
                 req_builder = req_builder.headers(if host_of(&current_url) == initial_host {
                     h.clone()
                 } else {
@@ -1538,12 +1506,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
-    // ── is_retryable ─────────────────────────────────────────────────────────
-
     #[test]
     fn not_retryable_on_429() {
-        // A16: 429 is surfaced immediately rather than slept-on in-request; the
-        // extraction typed error + the download job retry policy honour it.
         assert!(!is_retryable(rquest::StatusCode::TOO_MANY_REQUESTS));
     }
 
@@ -1574,15 +1538,11 @@ mod tests {
 
     #[test]
     fn not_retryable_on_503() {
-        // 503 is deliberately excluded (Cloudflare challenge signal)
         assert!(!is_retryable(rquest::StatusCode::SERVICE_UNAVAILABLE));
     }
 
-    // ── compute_delay ────────────────────────────────────────────────────────
-
     #[test]
     fn no_header_gives_exponential_backoff() {
-        // attempt 0 → BASE_DELAY * 2^0 = 5s; attempt 1 → 10s; attempt 2 → 20s
         let d0 = compute_delay(None, 0, BASE_DELAY);
         let d1 = compute_delay(None, 1, BASE_DELAY);
         let d2 = compute_delay(None, 2, BASE_DELAY);
@@ -1605,7 +1565,6 @@ mod tests {
     #[test]
     fn retry_after_capped_at_max() {
         let mut headers = rquest::header::HeaderMap::new();
-        // 9999s > RETRY_AFTER_CAP_SECS (60)
         headers.insert(
             rquest::header::RETRY_AFTER,
             rquest::header::HeaderValue::from_static("9999"),
@@ -1621,8 +1580,6 @@ mod tests {
         assert_eq!(d, BASE_DELAY);
     }
 
-    // ── base_domain ──────────────────────────────────────────────────────────
-
     #[test]
     fn a_rate_limit_registered_on_a_subdomain_is_found_by_the_apex_lookup() {
         let client = SmartClient::new_for_test().unwrap();
@@ -1632,8 +1589,6 @@ mod tests {
             max_concurrent: 1,
             ..Default::default()
         };
-        // Sources register with the host straight off their base_url, which is
-        // routinely a subdomain; every request looks up the base domain.
         client.register_rate_limit("api.example.com", &cfg);
         assert!(
             client.rate_states.get("example.com").is_some(),
@@ -1658,14 +1613,10 @@ mod tests {
 
     #[test]
     fn base_domain_is_deterministic_for_ips() {
-        // publicsuffix parses IP octets as domain labels; the exact output is
-        // library-defined — just verify the call doesn't panic and is stable.
         let first = base_domain("8.8.8.8");
         let second = base_domain("8.8.8.8");
         assert_eq!(first, second);
     }
-
-    // ── SmartResponse (Buffered variant) ─────────────────────────────────────
 
     #[tokio::test]
     async fn smart_response_buffered_accessors() {
@@ -1709,8 +1660,6 @@ mod tests {
         assert_eq!(&b[..], b"\x01\x02\x03");
     }
 
-    // ── Circuit breaker ───────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn circuit_starts_closed() {
         let client = SmartClient::new(None).unwrap();
@@ -1729,12 +1678,10 @@ mod tests {
     #[tokio::test]
     async fn record_success_resets_failure_counter() {
         let client = SmartClient::new(None).unwrap();
-        // record failures but not enough to trip the breaker, then clear
         for _ in 0..CIRCUIT_OPEN_THRESHOLD - 1 {
             client.record_failure("example.com");
         }
         client.record_success("example.com");
-        // after reset, one more failure should not open the circuit
         client.record_failure("example.com");
         assert!(!client.is_circuit_open("example.com"));
     }
@@ -1742,7 +1689,6 @@ mod tests {
     #[tokio::test]
     async fn record_success_on_unknown_domain_is_noop() {
         let client = SmartClient::new(None).unwrap();
-        // should not panic or insert an entry
         client.record_success("never-seen.com");
         assert!(!client.is_circuit_open("never-seen.com"));
     }
@@ -1751,7 +1697,6 @@ mod tests {
     async fn collect_bytes_limited_rejects_large_content_length() {
         use futures::stream;
         let small_chunk = bytes::Bytes::from("hello");
-        // The content-length hint says 1000 but limit is 10 → should reject immediately
         let s = stream::iter(vec![Ok::<_, crate::error::Error>(small_chunk)]);
         let err = collect_bytes_limited(s, Some(1000), 10).await.unwrap_err();
         assert!(err.to_string().contains("exceeds limit"));
@@ -1774,8 +1719,6 @@ mod tests {
         let result = collect_bytes_limited(s, None, 100).await.unwrap();
         assert_eq!(&result[..], b"hello");
     }
-
-    // ── SmartClient integration (wiremock) ───────────────────────────────────
 
     use wiremock::matchers::{body_partial_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1887,9 +1830,6 @@ mod tests {
     #[tokio::test]
     async fn html_response_is_buffered() {
         let server = MockServer::start().await;
-        // Use set_body_raw so we control the mime type directly.
-        // set_body_string always sets mime="text/plain" which generate_response
-        // later inserts as Content-Type, overriding any insert_header call.
         Mock::given(method("GET"))
             .and(path("/page"))
             .respond_with(
@@ -1977,10 +1917,6 @@ mod tests {
 
     #[tokio::test]
     async fn an_html_body_over_the_budget_is_refused_not_buffered() {
-        // The challenge sniff buffers the whole body before looking at it, so
-        // the ceiling is the only thing standing between a hostile origin and
-        // the server's memory. Driving it needs the budget seam: the real
-        // ceiling is 16 MB.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/huge"))
@@ -2013,7 +1949,6 @@ mod tests {
 
     #[tokio::test]
     async fn an_html_body_within_the_budget_is_still_served() {
-        // The complement, so the test above cannot pass by refusing everything.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/small"))
@@ -2040,9 +1975,6 @@ mod tests {
 
     #[test]
     fn the_budget_seam_overrides_every_ceiling() {
-        // Each field feeds a different call site — the html sniff here, the
-        // guest response in wasm::abi, the option set in option_set_fetcher —
-        // so a partially-applied override would leave one path on its default.
         let client = SmartClient::new_for_test().unwrap().with_budgets(Budgets {
             max_html_body_bytes: 1,
             max_http_response_bytes: 2,
@@ -2062,9 +1994,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_429_is_returned_immediately_without_retrying() {
-        // A16: the client must not sleep-retry a 429 in-request. Exactly one
-        // request reaches the origin, and the 429 is surfaced for the caller to
-        // classify. `.expect(1)` is verified when the server drops.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/rl"))
@@ -2127,7 +2056,6 @@ mod tests {
     #[tokio::test]
     async fn safe_get_too_many_redirects_returns_error() {
         let server = MockServer::start().await;
-        // A chain longer than MAX_REDIRECTS (10) trips the guard.
         for i in 1..=12 {
             let next = format!("{}/r{}", server.uri(), i + 1);
             Mock::given(method("GET"))
@@ -2148,8 +2076,6 @@ mod tests {
         );
     }
 
-    // C12 — a relative Location (`../dest`) resolves against the request URL, not
-    // as a bare path off the origin root.
     #[tokio::test]
     async fn a_relative_redirect_resolves_against_the_current_url() {
         let server = MockServer::start().await;
@@ -2177,8 +2103,6 @@ mod tests {
         );
     }
 
-    // C13 — a protocol-relative Location (`//host/dest`) inherits the current
-    // scheme rather than being rejected as schemeless.
     #[tokio::test]
     async fn a_protocol_relative_redirect_inherits_the_scheme() {
         let server = MockServer::start().await;
@@ -2214,8 +2138,6 @@ mod tests {
         );
     }
 
-    // SSRF-via-redirect: a benign-looking URL that 302s to an internal IP literal
-    // (which the DNS resolver never sees) is refused at the hop.
     #[tokio::test]
     async fn a_redirect_to_a_forbidden_ip_literal_is_refused() {
         let server = MockServer::start().await;
@@ -2228,8 +2150,6 @@ mod tests {
             .mount(&server)
             .await;
 
-        // allow_private_egress(false): the loopback *origin* is still reached (the
-        // initial hop is not gated here), but the redirect *target* is refused.
         let client = SmartClient::new_for_test()
             .unwrap()
             .with_allow_private_egress(false);
@@ -2245,9 +2165,6 @@ mod tests {
         );
     }
 
-    // send_request (via get) auto-follows redirects through the SSRF-aware policy;
-    // a hop to a forbidden IP literal is refused, not followed. This covers the
-    // source hot path, which previously auto-followed with no per-hop check.
     #[tokio::test]
     async fn get_refuses_a_redirect_to_a_forbidden_ip_literal() {
         let server = MockServer::start().await;
@@ -2260,8 +2177,6 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Production `new()` (allow_private_egress = false). The loopback origin is
-        // reached (IP literal bypasses the resolver), the redirect target is not.
         let client = SmartClient::new(None).unwrap();
         let res = client.get(&format!("{}/redir", server.uri())).await;
         assert!(
@@ -2270,8 +2185,6 @@ mod tests {
         );
     }
 
-    // A redirect loop trips the limit and fails FAST — no retry amplification
-    // (the old bug spent ~35s re-walking the chain per retry).
     #[tokio::test]
     async fn a_redirect_loop_fails_fast_without_amplification() {
         let server = MockServer::start().await;
@@ -2283,7 +2196,7 @@ mod tests {
 
         let client = SmartClient::new(None)
             .unwrap()
-            .with_allow_private_egress(true); // let the loopback loop run to the limit
+            .with_allow_private_egress(true);
         let start = std::time::Instant::now();
         let res = client.get(&format!("{}/loop", server.uri())).await;
         let elapsed = start.elapsed();
@@ -2295,20 +2208,18 @@ mod tests {
         );
     }
 
-    // The whole-call deadline bounds the cumulative time across retries/backoff,
-    // even when each individual attempt stays under request_timeout.
     #[tokio::test]
     async fn a_call_is_bounded_by_the_whole_call_deadline() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/x"))
-            .respond_with(ResponseTemplate::new(502)) // retryable → would keep retrying
+            .respond_with(ResponseTemplate::new(502))
             .mount(&server)
             .await;
 
         let client = SmartClient::new_for_test().unwrap().with_timings(Timings {
             whole_call_deadline: std::time::Duration::from_millis(50),
-            retry_base_delay: std::time::Duration::from_millis(100), // one backoff blows the deadline
+            retry_base_delay: std::time::Duration::from_millis(100),
             retry_jitter: std::time::Duration::ZERO,
             ..Timings::default()
         });
@@ -2343,8 +2254,6 @@ mod tests {
         };
         assert!(err.to_string().contains("forbidden scheme"), "{err}");
     }
-
-    // ── Rate limiting ────────────────────────────────────────────────────────
 
     #[test]
     fn register_and_deregister_rate_limit() {
@@ -2388,8 +2297,6 @@ mod tests {
         assert_eq!(passed, 3, "only burst={} requests pass immediately", 3);
         assert_eq!(blocked, 3, "remaining requests are rate-limited");
     }
-
-    // ── ConditionalGetCache ──────────────────────────────────────────────────
 
     #[test]
     fn cond_cache_records_etag_and_applies_if_none_match() {
@@ -2511,8 +2418,6 @@ mod tests {
             "safe_get (non-conditional) must not populate cond_cache"
         );
     }
-
-    // ── circuit_opens_emits_event ─────────────────────────────────────────────
 
     #[tokio::test]
     async fn circuit_open_emits_event_on_first_open() {

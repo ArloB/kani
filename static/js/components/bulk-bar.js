@@ -1,26 +1,3 @@
-// @ts-check
-// BulkBar — the floating bulk-action bar shown in select mode. One component
-// for every selectable surface (library grid, chapter list); it replaces two
-// independent implementations that had drifted apart in both placement and
-// button semantics.
-//
-// Pure view: the host owns selection state and every handler. Actions are
-// btn-secondary by default and btn-danger for destructive ones — a bulk bar
-// never carries an accent fill.
-//
-// Layout: the bar is one line of three parts — what is selected, how to change
-// the selection, what to do with it. On a phone it sits above the bottom nav
-// (bottom-16, the nav's h-16) rather than on top of it — at bottom-0 the action
-// row was covered by the tab bar and its buttons could not be reached.
-//
-// Centred with mx-auto rather than a translate: a transformed ancestor becomes
-// the containing block for `position: fixed` descendants, which sent the
-// Select dropdown's viewport coordinates to the far left of the screen.
-// `md:left-sidebar` centres it over the content rather than the viewport, so
-// the count does not sit behind the sidebar on a narrow desktop. Selection helpers past a couple collapse
-// into a single "Select" menu rather than each claiming bar width; nine
-// same-weight buttons in a wrapping row read as a wall and pushed the actions
-// onto a second and third line as surfaces added selectors.
 
 import { h } from 'preact';
 import { useRef, useState } from 'preact/hooks';

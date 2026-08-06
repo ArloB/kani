@@ -9,8 +9,6 @@ use common::{
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── GET /rest/admin/storage/stats ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn admin_storage_stats_returns_200_for_admin() {
     let state = test_state().await;
@@ -58,8 +56,6 @@ async fn admin_storage_stats_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
-// ── GET /rest/admin/storage/stats/history ────────────────────────────────────
-
 #[tokio::test]
 async fn admin_storage_stats_history_returns_200_for_admin() {
     let state = test_state().await;
@@ -103,11 +99,6 @@ async fn admin_storage_stats_history_returns_403_for_regular_user() {
 
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
-
-// ── POST /rest/admin/library/scrub ───────────────────────────────────────────
-// Supersedes /admin/library/integrity-check, which was removed with
-// check_library/cleanup_orphans. The scrub is a job, so it returns 202 + job_id
-// rather than an inline report.
 
 #[tokio::test]
 async fn admin_scrub_returns_202_for_admin() {

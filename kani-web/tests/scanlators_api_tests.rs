@@ -1,8 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for scanlator-related REST endpoints:
-// PATCH /manga/{id}/scanlator_mode, GET /manga/{id}/scanlators,
-// GET /scanlator_preferences, POST /scanlator_preferences,
-// DELETE /scanlator_preferences/{id}.
 
 mod common;
 use axum::http::StatusCode;
@@ -11,8 +7,6 @@ use common::{
     insert_source, login, test_state,
 };
 use tower::ServiceExt;
-
-// ── PATCH /manga/{id}/scanlator_mode ─────────────────────────────────────────
 
 #[tokio::test]
 async fn set_scanlator_mode_returns_200_for_priority() {
@@ -123,8 +117,6 @@ async fn set_scanlator_mode_persists_change() {
     assert_eq!(body["scanlator_mode"], "whitelist");
 }
 
-// ── GET /manga/{id}/scanlators ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn get_chapter_scanlators_returns_200_for_existing_manga() {
     let state = test_state().await;
@@ -157,8 +149,6 @@ async fn get_chapter_scanlators_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── GET /manga/{id}/scanlator_preferences ─────────────────────────────────────
 
 #[tokio::test]
 async fn get_scanlator_prefs_returns_empty_list_for_fresh_manga() {

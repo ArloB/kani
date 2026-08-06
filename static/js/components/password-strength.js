@@ -17,11 +17,11 @@ const SCORE_LABEL_KEYS = [
   'pwstrength.score.very_strong',
 ];
 const SCORE_COLORS = [
-  'bg-danger',   // 0
-  'bg-danger',   // 1
-  'bg-warn',     // 2
-  'bg-success',  // 3
-  'bg-success',  // 4
+  'bg-danger',
+  'bg-danger',
+  'bg-warn',
+  'bg-success',
+  'bg-success',
 ];
 
 /**

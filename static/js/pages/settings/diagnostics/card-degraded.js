@@ -57,8 +57,6 @@ function DegradedCard({ refreshToken, span }) {
 registerDiagnosticsCard({
   id: 'degraded',
   titleKey: 'diag.degraded.title',
-  // Above every other card: if something is degraded it is the most important
-  // thing on the page.
   order: 5,
   span: 2,
   Component: DegradedCard,

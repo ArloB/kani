@@ -1,3 +1,5 @@
+//! Unified source backend over compiled WASM components and interpreted YAML extensions.
+
 pub mod loader;
 pub mod registry;
 pub mod signing;
@@ -8,6 +10,7 @@ pub use registry::SourceRegistry;
 pub use wasm_source::WasmSource;
 pub use yaml_source::YamlSource;
 
+/// Installed source implementation with behaviorally equivalent WASM and YAML dispatch paths.
 pub enum SourceBackend {
     Wasm(Box<WasmSource>),
     Yaml(Box<YamlSource>),

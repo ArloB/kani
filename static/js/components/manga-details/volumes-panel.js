@@ -1,5 +1,4 @@
 // @ts-check
-// Volumes panel — list/add/rename/delete volumes for a manga.
 
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
@@ -18,8 +17,6 @@ export async function mountVolumesPanel(section, mangaId) {
   head.className = 'detail-card-head';
   head.innerHTML = `<span>${t('manga.details.volumes.loading')}</span>`;
 
-  // The trigger opens the form; the form's own Add is the primary. Two accent
-  // fills in one card would compete.
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn-secondary btn-sm';

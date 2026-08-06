@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for /rest/sources endpoints: list, get, add (admin-only), delete.
-// WASM upload is tested separately (it requires multipart + binary fixture).
 
 mod common;
 use axum::http::StatusCode;
@@ -72,7 +70,6 @@ async fn get_source_returns_404_for_missing_id() {
 #[tokio::test]
 async fn add_source_requires_source_install_permission() {
     let state = test_state().await;
-    // Regular user role does not have source:install permission.
     let (username, password) = create_regular_user(&state, "bob").await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
@@ -285,12 +282,6 @@ async fn set_browser_enabled_rejects_invalid_body() {
     );
 }
 
-// ── Bulk capabilities ─────────────────────────────────────────────────────────
-//
-// The point of this endpoint is one round trip instead of one request per
-// source, so the tests check the shape a client depends on — and the route
-// ordering, which is the way this breaks silently.
-
 #[tokio::test]
 async fn bulk_capabilities_returns_200_with_auth() {
     let state = test_state().await;
@@ -352,9 +343,6 @@ async fn bulk_capabilities_is_empty_not_an_error_with_no_sources() {
 
 #[tokio::test]
 async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
-    // `/sources/{id}/capabilities` is registered too. If the parameterised
-    // route were matched first, "capabilities" would be parsed as an id and
-    // this would 400 or 404 rather than listing.
     let state = test_state().await;
     let (user, pass) = create_admin(&state).await;
     let app = build_test_app(state).await;
@@ -368,7 +356,6 @@ async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
         .unwrap();
     assert_eq!(bulk.status(), StatusCode::OK, "bulk route must win");
 
-    // And the per-source route still works alongside it.
     let single = app
         .clone()
         .oneshot(authed_get(
@@ -387,7 +374,6 @@ async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
 
 #[tokio::test]
 async fn bulk_and_per_source_agree() {
-    // Two endpoints answering the same question must not drift.
     let state = test_state().await;
     let (user, pass) = create_admin(&state).await;
     let app = build_test_app(state).await;

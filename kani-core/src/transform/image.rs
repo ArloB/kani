@@ -36,7 +36,7 @@ impl Transform for LcgTileDescramble {
 }
 
 const GRID: usize = 5;
-const TILES: usize = GRID * GRID; // 25
+const TILES: usize = GRID * GRID;
 
 /// Resolve the LCG scramble seed for a page, given the per-page transform hint
 /// declared by the extension and the HTTP response headers from the upstream CDN.
@@ -100,12 +100,8 @@ fn lcg_tile_descramble(data: &[u8], seed: i32) -> Result<Vec<u8>> {
 
         for dy in 0..tile_h {
             for dx in 0..tile_w {
-                // Bounds-checked: `tile_w`/`tile_h` are floored to 1, so on an
-                // image narrower or shorter than the 5×5 grid a tile column can
-                // start past the edge (src_x = 4 on a 2px-wide image). Copying
-                // that would panic and unwind the download worker; skipping it
-                // leaves a nonsensically small image best-effort rather than
-                // crashing the whole chapter.
+                // Tiny images can place a grid tile beyond their edge; skip it instead of
+                // panicking.
                 let (sx, sy) = (src_x + dx, src_y + dy);
                 let (dx2, dy2) = (dst_x + dx, dst_y + dy);
                 if sx < width && sy < height && dx2 < width && dy2 < height {
@@ -130,9 +126,6 @@ mod tests {
 
     #[test]
     fn descramble_does_not_panic_on_an_image_smaller_than_the_grid() {
-        // A 2x2 image cannot be tiled into a 5x5 grid; the tile columns run
-        // past its edge. The old code indexed out of bounds and panicked,
-        // unwinding the download worker.
         let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
             2,
             2,
@@ -142,7 +135,6 @@ mod tests {
         img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .unwrap();
 
-        // Must return Ok (a best-effort image) rather than panic.
         let out = lcg_tile_descramble(&png, 12345);
         assert!(out.is_ok(), "a tiny image must not crash the descrambler");
     }
@@ -178,8 +170,6 @@ mod tests {
         h
     }
 
-    // C14 — a page whose hint defers to the header resolves its seed from
-    // `x-scramble-seed`, and the inline-seed hint resolves from the hint itself.
     #[test]
     fn a_scramble_seed_header_drives_the_descramble() {
         let headers = header_map("x-scramble-seed", "12345");
@@ -188,18 +178,14 @@ mod tests {
             Some(12345),
             "the header value becomes the descramble seed"
         );
-        // The inline form carries the seed in the hint, no header needed.
         assert_eq!(
             resolve_scramble_seed("lcg-tile-5x5:777", &rquest::header::HeaderMap::new()),
             Some(777)
         );
     }
 
-    // C15 — a missing or malformed seed resolves to None, so the raw image is
-    // stored rather than mangled by a bogus permutation.
     #[test]
     fn a_missing_or_malformed_scramble_seed_stores_the_raw_image() {
-        // Header absent entirely.
         assert_eq!(
             resolve_scramble_seed(
                 "lcg-tile-5x5-from-header",
@@ -207,7 +193,6 @@ mod tests {
             ),
             None
         );
-        // Header present but not a number.
         assert_eq!(
             resolve_scramble_seed(
                 "lcg-tile-5x5-from-header",
@@ -215,7 +200,6 @@ mod tests {
             ),
             None
         );
-        // Header present but zero (the sentinel for "no scramble").
         assert_eq!(
             resolve_scramble_seed(
                 "lcg-tile-5x5-from-header",
@@ -223,7 +207,6 @@ mod tests {
             ),
             None
         );
-        // A hint that names no transform never scrambles, header or not.
         assert_eq!(
             resolve_scramble_seed("none", &header_map("x-scramble-seed", "12345")),
             None

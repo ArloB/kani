@@ -42,7 +42,7 @@ pub struct AppState {
     pub rate_limiter: Arc<AuthRateLimiter>,
     /// Ephemeral per-process key for signing CSRF double-submit tokens.
     pub csrf_secret: Arc<[u8; 32]>,
-    /// Whether `KANI_PUBLIC_INSTANCE=true` is set; enables hardened runtime profile.
+    /// Whether `KANI_PUBLIC_INSTANCE=true` is set, exposed to the UI as a feature flag.
     pub public_instance: bool,
     /// Records responses to writes carrying an `Idempotency-Key`, so a client's
     /// retry replays the original result instead of repeating the write.

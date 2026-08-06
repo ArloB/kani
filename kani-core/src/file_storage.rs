@@ -8,8 +8,8 @@ use crate::error::{Error, Result};
 /// WASM magic bytes: \0asm
 const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6D];
 
-/// Saves WASM bytes to disk, creating directories as needed.
-/// Returns the full path where the file was saved.
+/// Validates WASM magic and stores the module under a sanitized name confined
+/// to `wasm_storage_path`.
 pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let name = crate::utilities::sanitize_filename(name);
 
@@ -35,8 +35,7 @@ pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Res
     Ok(path)
 }
 
-/// Saves YAML content to disk, creating directories as needed.
-/// Returns the full path where the file was saved.
+/// Stores YAML under a sanitized name confined to `wasm_storage_path`.
 pub async fn save_yaml(wasm_storage_path: &str, name: &str, content: &str) -> Result<PathBuf> {
     let name = crate::utilities::sanitize_filename(name);
 
@@ -58,7 +57,7 @@ pub async fn save_yaml(wasm_storage_path: &str, name: &str, content: &str) -> Re
     Ok(path)
 }
 
-/// Deletes a WASM file at the given path.
+/// Deletes the confined, sanitized module path and succeeds if it is absent.
 pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()> {
     let name = crate::utilities::sanitize_filename(name);
     let dir = PathBuf::from(wasm_storage_path);
@@ -90,9 +89,7 @@ mod tests {
     use super::*;
 
     fn valid_wasm() -> Vec<u8> {
-        let mut v = vec![0x00, 0x61, 0x73, 0x6D]; // \0asm magic
-        v.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]); // version 1
-        v
+        b"\0asm\x01\0\0\0".to_vec()
     }
 
     #[test]
@@ -169,14 +166,12 @@ mod tests {
 
     #[test]
     fn correct_prefix_with_wrong_bytes_rejected() {
-        // First byte right, rest wrong.
         assert!(!validate_wasm_magic(&[0x00, 0x62, 0x73, 0x6D]));
     }
 
     #[tokio::test]
     async fn save_wasm_name_with_special_chars_is_sanitized_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        // Forbidden chars are stripped; the sanitized name should still be usable.
         let path = save_wasm(dir.path().to_str().unwrap(), "my:source/ext", &valid_wasm())
             .await
             .unwrap();

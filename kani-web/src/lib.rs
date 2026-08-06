@@ -1,3 +1,10 @@
+//! Axum interface layer for Kani's application service.
+//!
+//! This crate owns HTTP authentication, authorization, middleware, REST and OPDS routing, proxying,
+//! embedded frontend delivery, and transport-specific error responses. Domain mutations remain in
+//! `kani-app`.
+
+/// Version reported by web diagnostics and API metadata.
 pub const KANI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod app;
@@ -29,5 +36,6 @@ pub mod utils;
 
 pub use kani_core::HTTP_LOGGING_ENABLED;
 
+/// Process-wide emergency gate checked before source installation and update operations.
 pub static SOURCE_INSTALL_ALLOWED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);

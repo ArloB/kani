@@ -50,6 +50,8 @@ struct Recorded {
 type Slot = Arc<tokio::sync::Mutex<Option<Recorded>>>;
 
 #[derive(Clone)]
+/// Per-process store coordinating and replaying keyed write responses.
+/// Concurrent duplicates wait for the original request; server failures are not retained.
 pub struct IdempotencyStore(moka::future::Cache<String, Slot>);
 
 impl Default for IdempotencyStore {

@@ -45,8 +45,6 @@ async fn insert_test_chapter(state: &kani_web::state::AppState) -> (i64, i64) {
     (manga_id, chapter_id)
 }
 
-// ── Bookmarks ─────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn get_bookmarks_returns_200_authed() {
     let state = test_state().await;
@@ -82,7 +80,6 @@ async fn get_bookmarks_returns_401_unauthenticated() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
 #[tokio::test]
 async fn toggle_bookmark_adds_and_returns_state() {
     let state = test_state().await;
@@ -104,8 +101,6 @@ async fn toggle_bookmark_adds_and_returns_state() {
     let body = body_json(res).await;
     assert_eq!(body["bookmarked"], serde_json::json!(true));
 }
-
-// ── Chapter notes ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn get_chapter_note_returns_200_authed() {
@@ -176,8 +171,6 @@ async fn set_chapter_note_returns_401_unauthenticated() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── Manga chapter notes endpoint ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn get_manga_chapter_notes_returns_notes_object() {
     let state = test_state().await;
@@ -186,7 +179,6 @@ async fn get_manga_chapter_notes_returns_notes_object() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // Add a note via the PUT endpoint.
     app.clone()
         .oneshot(put_json(
             &format!("/rest/chapter/{chapter_id}/note"),
@@ -205,7 +197,6 @@ async fn get_manga_chapter_notes_returns_notes_object() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    // Response is { notes: [{chapter_id, chapter_number, note}] }
     let notes = body["notes"].as_array().expect("notes should be an array");
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["chapter_id"], serde_json::json!(chapter_id));
@@ -227,5 +218,3 @@ async fn get_manga_chapter_notes_returns_401_unauthenticated() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── Reading pace ──────────────────────────────────────────────────────────────

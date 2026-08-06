@@ -1,6 +1,6 @@
 package kani:extension;
 
-// Host provides these (Imports for Guest)
+/// Host-mediated HTTP access for extension requests.
 interface http {
     enum method { get, post, put, delete }
 
@@ -20,6 +20,8 @@ interface http {
     send: func(req: request) -> result<response, string>;
 }
 
+/// Host-owned HTML documents and element lists referenced by opaque handles.
+/// Guests must release every returned document and list handle exactly once.
 interface html {
     type doc-handle = s32;
     type list-handle = s32;
@@ -41,6 +43,7 @@ interface html {
     children: func(doc: doc-handle) -> result<list-handle, string>;
 }
 
+/// Stateless URL, date, form-encoding, and diagnostic helpers supplied by the host.
 interface utility {
     date-parse: func(date: string, fmt: string) -> result<s64, string>;
     date-parse-rfc3339: func(date: string) -> result<s64, string>;
@@ -58,6 +61,8 @@ interface utility {
     log: func(level: u8, line: u32, message: string);
 }
 
+/// Host-owned JSON trees addressed through JSON Pointer paths and opaque handles.
+/// Guests must release every root or child handle exactly once.
 interface json {
     type json-handle = s32;
 
@@ -79,6 +84,7 @@ interface json {
     drop-json: func(handle: json-handle);
 }
 
+/// Data contracts shared by host imports and the guest provider export.
 interface types {
     enum extension-error-kind {
         network,
@@ -132,9 +138,8 @@ interface types {
         tags: list<string>,
     }
 
-    /// Pages as the *source listing* reports them, when it does. Distinct from
-    /// `chapters.page_count`, which is what a downloaded archive turned out to
-    /// hold — comparing the two is what makes re-upload detection possible.
+    /// Pages reported by the source listing, when available. This remains distinct from the
+    /// downloaded archive count in `chapters.page_count` so re-uploads can be detected.
     record chapter-info {
         id: string,
         number: f64,
@@ -218,13 +223,16 @@ interface types {
         state: filter-state,
     }
 
-    // Simplified flat preference manifest - extensions declare what they need,
-    // the host handles storage, rendering, and serialization.
+    /// Flat preference declarations rendered and persisted by the host.
     enum pref-kind {
-        toggle,          // bool stored as "true"/"false"
-        select,          // single-value selection; options lists available values
-        text,            // free-form text input
-        multi-value-list, // JSON-array of strings; options may carry metadata (e.g. placeholder)
+        /// Boolean stored as "true" or "false".
+        toggle,
+        /// Single selection from the accompanying options.
+        select,
+        /// Free-form text.
+        text,
+        /// JSON array of strings; options may carry metadata such as a placeholder.
+        multi-value-list,
     }
 
     record preference-spec {
@@ -241,10 +249,12 @@ interface types {
     }
 }
 
+/// Read-only access to the installed extension's host-managed preferences.
 interface prefs {
     get-value: func(key: string) -> option<string>;
 }
 
+/// Manga source operations implemented by each extension and called by the host.
 interface manga-provider {
     use types.{manga-list, manga-info, chapter-list, chapter-info, chapter, preference-spec, filter-list, active-filter, sort-option, extension-error};
 
@@ -270,6 +280,7 @@ interface manga-provider {
     get-url: func(manga-id: string) -> result<string, extension-error>;
 }
 
+/// Host-side blueprint evaluation that returns an opaque JSON result handle.
 interface extraction {
     // Blueprint is passed as postcard-encoded bytes (list<u8>).
     extract-html: func(doc: option<s32>, blueprint: list<u8>) -> result<s32, string>;
@@ -286,6 +297,7 @@ interface extraction {
     paginated-extract-json-raw: func(page: s32, page-size: s32, url: string, method: string, headers: list<tuple<string, string>>, queries: list<tuple<string, string>>, blueprint: list<u8>) -> result<s32, string>;
 }
 
+/// Host-managed binary cache scoped to the calling extension installation.
 interface cache {
     get: func(key: string) -> option<list<u8>>;
     put: func(key: string, value: list<u8>, ttl-secs: u32);
@@ -293,6 +305,7 @@ interface cache {
     clear: func();
 }
 
+/// Host-managed V8 contexts and browser capture operations for script-dependent sources.
 interface scripting {
     /// Returns true if a named V8 (Node.js) context is currently live on the host.
     v8-context-exists: func(name: string) -> bool;
@@ -334,6 +347,7 @@ interface scripting {
     capture-page-payload: func(page-url: string, init-script: string, timeout-ms: u32) -> result<string, string>;
 }
 
+/// Extension component boundary: the host supplies capabilities and the guest exports a provider.
 world kani-extension {
     import types;
     import http;

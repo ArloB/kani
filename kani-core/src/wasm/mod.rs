@@ -14,6 +14,7 @@ use wasmtime::{Config, Engine, Store};
 
 use crate::error::Result;
 
+/// Host-side bindings generated from the `kani-extension` WIT world.
 pub mod bindings {
     wasmtime::component::bindgen!({
         path: "wit/kani.wit",
@@ -36,16 +37,17 @@ pub use bindings::KaniExtensionPre;
 pub use bindings::exports;
 pub use bindings::kani;
 
+/// Buffered HTTP response stored while adapting host requests to WIT values.
 pub struct ResponseData {
     pub body: String,
     pub status: u16,
 }
 
+/// Parsed scraper document admitted into the host's synchronized handle store.
 pub struct SafeHtml(pub scraper::Html);
-// SAFETY: SafeHtml is only ever accessed behind Arc<Mutex<_>> (via SendHtml),
-// which serialises all access. scraper::Html is !Send due to internal use of
-// ego_tree NodeId (raw pointers), but these are never shared across threads.
+// SAFETY: after parsing, the host performs only immutable queries against the scraper tree.
 unsafe impl Send for SafeHtml {}
+// SAFETY: after parsing, the host performs only immutable queries against the scraper tree.
 unsafe impl Sync for SafeHtml {}
 
 impl SafeHtml {
@@ -58,6 +60,7 @@ impl SafeHtml {
     }
 }
 
+/// Shared, synchronized ownership of a parsed HTML document.
 pub struct SendHtml(pub Arc<Mutex<SafeHtml>>);
 
 impl SendHtml {
@@ -71,12 +74,14 @@ impl SendHtml {
 }
 
 #[derive(Clone)]
+/// A node handle that keeps its owning document alive.
 pub struct StoredNode {
     pub doc: Arc<Mutex<SafeHtml>>,
     pub node_id: ego_tree::NodeId,
 }
 
 #[derive(Debug, Clone)]
+/// Network authority granted to one extension instance.
 pub enum AllowedHost {
     Restricted(String),
     Unrestricted,
@@ -109,8 +114,11 @@ impl AllowedHost {
 
 use crate::http::SmartClient;
 
+/// Maximum combined HTML, element-list, and JSON handles held by one guest store.
 pub const MAX_HANDLES: usize = 10_000;
 
+/// Per-instance host resources and capability state exposed through WIT imports.
+/// Handle maps own guest-visible resources and are cleared between provider calls.
 pub struct HostState {
     pub http_client: SmartClient,
     pub allowed_host: AllowedHost,
@@ -170,7 +178,7 @@ impl StoredNode {
         }
     }
 
-    /// Like [`with_element`] but returns `Ok(None)` when the node is not an element,
+    /// Like [`Self::with_element`] but returns `Ok(None)` when the node is not an element,
     /// so callers that treat that as a non-error can propagate it cleanly.
     pub fn try_with_element<T, F>(&self, f: F) -> std::result::Result<Option<T>, String>
     where
@@ -290,14 +298,12 @@ impl HostState {
         self.allowed_host.allows_host(host)
     }
 
-    /// Returns a reference to the JSON document for `handle`, or an error string.
     pub fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
         self.json_docs
             .get(&handle)
             .ok_or_else(|| "Invalid JSON handle".to_string())
     }
 
-    /// Returns a reference to the HTML document node for `handle`, or an error string.
     pub fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
         self.html_docs
             .get(&handle)
@@ -389,7 +395,6 @@ impl WasmRuntime {
         })
     }
 
-    /// Returns a reference to the engine.
     pub fn engine(&self) -> &Engine {
         &self.engine
     }
@@ -429,12 +434,10 @@ impl WasmRuntime {
         }
     }
 
-    /// Creates a new store with fresh host state.
     pub fn create_store(&self) -> Store<HostState> {
         Store::new(&self.engine, HostState::default())
     }
 
-    /// Instantiates a component in the given store.
     pub async fn instantiate(
         &self,
         store: &mut Store<HostState>,
@@ -451,7 +454,6 @@ impl WasmRuntime {
         Ok(pre)
     }
 
-    /// Returns a reference to the linker.
     pub fn linker(&self) -> &Linker<HostState> {
         &self.linker
     }

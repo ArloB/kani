@@ -1,8 +1,4 @@
 // @ts-check
-// Checkbox — the labelled checkbox for forms and option lists. The design
-// system has two boolean controls: kani-toggle for on/off settings rows, and
-// this for multi-pick lists and modal options. Bare `accent-accent` native
-// checkboxes should migrate here when touched.
 
 import { h } from 'preact';
 import htm from 'htm';

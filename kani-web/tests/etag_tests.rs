@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Conditional GET on the list endpoints a polling client walks.
 
 mod common;
 use axum::http::{StatusCode, header};
@@ -114,8 +113,6 @@ async fn the_tag_follows_the_library_contents() {
     .execute(&db)
     .await
     .unwrap();
-    // The listing is served from an in-process cache, so a direct write has to
-    // invalidate it the way a service-level mutation would.
     cache.invalidate_library();
 
     let after = app
@@ -143,8 +140,6 @@ async fn a_different_query_gets_a_different_tag() {
     let app = build_test_app(state).await;
     let cookie = common::login(&app, u, p).await;
 
-    // The tag is over the body, so two pages of the same list must never
-    // collide — a client paging through would otherwise get a bogus 304.
     let a = app
         .clone()
         .oneshot(get_with("/rest/library?page=1&page_size=20", &cookie, None))
@@ -172,8 +167,6 @@ async fn a_streamed_response_is_left_alone() {
     let app = build_test_app(state).await;
     let cookie = common::login(&app, u, p).await;
 
-    // Only the chosen list routes carry the layer; a cover or a backup must not
-    // be buffered to be tagged.
     let res = app
         .clone()
         .oneshot(get_with("/rest/library/backup", &cookie, None))

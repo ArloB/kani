@@ -1,7 +1,7 @@
-//! Host ABI wrapper for WASM extensions.
+//! Ownership-aware guest wrappers around host-imported WIT capabilities.
 //!
-//! This module provides a high-level API for extensions to interact with the host,
-//! wrapping the low-level `wit-bindgen` generated code.
+//! Handle wrappers release host resources on drop. Lower-level generated bindings remain exposed
+//! for operations that do not require additional ownership or error semantics.
 
 use crate::{
     ExtensionError,
@@ -11,10 +11,6 @@ use crate::{
 pub use http::Method as HttpMethod;
 pub type DocumentHandle = html::DocHandle;
 pub type ListHandle = html::ListHandle;
-
-// ============================================================
-// HTTP API
-// ============================================================
 
 /// High-level API for making HTTP requests from extensions.
 pub struct HttpRequest {
@@ -27,7 +23,6 @@ pub struct HttpRequest {
 }
 
 impl HttpRequest {
-    /// Create a new HTTP request builder
     pub fn new() -> Self {
         Self {
             method: HttpMethod::Get,
@@ -50,33 +45,27 @@ impl HttpRequest {
         }
     }
 
-    /// Create a new GET request (convenience method)
     pub fn get<S: Into<String>>(url: S) -> Self {
         Self::new_method(url, HttpMethod::Get)
     }
 
-    /// Create a new POST request (convenience method)
     pub fn post<S: Into<String>>(url: S) -> Self {
         Self::new_method(url, HttpMethod::Post)
     }
 
-    /// Create a new PUT request (convenience method)
     pub fn put<S: Into<String>>(url: S) -> Self {
         Self::new_method(url, HttpMethod::Put)
     }
 
-    /// Create a new DELETE request (convenience method)
     pub fn delete<S: Into<String>>(url: S) -> Self {
         Self::new_method(url, HttpMethod::Delete)
     }
 
-    /// Set the HTTP method
     pub fn method(mut self, method: HttpMethod) -> Self {
         self.method = method;
         self
     }
 
-    /// Set the URL
     pub fn url<S: Into<String>>(mut self, url: S) -> Self {
         self.url = Some(url.into());
         self
@@ -88,13 +77,11 @@ impl HttpRequest {
         self
     }
 
-    /// Add a header to the request
     pub fn header<K: Into<String>, V: std::fmt::Display>(mut self, key: K, value: V) -> Self {
         self.headers.push((key.into(), value.to_string()));
         self
     }
 
-    /// Set the request body
     pub fn body(mut self, body: Vec<u8>) -> Self {
         self.body = Some(body);
         self
@@ -126,7 +113,6 @@ impl HttpRequest {
         self
     }
 
-    /// Returns the raw query pairs without building the URL (test only).
     #[cfg(test)]
     pub(crate) fn into_queries(self) -> Vec<(String, String)> {
         self.queries
@@ -149,7 +135,6 @@ impl HttpRequest {
         Ok((url, method, self.headers, self.queries))
     }
 
-    /// Build the final URL with query parameters.
     fn build_final_url(&self) -> Result<String, ExtensionError> {
         let url = match &self.url {
             Some(u) => u,
@@ -210,27 +195,24 @@ impl Default for HttpRequest {
     }
 }
 
-// ============================================================
-// HTML Parsing API
-// ============================================================
-
+/// RAII wrapper for a host-owned HTML node.
+///
+/// Query helpers treat host errors and missing values as empty results. Dropping
+/// the wrapper releases its host handle.
 pub struct HtmlDocument {
     handle: DocumentHandle,
 }
 
 impl HtmlDocument {
-    /// Parse an HTML string into a document
     pub fn new(html: &str) -> Result<Self, ExtensionError> {
         let handle = html::parse(html).map_err(ExtensionError::unknown)?;
         Ok(Self { handle })
     }
 
-    /// Get the raw handle (for advanced usage)
     pub fn handle(&self) -> DocumentHandle {
         self.handle
     }
 
-    /// Select all elements matching a CSS selector
     pub fn select(&self, selector: &str) -> Vec<HtmlDocument> {
         let list_handle = match html::select(self.handle, selector) {
             Ok(h) => h,
@@ -250,7 +232,6 @@ impl HtmlDocument {
         docs
     }
 
-    /// Get the first element matching a CSS selector, or None if not found
     pub fn first(&self, selector: &str) -> Option<HtmlDocument> {
         html::first(self.handle, selector)
             .ok()
@@ -258,7 +239,6 @@ impl HtmlDocument {
             .map(|h| HtmlDocument { handle: h })
     }
 
-    /// Get all direct child elements
     pub fn children(&self) -> Vec<HtmlDocument> {
         let list_handle = match html::children(self.handle) {
             Ok(h) => h,
@@ -278,7 +258,6 @@ impl HtmlDocument {
         docs
     }
 
-    /// Get an attribute from the first element matching the selector
     pub fn attr(&self, selector: &str, attribute: &str) -> String {
         html::attr(self.handle, selector, attribute)
             .ok()
@@ -286,7 +265,6 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Get an attribute from this element directly
     pub fn get_attr(&self, attribute: &str) -> String {
         html::attr(self.handle, "", attribute)
             .ok()
@@ -294,7 +272,6 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Get text content from the first element matching the selector
     pub fn text(&self, selector: &str) -> String {
         html::text(self.handle, selector)
             .ok()
@@ -302,7 +279,6 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Get text content from this element directly
     pub fn get_text(&self) -> String {
         html::text(self.handle, "")
             .ok()
@@ -310,7 +286,6 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Get the inner HTML (content without the outer tag)
     pub fn inner_html(&self) -> String {
         html::inner_html(self.handle)
             .ok()
@@ -318,7 +293,6 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Get the outer HTML (full element including tag)
     pub fn outer_html(&self) -> String {
         html::outer_html(self.handle)
             .ok()
@@ -326,13 +300,11 @@ impl HtmlDocument {
             .unwrap_or_default()
     }
 
-    /// Check if this element has a specific class
     pub fn has_class(&self, class_name: &str) -> bool {
         let classes = self.get_attr("class");
         classes.split_whitespace().any(|c| c == class_name)
     }
 
-    /// Get the tag name of this element
     pub fn tag_name(&self) -> String {
         let html = self.outer_html();
         if html.starts_with('<')
@@ -369,10 +341,6 @@ impl Drop for HtmlDocument {
         html::drop_doc(self.handle);
     }
 }
-
-// ============================================================
-// Utility API
-// ============================================================
 
 /// Parse a date string with the given chrono format into epoch seconds.
 /// Returns `None` if parsing fails.
@@ -460,18 +428,15 @@ macro_rules! dbg {
     };
 }
 
-// ============================================================
-// JSON API
-// ============================================================
-
-/// RAII wrapper around a JSON handle. Automatically drops the host-side
-/// Value when this goes out of scope.
+/// RAII wrapper around a host-owned JSON value.
+///
+/// Optional accessors treat host errors and missing values alike. Dropping the
+/// wrapper releases its host handle.
 pub struct JsonHandle {
     handle: json::JsonHandle,
 }
 
 impl JsonHandle {
-    /// Wrap a raw handle already registered on the host side (e.g. returned by extract_html).
     pub fn from_raw(handle: json::JsonHandle) -> Self {
         Self { handle }
     }
@@ -482,13 +447,11 @@ impl JsonHandle {
         self.handle
     }
 
-    /// Parse raw response bytes into a host-side JSON value.
     pub fn parse(data: &[u8]) -> Result<Self, ExtensionError> {
         let handle = json::parse(data).map_err(ExtensionError::parse)?;
         Ok(Self { handle })
     }
 
-    /// Get a string at the given JSON Pointer path.
     pub fn get_str(&self, ptr: &str) -> Option<String> {
         json::get_str(self.handle, ptr).ok().flatten()
     }
@@ -511,18 +474,15 @@ impl JsonHandle {
         json::get_bool(self.handle, ptr).ok().flatten()
     }
 
-    /// Returns the length of an array at the given path.
     pub fn array_len(&self, ptr: &str) -> Option<i32> {
         json::array_len(self.handle, ptr).ok().flatten()
     }
 
-    /// Returns a child handle for the element at ptr[index].
     pub fn array_get(&self, ptr: &str, index: i32) -> Result<JsonHandle, ExtensionError> {
         let child = json::array_get(self.handle, ptr, index).map_err(ExtensionError::parse)?;
         Ok(JsonHandle { handle: child })
     }
 
-    /// Iterate over all elements of an array at the given path.
     pub fn array_iter(&self, ptr: &str) -> impl Iterator<Item = JsonHandle> + '_ {
         let len = self.array_len(ptr).unwrap_or(0);
         let ptr = ptr.to_string();
@@ -533,7 +493,7 @@ impl JsonHandle {
         json::object_keys(self.handle, ptr).ok().unwrap_or_default()
     }
 
-    /// Returns a child handle for the value at object[key] under `ptr`.
+    /// Returns a child handle for the keyed object value under `ptr`.
     /// Returns `None` if the key doesn't exist or `ptr` is not an object.
     pub fn object_get(&self, ptr: &str, key: &str) -> Option<JsonHandle> {
         json::object_get(self.handle, ptr, key)
@@ -542,7 +502,6 @@ impl JsonHandle {
             .map(|h| JsonHandle { handle: h })
     }
 
-    /// Iterate over all (key, value) pairs of a JSON object at `ptr`.
     pub fn object_iter<'a>(
         &'a self,
         ptr: &'a str,
@@ -552,26 +511,19 @@ impl JsonHandle {
             .filter_map(move |k| self.object_get(ptr, &k).map(|v| (k, v)))
     }
 
-    // ── Blueprint result accessors ───────────────────────────────────────────
-    // Blueprint results are returned as { "rows": [...], "scalars": {...} }.
-
-    /// Number of rows returned by a blueprint extraction.
     pub fn rows_len(&self) -> i32 {
         self.array_len("/rows").unwrap_or(0)
     }
 
-    /// Get the row at `index` from a blueprint extraction result.
     pub fn rows_get(&self, index: i32) -> Result<JsonHandle, crate::ExtensionError> {
         self.array_get("/rows", index)
     }
 
-    /// Iterate over all rows from a blueprint extraction result.
     pub fn rows_iter(&self) -> impl Iterator<Item = JsonHandle> + '_ {
         let len = self.rows_len();
         (0..len).filter_map(|i| self.rows_get(i).ok())
     }
 
-    /// Get a scalar value (document-level) from a blueprint extraction result.
     pub fn get_scalar_str(&self, name: &str) -> Option<String> {
         self.get_str(&format!("/scalars/{}", name))
     }
@@ -582,12 +534,9 @@ impl JsonHandle {
             .unwrap_or(false)
     }
 
-    /// Get a scalar integer from a blueprint extraction result.
     pub fn get_scalar_i64(&self, name: &str) -> Option<i64> {
         self.get_i64(&format!("/scalars/{}", name))
     }
-
-    // ── Array-of-strings helper ──────────────────────────────────────────────
 
     /// Collect all string elements of a JSON array at `ptr` into a `Vec<String>`.
     /// Non-string elements and missing values are silently skipped.
@@ -612,10 +561,6 @@ impl Drop for JsonHandle {
         json::drop_json(self.handle);
     }
 }
-
-// ============================================================
-// BlueprintBuilder extension — request() using HttpRequest
-// ============================================================
 
 #[cfg(feature = "builder")]
 impl crate::ast::BlueprintBuilder {
@@ -653,10 +598,6 @@ fn http_request_to_def(req: HttpRequest) -> crate::ast::RequestDef {
         endpoint_id: req.endpoint_id,
     }
 }
-
-// ============================================================
-// Extraction API
-// ============================================================
 
 #[cfg(feature = "builder")]
 pub mod extract {
@@ -720,12 +661,8 @@ pub mod extract {
     }
 }
 
-// ============================================================
-// Raw extraction API (no builder feature required)
-// ============================================================
-
-/// Like [`extract`] but takes pre-computed postcard bytes directly, bypassing
-/// `BlueprintBuilder` and the `builder` feature entirely.  The blueprint bytes
+/// Like the builder-only `extract` module but takes pre-computed postcard bytes directly,
+/// bypassing `BlueprintBuilder` and the `builder` feature entirely. The blueprint bytes
 /// must **not** include a `RequestDef`; callers are responsible for fetching
 /// the document and passing the resulting handle.
 pub mod extract_raw {
@@ -781,10 +718,6 @@ pub mod extract_raw {
     }
 }
 
-// ============================================================
-// Prefs API
-// ============================================================
-
 /// Typed helpers for reading extension preference values stored by the host.
 ///
 /// Values are stored as strings by the host. Each helper converts to the
@@ -822,7 +755,7 @@ pub mod prefs {
         raw(key)?.parse().ok()
     }
 
-    /// Parses a multi-value-list preference (stored as a JSON array of strings) into a Vec<String>.
+    /// Parses a multi-value-list preference stored as a JSON array into a `Vec<String>`.
     /// Returns an empty vec if the value is unset or cannot be parsed.
     pub fn get_list(key: &str) -> Vec<String> {
         parse_json_str_array(&raw(key).unwrap_or_default())
@@ -882,10 +815,6 @@ pub mod prefs {
         result
     }
 }
-
-// ============================================================
-// Scripting API
-// ============================================================
 
 /// Wrappers for the host-side JS execution context (backed by the Node.js V8 subprocess).
 ///

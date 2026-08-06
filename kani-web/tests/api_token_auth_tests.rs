@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Bearer-token authentication on /rest/*: kind separation, scope enforcement,
-// and the use-time intersection.
 
 mod common;
 use axum::http::StatusCode;
@@ -167,8 +165,6 @@ async fn session_routes_still_work_without_any_bearer() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── creation: kind requires its own permission ───────────────────────────────
-
 fn post_json_authed(
     path: &str,
     cookie: &str,
@@ -190,7 +186,6 @@ async fn minting_an_api_token_requires_token_create_api() {
     let app = build_test_app(state).await;
     let cookie = common::login(&app, u, p).await;
 
-    // A plain user can still pair a reader app...
     let opds = app
         .clone()
         .oneshot(post_json_authed(
@@ -206,7 +201,6 @@ async fn minting_an_api_token_requires_token_create_api() {
         "token:create_opds is seeded wherever library:view is"
     );
 
-    // ...but not mint something that can drive the REST API.
     let api = app
         .oneshot(post_json_authed(
             "/rest/me/api-tokens",
@@ -269,7 +263,6 @@ async fn a_scope_the_owner_lost_is_reported_as_stale() {
         .await
         .unwrap();
 
-    // Demote the owner after the token was minted.
     sqlx::query("DELETE FROM user_roles WHERE user_id = ? AND role_slug = 'admin'")
         .bind(uid.0)
         .execute(&state.db)

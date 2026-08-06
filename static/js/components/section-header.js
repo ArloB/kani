@@ -1,5 +1,4 @@
 // @ts-check
-// SectionHeader — title + description + optional actions + dirty indicator.
 
 import { h, render } from 'preact';
 import htm from 'htm';

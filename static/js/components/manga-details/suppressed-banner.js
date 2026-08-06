@@ -1,6 +1,4 @@
 // @ts-check
-// Dismissable notice shown when the most recent auto-scan discovered new
-// chapters that the manga's download rules filtered out entirely.
 
 import { h, render } from 'preact';
 import { useState } from 'preact/hooks';

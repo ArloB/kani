@@ -173,7 +173,7 @@ async fn update_scan_settings_rejects_short_interval() {
         .update_settings(
             SettingsUpdate::Scan(ScanSettings {
                 auto_scan: false,
-                scan_interval_minutes: 4, // below minimum of 5
+                scan_interval_minutes: 4,
                 scan_exclude_completed: false,
                 upgrade_detection_enabled: true,
                 upgrade_min_res_gain: 1.2,
@@ -226,7 +226,7 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
     let result = svc
         .update_settings(
             SettingsUpdate::Download(DownloadSettings {
-                concurrent_page_downloads: 0, // below minimum of 1
+                concurrent_page_downloads: 0,
                 max_retries: 3,
                 initial_retry_delay_ms: 100,
                 auto_download_category_ids: vec![],
@@ -264,7 +264,6 @@ async fn update_settings_does_not_affect_unrelated_fields() {
     .await
     .unwrap();
 
-    // Update download settings — scan settings should not change
     svc.update_settings(
         SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 8,
@@ -311,13 +310,6 @@ async fn update_check_enabled_round_trips_and_defaults_on() {
         "the toggle must persist through update_settings"
     );
 }
-
-// ── Degraded subsystems ───────────────────────────────────────────────────────
-//
-// The registry exists so a reduced-but-running instance is visible somewhere
-// other than the log. That only holds if it reaches the diagnostics payload the
-// UI reads — the mechanism being correct in isolation is what this codebase
-// keeps shipping.
 
 #[tokio::test]
 async fn a_registered_degradation_reaches_the_diagnostics_payload() {

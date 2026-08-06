@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group M — webhook delivery. `create_webhook` refuses loopback URLs (SSRF
+//! Webhook delivery. `create_webhook` refuses loopback URLs (SSRF
 //! guard, covered by webhook_ssrf_tests), so delivery is exercised by inserting
 //! the row directly and opting the egress guard into private hosts — the same
 //! pattern jobs_tests uses for the delivery job.
@@ -12,8 +12,6 @@ use hmac::{Hmac, Mac};
 use kani_shared_test::origin::{Response, TestOrigin};
 use sha2::Sha256;
 
-// M1 — a delivery records the upstream status it actually got in
-// webhook_deliveries: a 200 then a 500 land as their real codes.
 #[tokio::test]
 async fn a_webhook_delivery_records_its_status() {
     let svc = test_service().await;
@@ -27,7 +25,6 @@ async fn a_webhook_delivery_records_its_status() {
             .await
             .unwrap();
 
-    // A healthy delivery records 200.
     origin.set("/hook", Response::json("{}"));
     let (status, err) = svc
         .webhook_service
@@ -37,8 +34,6 @@ async fn a_webhook_delivery_records_its_status() {
         .record_delivery(webhook_id, "chapter.new", "{}", status, err)
         .await;
 
-    // A failing delivery records the upstream 500 (a 500 is still an HTTP
-    // response, not a transport error).
     origin.set("/hook", Response::status(500));
     let (status2, err2) = svc
         .webhook_service
@@ -62,8 +57,6 @@ async fn a_webhook_delivery_records_its_status() {
     );
 }
 
-// M4 — the X-Kani-Signature header is HMAC-SHA256 of the exact delivered body,
-// keyed by the webhook secret. Recompute it from what actually arrived.
 #[tokio::test]
 async fn the_hmac_signature_matches_the_delivered_body() {
     let svc = test_service().await;
@@ -96,8 +89,6 @@ async fn the_hmac_signature_matches_the_delivered_body() {
     );
 }
 
-// M5 — one event yields exactly one delivery. A 2xx is terminal: the job must
-// not retry a webhook that already succeeded into a second, duplicate POST.
 #[tokio::test]
 async fn a_webhook_is_not_retried_into_a_duplicate_delivery() {
     let svc = test_service().await;
@@ -122,7 +113,6 @@ async fn a_webhook_is_not_retried_into_a_duplicate_delivery() {
         .await
         .unwrap();
 
-    // Wait for the job to reach a terminal state.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let status: Option<String> = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
@@ -154,9 +144,6 @@ async fn a_webhook_is_not_retried_into_a_duplicate_delivery() {
     assert_eq!(deliveries, 1, "and recorded exactly once");
 }
 
-// M6 — an oversized webhook response is never buffered. Delivery reads the
-// status and drops the body, so a huge reply costs nothing; a buffering
-// implementation would stall here.
 #[tokio::test]
 async fn an_oversized_webhook_response_is_not_buffered() {
     let svc = test_service().await;
@@ -178,7 +165,6 @@ async fn an_oversized_webhook_response_is_not_buffered() {
     );
 }
 
-// M4b — with no secret configured, no signature header is attached.
 #[tokio::test]
 async fn an_unsigned_webhook_carries_no_signature_header() {
     let svc = test_service().await;

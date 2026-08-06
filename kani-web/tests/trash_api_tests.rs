@@ -10,8 +10,6 @@ use common::{insert_manga, insert_source};
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── GET /rest/trash ───────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_trash_returns_200_for_authed_user() {
     let state = test_state().await;
@@ -37,8 +35,6 @@ async fn list_trash_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── DELETE /rest/manga/:id (soft delete → trash) ──────────────────────────────
-
 #[tokio::test]
 async fn delete_manga_returns_404_for_missing_id() {
     let state = test_state().await;
@@ -63,8 +59,6 @@ async fn delete_manga_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── POST /rest/manga/:id/untrash ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn untrash_manga_returns_404_for_missing_id() {
@@ -117,8 +111,6 @@ async fn untrash_manga_returns_404_for_regular_user_missing_id() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-// ── DELETE /rest/trash (empty all) ───────────────────────────────────────────
-
 #[tokio::test]
 async fn purge_trash_all_returns_200_for_authed_user() {
     let state = test_state().await;
@@ -163,8 +155,6 @@ async fn purge_trash_all_returns_200_for_regular_user() {
     assert_eq!(body["purged"], 0);
 }
 
-// ── DELETE /rest/trash/:id (purge one) ───────────────────────────────────────
-
 #[tokio::test]
 async fn purge_trash_one_returns_404_for_missing_id() {
     let state = test_state().await;
@@ -205,8 +195,6 @@ async fn purge_trash_one_returns_404_for_regular_user_missing_id() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-// ── DELETE /rest/manga/:id returns undo_token ─────────────────────────────────
-
 #[tokio::test]
 async fn delete_manga_returns_undo_token() {
     let state = test_state().await;
@@ -234,8 +222,6 @@ async fn delete_manga_returns_undo_token() {
         "undo_token must be a UUID"
     );
 }
-
-// ── POST /rest/manga/untrash (token-based) ────────────────────────────────────
 
 #[tokio::test]
 async fn untrash_by_token_returns_401_without_auth() {

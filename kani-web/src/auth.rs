@@ -1,3 +1,5 @@
+//! Session authentication backend, credential verification, users, roles, and password hashing.
+
 use secrecy::{ExposeSecret, Secret};
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -22,12 +24,8 @@ use crate::error::AppError;
 
 /// Where the first-run admin password is written.
 ///
-/// The **data directory**, not the home directory. In Docker `HOME` is `/app`,
-/// which is root-owned and not writable by the `kani` user the container runs
-/// as — so this write failed *after* the admin account had already been
-/// created, leaving a fresh deployment with an account whose randomly generated
-/// password nobody could ever read. The data dir is a mounted volume, is
-/// writable, and is where an operator would think to look.
+/// This must remain inside the writable data directory: account creation and credential delivery
+/// form one setup operation, while container home directories may be read-only.
 pub fn admin_password_path() -> std::path::PathBuf {
     std::env::var("KANI_DATA_DIR")
         .map(std::path::PathBuf::from)
@@ -36,6 +34,8 @@ pub fn admin_password_path() -> std::path::PathBuf {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// Authenticated account loaded into an `axum-login` session.
+/// Secret authentication material is retained for validation and never serialized.
 pub struct User {
     pub id: UserId,
     pub username: String,
@@ -67,14 +67,17 @@ impl AuthUser for User {
 }
 
 #[derive(Clone, Deserialize)]
+/// Username/password credentials submitted to the authentication backend.
 pub struct Credentials {
     pub username: String,
     pub password: Secret<String>,
 }
 
+/// Web session bound to Kani's SQL-backed authentication backend.
 pub type AuthSession = axum_login::AuthSession<AuthBackend>;
 
 #[derive(Clone)]
+/// SQL-backed `axum-login` authentication and role-loading backend.
 pub struct AuthBackend {
     db: SqlitePool,
 }
@@ -176,7 +179,6 @@ impl AuthBackend {
         Ok(roles)
     }
 
-    /// Returns the number of registered users.
     pub async fn user_count(&self) -> Result<i64, AppError> {
         Ok(sqlx::query_scalar!("SELECT COUNT(*) FROM users")
             .fetch_one(&self.db)
@@ -184,7 +186,6 @@ impl AuthBackend {
     }
 
     /// Creates a new user, hashes their password, and assigns the `user` role.
-    /// Returns the created `User`.
     pub async fn create_user(
         &self,
         username: &str,
@@ -294,7 +295,6 @@ impl AuthBackend {
         Ok(())
     }
 
-    /// Returns the number of users who currently hold the given role.
     pub async fn count_users_with_role(&self, role_slug: &str) -> Result<i64, AppError> {
         let count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM user_roles WHERE role_slug = ?",
@@ -620,10 +620,6 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
         return next.run(request).await;
     }
 
-    // Bearer-authenticated callers have no session, so this guard cannot judge
-    // them. Let them through and leave the decision to the AuthGuard extractor,
-    // which validates the token, its kind and its scopes. A bogus bearer is
-    // refused there, not here — it never reaches a handler either way.
     if request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -766,14 +762,8 @@ mod tests {
     use super::*;
     use axum_login::AuthzBackend;
 
-    // The first-run admin password must land in the data directory. It used to
-    // use `dirs::home_dir()`, which in Docker is `/app` — root-owned and not
-    // writable by the container's `kani` user. The write failed *after* the
-    // admin account was created, so a fresh deployment ended up with an account
-    // whose password nobody could read, while still reporting healthy.
     #[test]
     fn the_admin_password_is_written_to_the_data_dir_not_the_home_dir() {
-        // SAFETY: single-threaded test process; no other thread reads the env.
         unsafe { std::env::set_var("KANI_DATA_DIR", "/tmp/kani-data-dir-test") };
         let path = admin_password_path();
         unsafe { std::env::remove_var("KANI_DATA_DIR") };
@@ -784,8 +774,6 @@ mod tests {
             "the password file must sit in the data dir, which is a writable volume"
         );
     }
-
-    // ── hash / verify password ───────────────────────────────────────────────
 
     #[test]
     fn hash_password_produces_argon2_string() {
@@ -811,8 +799,6 @@ mod tests {
         let h2 = hash_password("same").unwrap();
         assert_ne!(h1, h2, "Argon2 should use different salts each time");
     }
-
-    // ── is_public_path ───────────────────────────────────────────────────────
 
     #[test]
     fn login_path_is_public() {
@@ -893,8 +879,6 @@ mod tests {
         assert!(!is_public_path("/settings"));
     }
 
-    // ── create_user / fetch / list ───────────────────────────────────────────
-
     #[tokio::test]
     async fn create_user_inserts_and_assigns_user_role() {
         let db = test_db().await;
@@ -958,8 +942,6 @@ mod tests {
         backend.create_user("x", "x@t.com", "p").await.unwrap();
         assert_eq!(backend.user_count().await.unwrap(), 1);
     }
-
-    // ── authenticate ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn authenticate_succeeds_with_valid_credentials() {
@@ -1030,8 +1012,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // ── timing-fix tests ────────────────────────────────────────────────────
-
     #[test]
     fn dummy_hash_is_stable_across_calls() {
         let h1 = dummy_hash();
@@ -1074,7 +1054,6 @@ mod tests {
             .await;
         let elapsed_unknown = start_unknown.elapsed();
 
-        // Allow 10× difference (argon2 timing can vary, but both must be in the same order of magnitude)
         let ratio =
             elapsed_known.as_millis().max(1) as f64 / elapsed_unknown.as_millis().max(1) as f64;
         assert!(
@@ -1082,8 +1061,6 @@ mod tests {
             "timing ratio {ratio:.1}× is too large — unknown-user path must run dummy argon2 work"
         );
     }
-
-    // ── role management ──────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn grant_role_adds_role() {
@@ -1156,8 +1133,6 @@ mod tests {
         assert!(updated.is_admin());
     }
 
-    // ── get_group_permissions with role hierarchy ────────────────────────────
-
     #[tokio::test]
     async fn user_role_gets_expected_permissions() {
         let db = test_db().await;
@@ -1169,7 +1144,6 @@ mod tests {
         let perms = backend.get_group_permissions(&user).await.unwrap();
         assert!(perms.contains(&"library:view".parse().unwrap()));
         assert!(perms.contains(&"source:browse".parse().unwrap()));
-        // user role should NOT have admin-only permissions
         assert!(!perms.contains(&"source:install".parse().unwrap()));
         assert!(!perms.contains(&"user:manage".parse().unwrap()));
     }
@@ -1189,9 +1163,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let perms = backend.get_group_permissions(&updated).await.unwrap();
-        // Admin inherits user permissions via recursive CTE
         assert!(perms.contains(&"library:view".parse().unwrap()));
-        // Admin also has admin-only permissions
         assert!(perms.contains(&"source:install".parse().unwrap()));
         assert!(perms.contains(&"user:manage".parse().unwrap()));
     }

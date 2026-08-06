@@ -152,7 +152,6 @@ async fn system_changelog_html_is_sanitised() {
         .unwrap();
     let body = body_json(res).await;
     let html = body["html"].as_str().unwrap();
-    // The client injects this with innerHTML, so it must never carry script.
     assert!(
         !html.contains("<script"),
         "sanitised output has no <script>"

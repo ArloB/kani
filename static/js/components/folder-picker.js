@@ -50,7 +50,6 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
     }
   }, []);
 
-  // Load initial path when opened
   useEffect(() => {
     if (open) load(initialPath);
   }, [open, initialPath, load]);
@@ -59,13 +58,11 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
   function buildPath(segs, i) {
     const parts = segs.slice(0, i + 1);
     if (parts.length === 0) return '/';
-    // On Windows the first segment is a drive like "C:\" — already complete
     if (parts[0].endsWith(':\\') || parts[0].endsWith(':/')) {
       const [drive, ...rest] = parts;
       if (rest.length === 0) return drive;
       return drive + rest.join('/');
     }
-    // Unix: rejoin with '/'
     return parts.map((p, j) => (j === 0 && p === '/') ? '' : p).join('/') || '/';
   }
 

@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Groups H6 / A9 — the per-call HTTP I/O budget (32 requests) against the
+//! Per-call HTTP I/O budgeting against the
 //! interpreted `YamlSource`. Each container row carries a `for_each` sub-fetch,
 //! so a listing wider than the budget forces the extraction over the cap. The
 //! budget lives on a fresh `HostState` built per call, so it is per-call, not a
@@ -116,18 +116,11 @@ fn items(n: usize) -> String {
     format!("<html><body>{rows}</body></html>")
 }
 
-// H6 — a listing wider than the 32-request budget is refused, and the budget is
-// per call: the same source succeeds on a subsequent narrow listing because a
-// fresh HostState resets io_count. A cumulative per-source counter would keep
-// the second call over budget.
 #[tokio::test]
 async fn the_io_budget_is_enforced_per_call_not_per_source() {
     let origin = TestOrigin::start().await;
-    // /detail is registered but never reached: charge_fetch_request errors on
-    // the row that crosses io_count > 32, before any sub-fetch is sent.
     origin.set("/detail", Response::html(r#"<div class="d">ok</div>"#));
 
-    // 40 rows × one for_each each → past the 32 cap → the call errors.
     origin.set("/popular", Response::html(&items(40)));
     let backend = source_with_for_each(&origin, OnFailurePolicy::Fail);
     let over = backend.get_popular_manga(1, 50, &[]).await;
@@ -137,8 +130,6 @@ async fn the_io_budget_is_enforced_per_call_not_per_source() {
         over.map(|l| l.manga.len())
     );
 
-    // Same source, a narrow listing well under the cap → succeeds, proving the
-    // budget reset per call rather than persisting from the failed one.
     origin.set("/popular", Response::html(&items(4)));
     let under = backend.get_popular_manga(1, 50, &[]).await;
     assert!(
@@ -148,16 +139,11 @@ async fn the_io_budget_is_enforced_per_call_not_per_source() {
     assert_eq!(under.unwrap().manga.len(), 4);
 }
 
-// A9 — a page set whose per-page sub-fetches exceed the I/O budget is refused
-// outright (Fail policy), never returned as a silently-truncated short set that
-// the downloader could seal into a short CBZ marked complete.
 #[tokio::test]
 async fn a_page_set_exceeding_the_io_budget_is_refused_not_truncated() {
     let origin = TestOrigin::start().await;
     origin.set("/detail", Response::html(r#"<div class="d">ok</div>"#));
 
-    // Reuse the popular endpoint as a 60-"page" listing with a per-row for_each,
-    // standing in for a source that resolves each page image via a detail fetch.
     origin.set("/popular", Response::html(&items(60)));
     let backend = source_with_for_each(&origin, OnFailurePolicy::Fail);
 

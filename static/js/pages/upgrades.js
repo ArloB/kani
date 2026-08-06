@@ -1,5 +1,4 @@
 // @ts-check
-// Library-wide upgrades — every chapter a source now offers a better version of.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';

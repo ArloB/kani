@@ -24,7 +24,6 @@ export function mountTrackerPanel(containerEl, ctx) {
   render(html`<${TrackerPanel} dbId=${ctx.dbId} title=${ctx.title ?? ''} />`, mount);
 }
 
-// ── Internal tracking ─────────────────────────────────────────────────────────
 
 function InternalTrackingCard({ dbId }) {
   const [trackingEnabled, setTrackingEnabled] = useState(true);
@@ -145,7 +144,6 @@ function InternalTrackingCard({ dbId }) {
   `;
 }
 
-// ── External trackers ─────────────────────────────────────────────────────────
 
 function ExternalTrackersCard({ dbId, title }) {
   const [state, setState_] = useState(/** @type {'loading'|'ready'|'error'} */ ('loading'));
@@ -273,7 +271,6 @@ function TrackerRow({ tracker: tr, mapping, dbId, title, onMappingSet, onMapping
   `;
 }
 
-// ── Root ──────────────────────────────────────────────────────────────────────
 
 function TrackerPanel({ dbId, title }) {
   return html`

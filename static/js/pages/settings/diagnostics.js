@@ -1,6 +1,4 @@
 // @ts-check
-// Settings — Diagnostics. A card host: each card is a self-contained module
-// registered through diagnostics-cards.js.
 
 import { h } from 'preact';
 import { useEffect, useState } from 'preact/hooks';

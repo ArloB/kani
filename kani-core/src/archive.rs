@@ -15,11 +15,13 @@ use std::path::{Path, PathBuf};
 
 use crate::manifest::{ChapterManifest, archive_hash};
 
+/// Schema version written to `ARCHIVE.json`.
 pub const ARCHIVE_SCHEMA: u32 = 1;
 
 const VIEWER_HTML: &str = include_str!("archive_viewer.html");
 
 #[derive(Debug)]
+/// Caller-supplied series content used to construct a self-contained archive.
 pub struct ArchiveSeries {
     pub slug: String,
     pub metadata_json: String,
@@ -28,6 +30,7 @@ pub struct ArchiveSeries {
 }
 
 #[derive(Debug)]
+/// Caller-supplied chapter archive and integrity manifest.
 pub struct ArchiveChapter {
     pub number_prefix: String,
     pub slug: String,
@@ -36,15 +39,18 @@ pub struct ArchiveChapter {
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+/// Summary of a completed archive export.
 pub struct ArchiveReport {
     pub root: String,
     pub series_count: u64,
     pub chapter_count: u64,
+    /// Total emitted size in bytes.
     pub total_bytes: u64,
     pub zipped: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+/// Result of validating an archive index and all indexed files.
 pub struct ArchiveVerifyReport {
     pub schema: u32,
     pub checked: u64,
@@ -60,8 +66,10 @@ impl ArchiveVerifyReport {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// Portable `ARCHIVE.json` index at the root of an export.
 pub struct ArchiveIndex {
     pub schema: u32,
+    /// Export creation time as a Unix timestamp in seconds.
     pub created_at: i64,
     pub generator: String,
     pub series_count: u64,
@@ -73,6 +81,7 @@ pub struct ArchiveIndex {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// One series entry in an [`ArchiveIndex`].
 pub struct ArchiveIndexSeries {
     pub slug: String,
     pub cover: Option<String>,
@@ -80,6 +89,7 @@ pub struct ArchiveIndexSeries {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// One chapter entry in an [`ArchiveIndexSeries`].
 pub struct ArchiveIndexChapter {
     pub slug: String,
     pub cbz: String,
@@ -88,6 +98,7 @@ pub struct ArchiveIndexChapter {
 }
 
 #[derive(Debug)]
+/// Failure while writing, reading, or validating the portable archive format.
 pub enum ArchiveError {
     Io(std::io::Error),
     Json(String),
@@ -466,8 +477,6 @@ mod tests {
 
     #[test]
     fn the_viewer_is_self_contained() {
-        // The archive is meant to be readable with no network and no Kani; a
-        // remote script tag would quietly break that years from now.
         assert!(!VIEWER_HTML.contains("http://"), "viewer fetches over http");
         assert!(
             !VIEWER_HTML.contains("https://"),

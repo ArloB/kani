@@ -486,8 +486,6 @@ impl AppService {
     }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 const ATOM_PROFILE: &str = "application/atom+xml;profile=opds-catalog";
 
 fn now_rfc3339() -> String {
@@ -538,8 +536,6 @@ fn nav_entry(w: &mut Utf8Writer, id: &str, title: &str, content: &str, updated: 
     );
     w.close("entry");
 }
-
-// ─── Minimal XML writer (quick-xml writer wrapper) ────────────────────────────
 
 struct Utf8Writer {
     writer: Writer<Cursor<Vec<u8>>>,

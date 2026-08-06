@@ -6,9 +6,7 @@ use tower_governor::{GovernorError, key_extractor::KeyExtractor};
 /// Rate-limit bucket identity.
 ///
 /// Bearer-authenticated traffic is bucketed per token rather than per peer IP.
-/// Sharing a bucket would mean a busy integration spends its owner's browsing
-/// budget — the owner's UI would stall with no visible cause, and the fix
-/// (revoking the token) would not be discoverable from the symptom.
+/// This prevents an integration from consuming its owner's browser budget.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RateKey {
     /// Hash of the presented bearer, never the token itself: this value is used
@@ -18,6 +16,7 @@ pub enum RateKey {
 }
 
 #[derive(Clone, Copy)]
+/// Tower Governor key extractor that prefers a hashed bearer token and otherwise uses peer IP.
 pub struct TokenOrPeerIp;
 
 fn hash_bearer(raw: &str) -> u64 {
@@ -88,8 +87,6 @@ mod tests {
 
     #[test]
     fn a_request_without_a_bearer_falls_back_to_peer_ip() {
-        // No ConnectInfo in a synthetic request, so extraction fails rather than
-        // silently lumping every anonymous caller into one shared bucket.
         assert!(TokenOrPeerIp.extract(&req_with_auth(None)).is_err());
         assert!(
             TokenOrPeerIp

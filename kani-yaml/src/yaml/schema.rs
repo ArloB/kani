@@ -1,7 +1,11 @@
+//! Serde input model defining the declarative extension YAML format.
+
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
+/// Top-level declarative extension document before semantic validation.
+/// Defaults and accepted wire shapes in this module are part of the authoring format.
 pub struct YamlExtension {
     pub id: String,
     pub name: String,
@@ -72,9 +76,8 @@ pub struct ScriptsBlock {
     pub pure: BTreeMap<String, String>,
 }
 
-// ── Multi-source factory ─────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone)]
+/// Template and source matrix used to generate several extensions from one declaration.
 pub struct FactoryBlock {
     /// Optional external template file path; if absent the containing YAML is the template.
     pub template: Option<String>,
@@ -95,8 +98,6 @@ pub struct FactorySource {
     pub overrides: BTreeMap<String, serde_yaml::Value>,
 }
 
-// ── Chapter sort ─────────────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize)]
 pub struct ChapterSortBlock {
     pub default: Option<String>,
@@ -110,13 +111,12 @@ pub struct ChapterSortOptionYaml {
     pub label: String,
 }
 
+/// Latest extension schema version accepted and emitted by this build.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
 }
-
-// ── Extended metadata ────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Default)]
 pub struct MetadataBlock {
@@ -132,7 +132,9 @@ pub struct MetadataBlock {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+/// Host-enforced upstream request and response-hook budget.
 pub struct RateLimitCfg {
+    /// Sustained requests per second.
     #[serde(default = "default_rps")]
     pub rps: f64,
     #[serde(default = "default_burst")]
@@ -172,6 +174,7 @@ fn default_language() -> String {
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Declared provider endpoints keyed by the operation the host invokes.
 pub struct Endpoints {
     pub popular: Option<PopularEndpoint>,
     pub search: Option<EndpointBody>,
@@ -194,6 +197,7 @@ pub enum PopularEndpoint {
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Request, extraction, chaining, pagination, and hook declaration for one provider operation.
 pub struct EndpointBody {
     pub route: Option<String>,
     #[serde(default = "default_method")]
@@ -252,6 +256,7 @@ pub struct EndpointBody {
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+/// Alternate transport used to obtain an endpoint's extraction input.
 pub enum EndpointVia {
     #[default]
     BrowserPayload,
@@ -260,8 +265,6 @@ pub enum EndpointVia {
 fn default_timeout_ms() -> u32 {
     30_000
 }
-
-// ── Endpoint chaining (then / for_each) ──────────────────────────────────────
 
 /// What to do when a chained sub-fetch fails.
 #[derive(Debug)]
@@ -415,9 +418,8 @@ pub enum TupleSplitKind {
     TupleSplit,
 }
 
-// ── Pagination ───────────────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone)]
+/// Fixed-size source pagination declaration lowered into a blueprint pagination config.
 pub struct PaginationCfg {
     pub native_page_size: usize,
     pub offset_param: String,
@@ -437,9 +439,8 @@ pub enum YamlOffsetType {
     Page,
 }
 
-// ── Filters ──────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone)]
+/// One author-facing filter control and its wire-mapping metadata.
 pub struct FilterEntry {
     pub id: String,
     pub name: String,
@@ -496,9 +497,8 @@ pub enum FilterSemantic {
     Tag,
 }
 
-// ── Preferences ──────────────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone)]
+/// One host-rendered and host-persisted extension preference.
 pub struct PreferenceEntry {
     pub key: String,
     pub label: String,
@@ -528,8 +528,6 @@ pub struct PrefOption {
     pub name: String,
     pub value: String,
 }
-
-// ── Filter request formatting ───────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FilterFormatCfg {
@@ -570,8 +568,6 @@ pub enum BoolFormat {
     YesNo,
 }
 
-// ── Option sets ──────────────────────────────────────────────────────────────
-
 /// Either a static inline list of options, or a definition for fetching them
 /// lazily from the host at filter-panel render time.
 #[derive(Debug, Deserialize, Clone)]
@@ -592,6 +588,7 @@ pub struct OptionSetItem {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+/// Host-fetched option-set extraction and caching declaration.
 pub struct FetchedOptionsDef {
     pub route: String,
     #[serde(rename = "type", default)]
@@ -604,7 +601,9 @@ pub struct FetchedOptionsDef {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+/// Inline fetched-option cache configuration.
 pub struct InlineCacheEntry {
+    /// Cache lifetime in seconds.
     #[serde(default = "default_cache_ttl")]
     pub ttl: u32,
     pub key: String,
@@ -614,9 +613,8 @@ fn default_cache_ttl() -> u32 {
     3600
 }
 
-// ── Composite ID encoding ───────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone, Default)]
+/// Composite identifier encoding declarations for manga and chapter identifiers.
 pub struct IdEncodingBlock {
     pub manga: Option<IdEncodingEntry>,
     pub chapter: Option<IdEncodingEntry>,
@@ -656,12 +654,12 @@ impl YamlIdEncoding {
     }
 }
 
-// ── Cache namespaces ─────────────────────────────────────────────────────────
-
 #[derive(Debug, Deserialize, Clone)]
+/// Host-managed named cache declaration.
 pub struct CacheEntry {
     #[serde(default)]
     pub scope: YamlCacheScope,
+    /// Entry lifetime in seconds.
     #[serde(default = "default_cache_block_ttl")]
     pub ttl: u32,
     pub max_entries: Option<u32>,

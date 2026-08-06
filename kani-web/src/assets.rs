@@ -1,9 +1,6 @@
 //! Frontend assets, served from the binary or from disk.
 //!
-//! The release archives ship `kani-web` alone. Before this, a binary install
-//! served a working API and a 404 for every page, with nothing explaining why —
-//! `install-binary.md` walks a user through systemd and never mentions
-//! `KANI_STATIC_DIR`. A release build now carries the frontend inside it.
+//! Release binaries embed the frontend so the archive remains self-contained.
 //!
 //! Three sources, most explicit first:
 //!
@@ -77,9 +74,7 @@ impl Assets {
 
     /// Fetches an asset by its path relative to the static root.
     ///
-    /// Returns `None` for anything that escapes that root. `ServeDir` used to
-    /// enforce that; a hand-written reader has to do it explicitly or a request
-    /// for `../../etc/passwd` is served happily.
+    /// Returns `None` for anything that escapes the root, preventing traversal requests.
     pub fn get(&self, relative: &str) -> Option<Asset> {
         let clean = normalise(relative)?;
         match self {
@@ -225,7 +220,6 @@ mod tests {
 
     #[test]
     fn traversal_is_refused() {
-        // ServeDir enforced this; a hand-written reader has to.
         assert_eq!(normalise("../../etc/passwd"), None);
         assert_eq!(normalise("js/../../../etc/passwd"), None);
         assert_eq!(normalise("/etc/passwd"), Some("etc/passwd".to_owned()));
@@ -252,7 +246,6 @@ mod tests {
     fn the_etag_tracks_the_bytes() {
         assert_eq!(weak_hash(b"alpha"), weak_hash(b"alpha"));
         assert_ne!(weak_hash(b"alpha"), weak_hash(b"beta"));
-        // A one-bit change must move it, or a stale cache survives a deploy.
         assert_ne!(weak_hash(b"alpha"), weak_hash(b"alphb"));
     }
 }

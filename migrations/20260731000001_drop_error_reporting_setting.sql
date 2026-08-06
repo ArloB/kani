@@ -1,12 +1,3 @@
--- Kani no longer reports errors to anything outside the machine it runs on.
---
--- `error_reporting_enabled` gated an optional Sentry/GlitchTip client compiled
--- in behind the `error-reporting` cargo feature. That feature, its dependency,
--- the `KANI_GLITCHTIP_DSN` env var and the settings toggle are all gone: a
--- self-hosted server has no upstream to report to, and keeping a dormant
--- reporting path is a promise about where a user's data can go that no longer
--- needs making.
---
--- Local observability is unaffected — `/metrics`, the ring-buffer log viewer,
--- the diagnostics card and the support bundle all stay on the box.
+-- External error reporting and its feature have been removed. Local metrics, logs,
+-- diagnostics, and support bundles remain available without this setting.
 ALTER TABLE settings DROP COLUMN error_reporting_enabled;

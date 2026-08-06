@@ -30,10 +30,7 @@ const TRIGGERABLE = [
 ];
 
 /**
- * Database size and the two reclaim operations.
- *
- * The endpoints have existed and worked since the jobs framework landed; there
- * was simply no way to reach them from the app.
+ * Database size and reclaim operations.
  */
 function DatabaseCard() {
   const [stats, setStats] = useState(/** @type {any} */ (null));

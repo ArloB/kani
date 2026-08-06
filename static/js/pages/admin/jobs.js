@@ -1,5 +1,4 @@
 // @ts-check
-// Admin Jobs page — background job queue and history.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -17,7 +16,6 @@ import { iconCheck, iconWarning, iconDocument } from '../../icons.js';
 import { t } from '../../i18n.js';
 const html = htm.bind(h);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** @param {number} ts */
 function _fmtTime(ts) {
@@ -40,7 +38,6 @@ function _pct(job) {
 }
 
 
-// ── Row components ─────────────────────────────────────────────────────────────
 
 function ActiveJobRow({ job, onCancel, onPause, onResume }) {
   const pct = _pct(job);
@@ -136,7 +133,6 @@ function FailedJobRow({ job }) {
   `;
 }
 
-// ── Page root ─────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
 
@@ -272,7 +268,6 @@ function JobsPage() {
   `;
 }
 
-// ── Page lifecycle ────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {

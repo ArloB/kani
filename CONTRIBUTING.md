@@ -36,7 +36,8 @@ cargo run -p kani-cli -- build kani-weebcentral --ext-dir ../kani-extensions
 cargo run -p kani-cli -- build --all
 ```
 
-For detailed conventions — test location rules, snapshot policy, `unwrap_used` expectations — see [`CLAUDE.md`](CLAUDE.md).
+See the developer documentation for [local development](docs/docs/developer/local-dev.md) and
+[test conventions](docs/docs/developer/test-conventions.md).
 
 ## SQL schema changes
 
@@ -50,9 +51,9 @@ Commit the updated `.sqlx/` directory. CI checks for staleness with `cargo sqlx 
 
 ## PR expectations
 
-- Write tests alongside new logic — don't defer. Every new pure function gets a happy-path test and an
+- Write tests with new logic. Every new pure function gets a happy-path test and an
   edge/error test. New REST endpoints get a test triplet: 200 authed, 401 unauthed, 4xx invalid.
-- Keep commits atomic and the branch focused. Prefer creating a new commit rather than amending after a review.
+- Keep commits atomic and branches focused. After review begins, prefer a new commit to an amendment.
 - Reference the issue number in the PR description if applicable.
 - CI must be green (build, test, clippy, sqlx check) before merge.
 

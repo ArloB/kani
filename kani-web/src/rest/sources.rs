@@ -993,8 +993,7 @@ pub(crate) async fn get_capabilities(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Incremental chapter delivery is host-side page polling, so every
-    // installed source has it. The flag this used to read was never written.
+    // Host-side page polling gives every installed source incremental delivery.
     let exists: Option<(i64,)> =
         sqlx::query_as("SELECT id FROM sources WHERE id = ? AND deleted_at IS NULL")
             .bind(id)
@@ -1033,10 +1032,7 @@ pub(crate) async fn get_all_capabilities(
             .await
             .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-    // Incremental chapter delivery is host-side page polling, so every
-    // installed source has it — the same reasoning as the per-source route.
-    // Kept in step with it deliberately: two endpoints answering the same
-    // question must not drift.
+    // This bulk response must match the per-source capability contract.
     let out: Vec<SourceCapabilityEntry> = ids
         .into_iter()
         .map(|(source_id,)| SourceCapabilityEntry {

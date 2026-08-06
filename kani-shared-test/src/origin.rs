@@ -474,8 +474,6 @@ fn parse_range(request: &str) -> Option<(usize, Option<usize>)> {
     Some((start, end))
 }
 
-// ── Page fixtures ────────────────────────────────────────────────────────────
-
 /// A JPEG of exactly these dimensions, encoded at `quality`, either colour or
 /// grey *in content* — which is what the probe and the manifest actually judge,
 /// as opposed to what the encoding is capable of.

@@ -1,5 +1,4 @@
 // @ts-check
-// Manga card component — cover, title, optional metadata badge.
 
 import { createCoverImage } from './cover-image.js';
 import { getMangaCoverUrl } from '../api.js';
@@ -12,7 +11,6 @@ import { t } from '../i18n.js';
  */
 
 /**
- * Creates a manga card element.
  * @param {{
  *   manga: MangaCardData,
  *   href: string,

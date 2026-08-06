@@ -1,5 +1,4 @@
 // @ts-check
-// Update group — recent-updates manga group with cover, title, and chapter list.
 
 import { createCoverImage } from './cover-image.js';
 import { getMangaCoverUrl } from '../api.js';
@@ -18,7 +17,6 @@ import { escapeHtml, formatDate } from '../utils.js';
  */
 
 /**
- * Creates a recent-updates group element.
  * @param {{ group: UpdateGroupData }} props
  * @returns {HTMLElement}
  */
@@ -29,7 +27,6 @@ export function createUpdateGroup({ group }) {
   const mangaHref = `/manga/${group.manga_id}`;
   const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
 
-  // Header: cover thumb + manga title link
   const header = document.createElement('div');
   header.className = 'flex items-center gap-3';
 
@@ -48,9 +45,8 @@ export function createUpdateGroup({ group }) {
   header.appendChild(titleLink);
   el.appendChild(header);
 
-  // Chapter list
   const list = document.createElement('ul');
-  list.className = 'flex flex-col gap-0.5 pl-13'; /* justified: aligns with thumbnail width (48px) + gap */
+  list.className = 'flex flex-col gap-0.5 pl-13';
 
   for (const ch of group.chapters) {
     const item = document.createElement('li');

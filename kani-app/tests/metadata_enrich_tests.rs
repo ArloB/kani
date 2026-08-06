@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group N (N7/N8) — metadata-provider enrichment. Enrichment fills gaps from a
+//! Metadata-provider enrichment fills gaps from a
 //! provider; it must never overwrite what the user typed, and a provider that
 //! fails must leave the manga exactly as it was.
 
@@ -18,9 +18,6 @@ async fn description(
         .unwrap()
 }
 
-// N7 — a local override wins over whatever the provider offers. The stub
-// provider always returns a description, so an unchanged value here can only
-// mean the override was honoured.
 #[tokio::test]
 async fn a_metadata_provider_enrichment_preserves_local_overrides() {
     let svc = test_service().await;
@@ -53,8 +50,6 @@ async fn a_metadata_provider_enrichment_preserves_local_overrides() {
     );
 }
 
-// The complement: with no local override, enrichment does fill the gap —
-// otherwise N7 could pass simply because enrichment never writes anything.
 #[tokio::test]
 async fn enrichment_fills_a_description_that_has_no_local_override() {
     let svc = test_service().await;
@@ -80,7 +75,6 @@ async fn enrichment_fills_a_description_that_has_no_local_override() {
     );
 }
 
-// N8 — a provider that fails leaves the manga untouched rather than half-written.
 #[tokio::test]
 async fn a_metadata_provider_failure_leaves_the_manga_unchanged() {
     let svc = test_service().await;

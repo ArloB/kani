@@ -32,7 +32,6 @@ function _onKeyDown(/** @type {KeyboardEvent} */ e) {
 
   if (e.key === 'F1') {
     e.preventDefault();
-    // If an override is registered (e.g. the reader's settings modal), call it instead.
     if (_f1Override) { _f1Override(); return; }
     _showCheatsheet();
     return;

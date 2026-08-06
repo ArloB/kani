@@ -16,7 +16,6 @@ import { subscribeJob } from '../../sse.js';
 /** Tears down an open description panel when the hero is rebuilt. */
 let _destroyDesc = /** @type {(() => void)|null} */ (null);
 
-// ── Source filter URL builder ──────────────────────────────────────────────────
 
 /** @type {Map<string|number, Promise<any[]>>} */
 const _sourceFilterDefsCache = new Map();
@@ -41,7 +40,6 @@ export async function buildSourceMetaUrl(sid, name, semantic) {
   return `/source/${sid}?q=${encodeURIComponent(name)}`;
 }
 
-// ── External link warning ──────────────────────────────────────────────────────
 
 /** @param {string} url */
 function _showExternalLinkDialog(url) {
@@ -82,7 +80,6 @@ function _showExternalLinkDialog(url) {
   /** @type {HTMLButtonElement|null} */ (dialog.querySelector('.js-continue'))?.focus();
 }
 
-// ── Hero mount ─────────────────────────────────────────────────────────────────
 
 /**
  * @typedef {{
@@ -119,12 +116,9 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     ? api.getMangaCoverUrl(dbId, 'lg') + '&v=' + Date.now()
     : (info?.cover_url ?? info?.cover_image_url ?? null);
 
-  // The two-column rail needs ~740 px of content (a 260 px rail plus a readable
-  // chapter column). With the sidebar that is ~975 px, so the split happens at
-  // lg rather than md — at 768 the rail was 130 px and clipped its own labels.
+  // The rail activates only when both it and the chapter column retain usable width.
   const isDesktop = () => window.innerWidth >= 1024;
 
-  // ── Cover ──
   const coverInner = document.createElement('div');
   coverInner.className = 'rail-cover-slot rounded-xl overflow-hidden bg-surface-2 cursor-pointer shadow-card';
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
@@ -136,7 +130,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   coverBox.className = 'rail-cover-box';
   coverBox.appendChild(coverInner);
 
-  // Cover lightbox
   coverInner.addEventListener('click', () => {
     if (!coverUrl) return;
     const rect = coverInner.getBoundingClientRect();
@@ -152,7 +145,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     overlay.appendChild(img);
     document.body.appendChild(overlay);
 
-    img.getBoundingClientRect(); // force reflow
+    img.getBoundingClientRect();
     img.style.transition = `top 280ms var(--motion-ease), left 280ms var(--motion-ease), width 280ms var(--motion-ease), height 280ms var(--motion-ease), border-radius 280ms ease`;
     overlay.style.background = 'rgba(0,0,0,0.6)'; // audit-ignore: cover lightbox scrim
 
@@ -167,7 +160,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     img.style.borderRadius = '1rem';
 
     const close = () => {
-      overlay.style.background = 'rgba(0,0,0,0)'; /* fades back to transparent — audit-ignore */
+      overlay.style.background = 'rgba(0,0,0,0)'; /* audit-ignore: animated cover backdrop */
       img.style.top = rect.top + 'px'; img.style.left = rect.left + 'px';
       img.style.width = rect.width + 'px'; img.style.height = rect.height + 'px';
       setTimeout(() => overlay.remove(), 280);
@@ -175,7 +168,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     overlay.addEventListener('click', close);
   });
 
-  // ── Meta rows ──
   const meta = document.createElement('div');
   meta.className = 'rail-meta flex flex-col gap-3';
 
@@ -186,8 +178,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
    *
    * Whoever is both author and artist takes the byline; whoever is left on
    * each side follows. Rows come out most-responsible first and empty ones are
-   * dropped, so a name is never printed twice — the old layout listed the same
-   * person under AUTHORS and again under ARTISTS on almost every series.
+   * dropped, so a name is never printed twice.
    *
    * @param {Array<{ id?: number, name: string }>} authors
    * @param {Array<{ id?: number, name: string }>} artists
@@ -237,7 +228,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     meta.appendChild(block);
   }
 
-  // ── Production facts ──
   const facts = document.createElement('dl');
   facts.className = 'rail-facts';
   let factCount = 0;
@@ -298,8 +288,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     mkFact(t('manga.header.chapters'), String(Number(info.chapter_count)));
   }
 
-  // When the series entered the library. Held in manga.created_at since the
-  // beginning and shown nowhere until now.
   if (isLocal && info?.added_at) {
     const when = new Date(info.added_at);
     if (!Number.isNaN(when.getTime())) {
@@ -316,12 +304,10 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     meta.appendChild(facts);
   }
 
-  // ── Button group ──
   const btnGroupEl = document.createElement('div');
   btnGroupEl.className = 'flex flex-col gap-2';
   _renderBtnGroup(btnGroupEl, info, source, ctx);
 
-  // ── Description ──
   /** @type {HTMLElement|null} */ let descWrap = null;
   /** @type {HTMLElement|null} */ let desc = null;
   let expanded = false;
@@ -331,10 +317,9 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     descWrap.className = 'flex flex-col gap-1.5 min-h-0 page-fill md:pb-1';
     desc = document.createElement('div');
     desc.className = 'text-sm text-text-muted leading-relaxed rail-desc';
-    // Deliberately not role="button": a synopsis can contain links, and a
-    // control containing links is nested interactive content — invalid, and
-    // unusable by keyboard. The button below owns the interaction; clicking
-    // the text is a mouse convenience on top of it.
+    // Deliberately not role="button": a synopsis can contain links, and a control containing
+    // links is nested interactive content — invalid, and unusable by keyboard. The button below
+    // owns the interaction; clicking the text is a mouse convenience on top of it.
     desc.id = 'manga-description';
     desc.innerHTML = info.description_html ?? `<p>${escapeHtml(info.description)}</p>`;
 
@@ -380,7 +365,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     // Only offer it when there is more than the three lines already showing.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // Nothing behind the clamp means nothing to disclose.
         if (desc && desc.scrollHeight <= desc.clientHeight + 2) {
           desc.classList.remove('rail-desc');
         } else {
@@ -394,7 +378,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     _destroyDesc = () => setReading(false);
   }
 
-  // ── Layout containers ──
   const titleMetaCard = document.createElement('div');
   titleMetaCard.className = 'flex flex-col gap-2 min-w-0';
   titleMetaCard.appendChild(meta);
@@ -416,7 +399,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
 
-  // ── Responsive layout ──
   function applyHeroLayout() {
     if (!isDesktop()) {
       leftCol.style.maxWidth = '';
@@ -438,10 +420,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       // Cap the column so the cover and panel don't sprawl across a quarter of
       // an ultra-wide viewport.
       leftCol.style.maxWidth = '';
-      // The cover holds its place; everything under it is the scroll region.
-      // Expanding the description used to grow the column and scroll the page,
-      // which slid the cover up out of view — the artwork is the last thing
-      // that should move when you ask to read more text.
       heroRow.style.cssText = 'display:flex;flex-direction:column;gap:1rem;flex:1 1 auto;min-height:0';
       btnGroupEl.style.paddingTop = '';
       btnGroupEl.style.paddingBottom = '';
@@ -475,7 +453,6 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   };
 }
 
-// ── Button group renderer ──────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} btnGroupEl

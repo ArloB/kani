@@ -18,10 +18,9 @@ pub struct PageProbe {
     pub colour: Option<bool>,
     /// Estimated encoder quality (1–100), JPEG only.
     ///
-    /// Approximate: it inverts libjpeg's table scaling, and real files come from
-    /// encoders that deviate from it — measured within ~8 of the requested
-    /// quality against the `image` crate. The *ordering* is what upgrade
-    /// detection relies on, not the absolute number.
+    /// Approximate: it inverts libjpeg's table scaling, while encoders may use
+    /// different tables. Upgrade detection relies on ordering, not the absolute
+    /// value.
     pub jpeg_quality: Option<u8>,
 }
 
@@ -179,7 +178,7 @@ fn jpeg_luminance_table(b: &[u8]) -> Option<[u16; 64]> {
         // A DQT segment may carry several tables back to back.
         while p < seg.len() {
             let pq_tq = *seg.get(p)?;
-            let precision = pq_tq >> 4; // 0 = 8-bit entries, 1 = 16-bit
+            let precision = pq_tq >> 4;
             let id = pq_tq & 0x0F;
             p += 1;
             let entries = if precision == 0 { 64 } else { 128 };
@@ -206,7 +205,8 @@ fn jpeg_luminance_table(b: &[u8]) -> Option<[u16; 64]> {
 /// Yields `(marker, payload)` for each JPEG segment present in the prefix.
 fn jpeg_segments(b: &[u8]) -> Vec<(u8, &[u8])> {
     let mut out = Vec::new();
-    let mut i = 2usize; // skip SOI
+    const JPEG_START_OF_IMAGE_LEN: usize = 2;
+    let mut i = JPEG_START_OF_IMAGE_LEN;
     while i + 3 < b.len() {
         if b[i] != 0xFF {
             i += 1;
@@ -357,7 +357,6 @@ mod tests {
     #[test]
     fn a_truncated_prefix_still_yields_dimensions() {
         let jpeg = jpeg_at(80, true);
-        // The whole point is not fetching the image; 2 KB must be enough.
         let p = probe_header(&jpeg[..2048.min(jpeg.len())], None);
         assert_eq!(
             (p.width, p.height),
@@ -374,22 +373,17 @@ mod tests {
 
     #[test]
     fn a_three_component_jpeg_is_unknown_rather_than_colour() {
-        // The image crate writes YCbCr even from a greyscale source, which is
-        // typical. Reporting that as colour would flag every ordinary manga
-        // page as a colour release.
         assert_eq!(probe_header(&jpeg_at(80, false), None).colour, None);
         assert_eq!(probe_header(&jpeg_at(80, true), None).colour, None);
     }
 
     #[test]
     fn a_single_component_jpeg_is_conclusively_grey() {
-        // Hand-built SOF0: precision, height, width, one component.
-        let jpeg = [
-            0xFF, 0xD8, // SOI
-            0xFF, 0xC0, 0x00, 0x0B, // SOF0, length 11
-            0x08, 0x00, 0x60, 0x00, 0x40, 0x01, // 8-bit, 96x64, 1 component
-            0x01, 0x11, 0x00,
-        ];
+        const START_OF_IMAGE: &[u8] = &[0xFF, 0xD8];
+        const BASELINE_FRAME: &[u8] = &[0xFF, 0xC0, 0x00, 0x0B];
+        const SINGLE_COMPONENT_96_BY_64: &[u8] =
+            &[0x08, 0x00, 0x60, 0x00, 0x40, 0x01, 0x01, 0x11, 0x00];
+        let jpeg = [START_OF_IMAGE, BASELINE_FRAME, SINGLE_COMPONENT_96_BY_64].concat();
         assert_eq!(jpeg_is_colour(&jpeg), Some(false));
     }
 
@@ -457,9 +451,6 @@ mod tests {
 
     #[test]
     fn a_colour_opener_does_not_make_a_colour_release() {
-        // The sample is first/middle/last, so the colour opener lands in it
-        // every time. This is the case that would otherwise mislabel most of a
-        // library.
         assert_eq!(
             colour_profile(&[coloured(), grey(), grey()]),
             ColourProfile::ColourAccent
@@ -640,8 +631,6 @@ mod sniff_tests {
 
     #[test]
     fn a_page_pretending_to_be_an_image_is_not_one() {
-        // The case the Content-Type gate existed for, now decided on bytes so a
-        // hostile `Content-Type: image/png` cannot get past it.
         assert_eq!(sniff_image_mime(b"<!DOCTYPE html><html>"), None);
         assert_eq!(
             sniff_image_mime(b"<html><body>Just a moment...</body>"),

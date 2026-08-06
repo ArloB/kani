@@ -58,13 +58,14 @@ impl MalTracker {
     }
 
     fn map_status_to_mal(status: MangaTrackingStatus) -> &'static str {
+        // MAL represents rereading with its ordinary reading status.
         match status {
             MangaTrackingStatus::Reading => "reading",
             MangaTrackingStatus::OnHold => "on_hold",
             MangaTrackingStatus::Dropped => "dropped",
             MangaTrackingStatus::PlanToRead => "plan_to_read",
             MangaTrackingStatus::Completed => "completed",
-            MangaTrackingStatus::Rereading => "reading", // MAL has no rereading status
+            MangaTrackingStatus::Rereading => "reading",
         }
     }
 

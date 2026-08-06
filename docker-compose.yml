@@ -7,8 +7,7 @@ services:
         # build cannot derive it. Export GIT_SHA=$(git rev-parse --short HEAD).
         GIT_SHA: "${GIT_SHA:-}"
 
-        #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-        #   Required for browser-based extensions (see the kani-extensions repository).
+        # Enables browser-based extensions; see the engineering constraints register.
         #   INSTALL_BROWSER: "true"
 
         #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
@@ -17,16 +16,13 @@ services:
     ports:
       - "8242:8242"
     volumes:
-      # Database and WASM extensions.
-      # The kani user inside the container runs as UID 1000.
-      # If using a bind mount and you hit permission errors, run:
-      #   sudo chown -R 1000:1000 ./data
+      # Database and WASM extensions. The kani user inside the container runs as UID 1000. If
+      # using a bind mount and you hit permission errors, run: sudo chown -R 1000:1000 ./data
       - ./data:/data
 
-      # Manga image library. This is kept separate so it can be placed on a
-      # different drive or filesystem on the host. To use a custom path, replace
-      # the left-hand side with an absolute path, e.g.:
-      #   - /mnt/large-drive/manga:/library
+      # Manga image library. This is kept separate so it can be placed on a different drive or
+      # filesystem on the host. To use a custom path, replace the left-hand side with an absolute
+      # path, e.g.: - /mnt/large-drive/manga:/library
       - ./library:/library
 
     environment:
@@ -49,9 +45,8 @@ services:
       # Warn-log any SQL statement slower than this many milliseconds.
       # KANI_SLOW_QUERY_THRESHOLD_MS: "100"
 
-      # Prometheus metrics at /metrics are disabled until a token is set, because
-      # they disclose extension names, upstream hosts and error counts. Set this
-      # and scrape with "Authorization: Bearer <token>".
+      # Prometheus metrics disclose extension names, upstream hosts, and error
+      # counts. Scrape /metrics with an API token scoped to metrics:read.
 
       # Set to "false" to disable browser-based extension features at runtime,
       # even if Chromium is installed (e.g. to reclaim memory on idle servers).
@@ -60,30 +55,15 @@ services:
       # Override the Chromium binary path if not at the default /usr/bin/chromium.
       # CHROMIUM_PATH: "/usr/bin/chromium-browser"
 
-      # How long (ms) to keep the Chromium process alive after all pages close.
-      # Defaults to 300000 (5 min). Set to 0 to keep it alive indefinitely.
-      # Lower values save RAM on idle servers at the cost of a ~2 s relaunch delay.
-      # BROWSER_IDLE_TIMEOUT_MS: "120000"
+      # How long (ms) to keep the Chromium process alive after all pages close. Defaults to
+      # 300000 (5 min). Set to 0 to keep it alive indefinitely. Lower values save RAM on idle
+      # servers at the cost of process-start latency. BROWSER_IDLE_TIMEOUT_MS: "120000"
 
-      # ── Credential encryption ────────────────────────────────────────────────
-      # Encrypts SMTP password and OAuth tokens at rest with ChaCha20-Poly1305.
-      # If neither variable is set, a key is auto-provisioned to /data/secret.key
-      # on first boot. Back that file up alongside kani.db — losing it means
-      # losing access to any stored credentials (trackers, SMTP, etc.).
-      #
-      # To use a fixed key (e.g. from a secret manager):
-      #   Generate: openssl rand -hex 32
-      # KANI_SECRET_KEY: ""
-      #
-      # Or load from a Docker secret (recommended for production):
-      # KANI_SECRET_KEY_FILE: "/run/secrets/kani_secret_key"
 
-      # ── Image proxy ──────────────────────────────────────────────────────────
       # Signs cover-image proxy URLs. Auto-provisioned to /data/proxy.key on
       # first boot — no action needed unless you want a fixed key across restarts.
       # KANI_PROXY_SECRET: ""   # base64url-encoded 32 bytes
 
-      # ── Auth / rate limiting ─────────────────────────────────────────────────
       # How long a session stays alive after last activity. Default: 30 days.
       # KANI_SESSION_TIMEOUT_SECONDS: "2592000"
 
@@ -96,19 +76,13 @@ services:
       # Max failed attempts from one IP (across all identities) before IP-level block.
       # KANI_MAX_IP_ATTEMPTS: "20"
 
-      # Set to "false" to prevent new user self-registration. The first admin
-      # account is always created automatically on first boot if no users exist.
+      # Set to "false" to prevent self-registration after initial administrator setup.
       # KANI_ALLOW_REGISTRATION: "true"
 
-      # ── Public instance hardening ────────────────────────────────────────────
-      # Set to "true" for internet-facing deployments. Forces secure cookies,
-      # aggressive rate limits (3 attempts / 15-min lockout), strict CSP, and
-      # shows a persistent banner if any admin account lacks 2FA.
-      # KANI_PUBLIC_INSTANCE: "false"
+      # Marks the deployment as internet-facing so the UI can surface hardened-setup guidance.
+      # Security settings still require explicit configuration. KANI_PUBLIC_INSTANCE: "false"
 
-      # ── Data directory ───────────────────────────────────────────────────────
-      # Where kani stores its database and auto-provisioned key files.
-      # Defaults to the process working directory (/data inside Docker).
-      # Only needed for non-Docker deployments where the working directory differs.
-      # KANI_DATA_DIR: "/data"
+      # Where kani stores its database and auto-provisioned key files. Defaults to the process
+      # working directory (/data inside Docker). Only needed for non-Docker deployments where the
+      # working directory differs. KANI_DATA_DIR: "/data"
     restart: unless-stopped

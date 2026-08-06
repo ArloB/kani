@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Plan 05 Phase 2 — `/rest/ui/themes`.
+//! Authorization contract for `/rest/ui/themes`.
 //!
 //! The routes only require an authenticated user, because a user manages their
 //! own themes. `theme:publish` is checked inside the handlers, so the tests that
@@ -46,8 +46,6 @@ async fn json_of(res: axum::response::Response) -> serde_json::Value {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }
-
-// ── The triplet ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn list_themes_returns_200_for_an_authed_user() {
@@ -105,8 +103,6 @@ async fn an_unknown_token_is_rejected() {
         res.status()
     );
 }
-
-// ── Round trip ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn a_theme_can_be_created_activated_and_deleted() {
@@ -181,8 +177,6 @@ async fn activating_an_unknown_theme_is_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
-
-// ── theme:publish boundary — the reason the check is in the handler ───────────
 
 #[tokio::test]
 async fn a_regular_user_cannot_publish_an_instance_wide_theme() {
@@ -273,7 +267,6 @@ async fn a_regular_user_cannot_delete_the_instance_theme() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    // And it is still there.
     let listed = json_of(
         app.oneshot(authed_get("/rest/ui/themes", &admin))
             .await
@@ -283,9 +276,6 @@ async fn a_regular_user_cannot_delete_the_instance_theme() {
     assert_eq!(listed["themes"].as_array().unwrap().len(), 1);
 }
 
-// Editing is authorised by who *owns* the row, not by the flag in the body —
-// otherwise omitting `instance_wide` would be enough to rewrite the published
-// theme for everyone.
 #[tokio::test]
 async fn a_regular_user_cannot_edit_the_instance_theme_by_omitting_the_flag() {
     let state = test_state().await;
@@ -328,13 +318,6 @@ async fn a_regular_user_cannot_edit_the_instance_theme_by_omitting_the_flag() {
         "the published theme is unchanged"
     );
 }
-
-// ── Another user's *private* theme ────────────────────────────────────────────
-//
-// The instance-wide tests above cover the `user_id IS NULL` row. These cover the
-// other half: a theme owned by a different ordinary user. Nothing hides a theme
-// id — the owner's own browser has it, and it appears in their `GET /ui/themes` —
-// so id alone must never be enough to change or remove someone else's theme.
 
 #[tokio::test]
 async fn a_user_cannot_edit_another_users_theme() {
@@ -420,8 +403,6 @@ async fn a_user_cannot_delete_another_users_theme() {
         "alice's theme still exists"
     );
 }
-
-// ── The shapes the frontend actually sends (plan 05 Phase 4) ─────────────────
 
 /// Every token the theme editor writes, exactly as `handleSave` in
 /// `static/js/components/theme-editor.js` assembles it: `CORE_TOKENS` plus the
@@ -528,8 +509,6 @@ async fn the_sync_upload_shape_creates_a_private_theme() {
     );
 }
 
-// The stored CSS is the sanitised output, so what a later GET returns is
-// already safe even though the client posted something that was not.
 #[tokio::test]
 async fn posted_custom_css_comes_back_sanitised() {
     let state = test_state().await;

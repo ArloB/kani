@@ -101,7 +101,6 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
   };
 }
 
-// ── Components ───────────────────────────────────────────────────────────────
 
 /**
  * @param {{
@@ -286,7 +285,6 @@ function FilterControl({ filter, value: curState, onChange }) {
   return html`<div class=${wrapClass}>${labelEl}${controlEl}</div>`;
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
 
 /**
  * Normalize a filter state value from either adjacently-tagged ({kind, data}) or

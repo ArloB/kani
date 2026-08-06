@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// The upgrade endpoints. Reads are library:view; anything that moves a file is
-// library:manage.
 
 mod common;
 use axum::http::StatusCode;
@@ -99,8 +97,6 @@ async fn a_library_wide_upgrade_names_its_series_and_chapter() {
     let body = common::body_json(res).await;
     let row = &body.as_array().unwrap()[0];
 
-    // Without these three the listing is a column of unlabelled Replace
-    // buttons — the reason nothing consumed this endpoint before.
     assert_eq!(row["manga_id"], manga_id);
     assert_eq!(row["manga_title"], "Blade of the Immortal");
     assert_eq!(row["chapter_number"], 7.0);
@@ -125,10 +121,6 @@ async fn upgrades_require_authentication() {
 
 #[tokio::test]
 async fn applying_an_upgrade_is_a_library_manage_action() {
-    // `library:manage` is seeded to the default user role in this app — the
-    // same role that already holds chapter:delete — so replacing a chapter is
-    // deliberately a user-level action, not an admin one. What must hold is
-    // that it is gated at all.
     let state = test_state().await;
     let (u, p) = create_regular_user(&state, "hank").await;
     let app = build_test_app(state).await;
@@ -259,11 +251,6 @@ async fn auto_replace_toggle_round_trips() {
         .unwrap();
     assert_eq!(stored, 1, "the toggle must actually persist");
 
-    // Persisting is only half of it. `/details` is a hand-built projection
-    // rather than the serialised model, so a field can be stored, returned by
-    // `/manga/{id}`, and still be invisible to the page that renders the
-    // control — which is exactly how this toggle shipped reading `false` on
-    // every load regardless of what was saved.
     let details = app
         .oneshot(authed_get(&format!("/rest/manga/{manga}/details"), &cookie))
         .await
@@ -280,9 +267,6 @@ async fn auto_replace_toggle_round_trips() {
 
 #[tokio::test]
 async fn the_details_projection_carries_the_rail_facts() {
-    // `/details` is hand-built with json!({...}) rather than serialised from the
-    // model, so a field exists on the struct and is still invisible to the page.
-    // The rail reads both of these; neither had ever left the database.
     let state = test_state().await;
     let db = state.service.db.clone();
 
@@ -311,7 +295,6 @@ async fn the_details_projection_carries_the_rail_facts() {
         .await
         .unwrap();
     }
-    // An orphan is held for the reader but is not part of the series' count.
     sqlx::query(
         "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language, name, is_orphaned) \
          VALUES (?, 'old', 99.0, 'en', 'kept', 1)",

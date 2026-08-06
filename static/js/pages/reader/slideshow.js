@@ -36,7 +36,7 @@ export function createSlideshow({ state, pagesEl, engine, getPrefs, slideshowSig
       pagesEl.scrollBy({ top: pagesEl.clientHeight, behavior: 'smooth' });
       setTimeout(() => {
         if (!active) return;
-        if (Math.abs(pagesEl.scrollTop - before) < 4 || // didn't scroll
+        if (Math.abs(pagesEl.scrollTop - before) < 4 ||
             pagesEl.scrollTop + pagesEl.clientHeight >= pagesEl.scrollHeight - 4) {
           if (state.chapterInfo.next_chapter_id) navigateChapter(state.chapterInfo.next_chapter_id);
         }

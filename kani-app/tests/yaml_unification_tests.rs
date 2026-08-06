@@ -1,16 +1,14 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::pedantic)]
 
-//! Phase 1 of the YAML backend-unification plan: measure the divergence between
-//! the two engines that consume the SAME `.yaml`.
+//! Requires both engines that consume the same YAML to produce equivalent behavior.
 //!
 //!   path 1  YAML → kani-cli codegen → WASM component  (`fixture-gen.wasm`)
 //!   path 2  YAML → ValidatedExtension → interpreted `YamlSource`
 //!
 //! Both are pointed at one `TestOrigin` and driven through the shared
 //! `SourceBackend` interface. We assert the request each puts on the wire and the
-//! parsed result agree — the plan's first two assertions. Divergence here is a
-//! bug in one engine's reading of the spec.
+//! parsed result agree. Divergence indicates that one engine reads the specification differently.
 //!
 //! Requires the codegen'd fixture: `cargo run -p kani-cli -- build --dev`.
 
@@ -25,8 +23,6 @@ use kani_shared::types::{ActiveFilter, FilterState};
 use kani_shared_test::origin::{Response, TestOrigin};
 
 const FIXTURE_YAML: &str = include_str!("../../fixture-gen.yaml");
-
-// ── Shared HTML the origin serves for both engines ────────────────────────────
 
 const ITEMS_HTML: &str = r#"<html><body>
     <div class="item" data-id="manga-1"><span class="title">First</span></div>
@@ -54,8 +50,6 @@ fn seed(origin: &TestOrigin) {
     origin.set("/manga/manga-1/chapters", Response::html(CHAPTERS_HTML));
     origin.set("/manga/manga-1/chapter/ch-1", Response::html(PAGES_HTML));
 }
-
-// ── Backends: same YAML, two engines ──────────────────────────────────────────
 
 /// path 2 — interpreted. Parse the fixture YAML, retarget its base_url at the
 /// origin, wrap in a `YamlSource`.
@@ -130,8 +124,6 @@ fn genre_filter() -> ActiveFilter {
     }
 }
 
-// ── Result parity ─────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn popular_result_parity() {
     let origin = TestOrigin::start().await;
@@ -190,14 +182,8 @@ async fn pages_result_parity() {
     assert_eq!(wr.pages.len(), 2);
 }
 
-// ── Request-on-the-wire parity (the plan's first assertion) ───────────────────
-
 #[tokio::test]
 async fn search_request_parity_with_filter_and_pagination() {
-    // The headline unification case: a filtered, paginated search. The
-    // interpreted path applies filters via kani_yaml::apply_filters; the compiled
-    // path runs codegen's emitted filter loop + pagination. They must put the
-    // same query on the wire — filter param (A1) and page offset alike.
     let origin = TestOrigin::start().await;
     seed(&origin);
     let w = compiled_or_skip!(origin);
@@ -228,8 +214,6 @@ async fn search_request_parity_with_filter_and_pagination() {
         y_page,
         "pagination offset param must match across engines"
     );
-    // And the interpreted engine genuinely applied the filter, not silently
-    // dropped it (the original A1 defect).
     assert_eq!(y_genre.as_deref(), Some("action"));
 }
 

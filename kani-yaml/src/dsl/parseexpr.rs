@@ -443,8 +443,6 @@ impl TryFrom<ParseExpr> for Expr {
     }
 }
 
-// ─── Spanned conversion ───────────────────────────────────────────────────────
-
 /// Conversion from `SpannedParseExpr` — the type produced at the parse boundary.
 ///
 /// This is the entry point for callers of `dsl::parser()`. The outer span is

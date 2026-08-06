@@ -1,3 +1,5 @@
+//! Bounded, namespace-aware binary caching used by extension host imports.
+
 use dashmap::DashMap;
 use std::{
     collections::VecDeque,
@@ -19,7 +21,6 @@ pub trait CacheBackend: Send + Sync + 'static {
     async fn prune_expired(&self);
 }
 
-/// Returns the cached value if present; otherwise calls `compute`, stores the result, and returns it.
 pub async fn get_or_insert<F, Fut>(
     cache: &dyn CacheBackend,
     namespace: &str,
@@ -109,6 +110,8 @@ impl NamespaceState {
     }
 }
 
+/// TTL cache with per-namespace entry/byte caps and a configurable global byte cap.
+/// Eviction follows insertion order within the selected namespace.
 pub struct InMemoryCache {
     namespaces: Arc<DashMap<String, Mutex<NamespaceState>>>,
     max_global_bytes: usize,

@@ -6,8 +6,8 @@ see different navigation.
 
 ![Settings navigation and server controls](../img/screenshots/settings.png)
 
-This guide explains ownership and effects by section. Labels, defaults, ranges, and validation in
-the running UI are authoritative for individual fields.
+This guide explains each section's scope and effects. Refer to the running interface for current
+labels, defaults, ranges, and validation.
 
 ## Personal and library sections
 

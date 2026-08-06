@@ -43,7 +43,6 @@ export function mountScanlatorPrefsPanel(
   />`, mount);
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 
 function ScanlatorPrefsPanel({
   initialPrefs,
@@ -106,7 +105,7 @@ function ScanlatorPrefsPanel({
                 onPrefsChange([...next]);
                 return next;
               });
-            } catch { /* ignore */ }
+            } catch { }
           });
           btns.appendChild(blockBtn);
         }
@@ -124,7 +123,7 @@ function ScanlatorPrefsPanel({
               onPrefsChange([...next]);
               return next;
             });
-          } catch { /* ignore */ }
+          } catch { }
         });
         btns.appendChild(rmBtn);
         content.appendChild(btns);
@@ -176,7 +175,7 @@ function ScanlatorPrefsPanel({
     try {
       await api.setScanlatorMode(dbId, newMode);
       setMode(newMode);
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   async function handleAdd() {

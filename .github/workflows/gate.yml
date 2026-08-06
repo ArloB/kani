@@ -1,8 +1,6 @@
-# A guard that branch protection cannot express on its own.
-#
-# `Source branch` exists because neither branch protection nor rulesets can
-# restrict which branch a pull request comes *from*. Enforcing "only develop
-# may merge into main" therefore has to be a status check.
+# A guard that branch protection cannot express on its own. `Source branch` exists because
+# neither branch protection nor rulesets can restrict which branch a pull request comes *from*.
+# Enforcing "only develop may merge into main" therefore has to be a status check.
 name: Gate
 
 on:

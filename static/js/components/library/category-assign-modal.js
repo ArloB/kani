@@ -1,7 +1,4 @@
 // @ts-check
-// Category-assign dialog — sets categories on one or many manga. Replaces the
-// hand-rolled overlay that lived in pages/library.js (raw checkboxes, its own
-// z-index, one-dialog-rule violation).
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -48,7 +45,7 @@ function CategoryAssignModal({ mangaIds, onApplied, onClose }) {
     let done = 0;
     try {
       for (const id of mangaIds) {
-        try { await api.setMangaCategories(id, catIds); done++; } catch { /* per-item */ }
+        try { await api.setMangaCategories(id, catIds); done++; } catch { }
       }
       showToast(t('library.categories.toast', { count: done }));
       onApplied(done);

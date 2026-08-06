@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for POST /manga/{id}/dismiss-suppressed — clears the "new chapters were
-// filtered out by your download rules" banner signal.
 
 mod common;
 use axum::http::StatusCode;
@@ -23,8 +21,6 @@ async fn dismiss_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// Dismissal is idempotent: an unknown id is a no-op, not an error, so a stale
-// banner click after the manga is gone can't 500.
 #[tokio::test]
 async fn dismiss_is_a_noop_for_an_unknown_manga() {
     let state = test_state().await;

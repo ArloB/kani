@@ -105,11 +105,8 @@ impl AppService {
         Ok(rows_affected)
     }
 
-    /// Returns `true` if the user has a verified TOTP configuration.
-    /// Returns `false` until the TOTP service is set up in `totp.rs`.
+    /// Returns `false` when the TOTP table is absent or the user has no verified row.
     pub async fn is_totp_enabled(&self, user_id: UserId) -> Result<bool> {
-        // The `user_totp` table is created when TOTP migrations run.
-        // Until then, check whether the table exists before querying it.
         let table_exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='user_totp'",
         )

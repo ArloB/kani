@@ -1,7 +1,4 @@
 // @ts-check
-// Select — non-searchable single select on the combobox popover pattern.
-// For option lists small enough that typeahead search would be noise;
-// anything searchable should use Combobox instead.
 
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -37,13 +34,6 @@ export function Select({ options, value, onChange, disabled = false, ariaLabel, 
   }, [open]);
 
   useEffect(() => {
-    // While closed, do nothing — not even renderPopover(null). Parent
-    // re-renders pass a fresh `options` array every time, so this effect
-    // re-runs constantly; calling renderPopover(null) on each of those did a
-    // synchronous nested preact render into the popover root, which corrupts
-    // the render context when the re-render was triggered from an async
-    // continuation (e.g. a row-action handler), aborting the paint mid-render.
-    // The cleanup below clears the popover on the open→closed transition.
     if (!open) return;
     const btn = btnRef.current;
     if (!btn) return;

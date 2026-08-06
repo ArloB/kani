@@ -1,3 +1,5 @@
+//! Validated intermediate representation shared by interpretation and Rust code generation.
+
 use std::collections::BTreeMap;
 
 use crate::yaml::schema::{
@@ -30,23 +32,18 @@ pub struct ValidatedExtension {
     pub mihon_source_id: Option<i64>,
     /// Composite ID encode/decode declared for manga and/or chapter IDs.
     pub id_encoding: Option<IdEncodingBlock>,
-    /// Named cache namespaces declared via the top-level `cache` block.
     pub cache: Vec<ValidatedCacheEntry>,
-    /// Extended metadata (icon, languages, description, rate limit, sections).
     pub metadata: ValidatedMetadata,
     /// Schema version this YAML was authored against.
     pub schema_version: u32,
     /// Minimum host (kani-app) semver this extension requires, if any.
     pub min_kani_version: Option<String>,
-    /// Host capability strings this extension requires to be installed.
     pub requires_capabilities: Vec<String>,
-    /// Chapter sort options declared via the top-level `chapter_sort` block.
     pub chapter_sort: Option<ValidatedChapterSort>,
     /// Named browser scripts (name → JS source), ready for codegen to write as `src/scripts/<name>.js`.
     pub browser_scripts: std::collections::BTreeMap<String, String>,
     /// Named pure Rhai scripts (name → source), ready for codegen to write as `src/scripts/<name>.rhai`.
     pub pure_scripts: std::collections::BTreeMap<String, String>,
-    /// Source-level pre_request hook body. `None` means no hook.
     pub pre_request: Option<String>,
     /// Source-level on_status hook bodies keyed by status pattern.
     pub on_status: std::collections::BTreeMap<String, String>,
@@ -74,6 +71,7 @@ impl ValidatedExtension {
     }
 }
 
+/// Validated chapter-sort declaration with a checked default identifier.
 pub struct ValidatedChapterSort {
     pub default: Option<String>,
     pub options: Vec<ValidatedChapterSortOption>,
@@ -95,6 +93,7 @@ pub struct ValidatedMetadata {
     pub sections: Vec<ValidatedSection>,
 }
 
+/// Validated request and hook budget ready for extension metadata emission.
 pub struct ValidatedRateLimit {
     pub requests_per_second: f64,
     pub burst: u32,
@@ -118,6 +117,7 @@ pub struct ValidatedCacheEntry {
     pub key_template: Option<String>,
 }
 
+/// Popular-list operation implemented directly or delegated to another endpoint.
 pub enum ValidatedPopular {
     Delegated {
         delegate_to: String,
@@ -126,6 +126,7 @@ pub enum ValidatedPopular {
     Full(Box<ValidatedEndpoint>),
 }
 
+/// Endpoint whose placeholders, expressions, chaining, and output fields have passed validation.
 pub struct ValidatedEndpoint {
     pub route: String,
     pub method: String,
@@ -191,6 +192,7 @@ pub struct CompositeIdDecode {
     pub referenced_fields: Vec<String>,
 }
 
+/// Validated source of the `has_next_page` response value.
 pub enum ValidatedHnp {
     Static(bool),
     Scalar(Expr),
@@ -198,6 +200,7 @@ pub enum ValidatedHnp {
     Default,
 }
 
+/// Validated source of the optional `total_pages` response value.
 pub enum ValidatedTotalPages {
     Static(u32),
     Scalar(Expr),
@@ -222,12 +225,14 @@ pub struct ValidatedBinding {
     pub expr: Expr,
 }
 
+/// Validated output field and whether a missing value is accepted.
 pub struct ValidatedField {
     pub name: String,
     pub source: FieldSource,
     pub optional: bool,
 }
 
+/// Origin of a validated output field.
 pub enum FieldSource {
     /// Expression to include as a blueprint field; evaluated against the document.
     Blueprint(Expr),

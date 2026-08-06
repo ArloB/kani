@@ -53,7 +53,6 @@ export function ScanlatorsSection() {
 
   const add = async () => {
     if (!picked) return;
-    // New entries go above everything already preferred.
     const top = Math.max(0, ...(prefs ?? []).map((p) => p.priority));
     await save(picked, top + 1, false);
     setPicked('');
@@ -64,7 +63,6 @@ export function ScanlatorsSection() {
     const i = ordered.findIndex((p) => p.id === pref.id);
     const j = i + delta;
     if (i < 0 || j < 0 || j >= ordered.length) return;
-    // Swap priorities with the neighbour rather than renumbering the list.
     await save(pref.scanlator, ordered[j].priority, false);
     await save(ordered[j].scanlator, pref.priority, false);
   };

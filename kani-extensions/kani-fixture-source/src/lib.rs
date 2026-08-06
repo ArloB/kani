@@ -5,13 +5,6 @@ compile_error!(
      default-members instead -- clippy/nextest omit the flag, cargo-dist needs precise-builds."
 );
 
-// A deliberately minimal *fetching* extension used only by Kani's own
-// conformance suite. It reads its origin from the `base_url` preference so a
-// test can point the compiled-WASM backend at a `TestOrigin` on a random port,
-// and its endpoints mirror the exact HTML contract that `yaml_source_tests`
-// drives — same routes, same selectors — so the suite can serve one set of
-// fixtures to both backends and assert they agree.
-
 use kani_shared::ast::{BlueprintBuilder, Expr};
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::host_abi::{HttpRequest, extract, prefs};
@@ -116,11 +109,6 @@ impl MangaExtension for Fixture {
         _page_size: i32,
         filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
-        // Conformance affordance: `__fanout__:N` issues N sequential sub-fetches
-        // in a single call, so the suite can prove the host charges the per-call
-        // HTTP budget on the compiled path exactly as it does on the interpreted
-        // one. Kept behind a magic query so the ordinary search tests are
-        // unaffected.
         if let Some(n) = query.strip_prefix("__fanout__:")
             && let Ok(n) = n.parse::<i32>()
         {
@@ -292,9 +280,7 @@ impl MangaExtension for Fixture {
     }
 
     fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {
-        // A single select filter with real options, so the conformance suite can
-        // assert the WASM path renders a panel AND puts the selection on the
-        // wire — the guest counterpart to A1 on the interpreted path.
+        // The select fixture must exercise both filter rendering and wire encoding.
         Ok(wit_types::FilterList {
             filters: vec![wit_types::FilterDef {
                 id: "genre".to_string(),

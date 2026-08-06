@@ -1,12 +1,13 @@
 # Kani Declarative Extraction: Specification
 
-This document specifies the three core formalisms of the declarative extraction system: the Extraction DSL, the JSON Intermediate Model (IM), and the YAML Extension Format.
+This document defines the extraction DSL, JSON intermediate model (IM), and YAML extension format.
 
 ---
 
 ## 1. Extraction DSL
 
-The Extraction DSL is a small, functional, pipeline-oriented language embedded as strings within YAML field definitions. It describes how to extract a single value from a document element.
+The extraction DSL is a functional, pipeline-oriented language embedded in YAML field definitions.
+Each expression extracts one value from a document element.
 
 ### 1.1 Lexical Structure
 
@@ -22,9 +23,9 @@ The Extraction DSL is a small, functional, pipeline-oriented language embedded a
 
 **Operators:** `.` (method chain), `=` (binding), `;` (statement separator), `,` (argument separator), `{` `}` (map literal), `(` `)` (grouping/call), `+` `-` `*` `/` (arithmetic), `==` `!=` `<` `>` `<=` `>=` (comparison), `&&` `||` (logical)
 
-**Whitespace:** Ignored between tokens. Newlines are significant only in that they can substitute for `;` between `let` statements.
+**Whitespace:** Ignored between tokens. Newlines may replace `;` between `let` statements.
 
-**Comments:** `/* */` block comments. Nesting is not supported.
+**Comments:** `/* */` block comments; nesting is unsupported.
 
 ### 1.2 Grammar
 
@@ -212,7 +213,7 @@ Applying an operator to incompatible types (e.g., `String + Number`) is a runtim
 
 #### JSON Methods
 
-When operating on a `Json` value (from `json()` root or within a JSON-mode blueprint):
+The following methods operate on `Json` values from `json()` or a JSON-mode blueprint:
 
 | Method | Input Type | Return Type | Description |
 |--------|-----------|-------------|-------------|
@@ -237,9 +238,12 @@ Pure functions declared in `scripts.pure:` (§3.10) are callable from any DSL ex
 | `.user.<name>()` | Call the named pure function with no arguments. Receiver (the value before the dot) is passed as the first argument. |
 | `.user.<name>(arg1, arg2, ...)` | Call with additional arguments. Each argument is a DSL expression evaluated before the call. |
 
-**Null propagation:** If the receiver or any argument evaluates to `Null`, the call is skipped and `Null` is returned without invoking the Rhai function.
+**Null propagation:** If the receiver or an argument evaluates to `Null`, the call returns `Null`
+without invoking the Rhai function.
 
-**Constraints:** Pure functions run in the same Rhai sandbox as hook scripts (§3.10) but without access to `req`, `ctx`, or `HookAction` constructors. They may only produce and consume `String`, `Int`, `Number`, `Bool`, `List<String>`, and `Null`. Any other type causes a runtime error.
+**Constraints:** Pure functions use the Rhai sandbox described in §3.10 but cannot access `req`,
+`ctx`, or `HookAction` constructors. Supported input and output types are `String`, `Int`, `Number`,
+`Bool`, `List<String>`, and `Null`; other types cause a runtime error.
 
 **Example:**
 
@@ -1807,9 +1811,13 @@ factory:
 
 ### 3.8 Browser Payload Endpoints
 
-Endpoints can declare `via: browser_payload` to indicate that the page must be loaded in a headless browser rather than fetched via direct HTTP. Codegen emits a `capture_page_payload` call with the declared script and timeout; the browser *runtime* (Chromium lifecycle, `passPayload` injection, `AllowedHost` gating, resource caps) is tracked in `overviews/EXT_BROWSER_PAYLOAD_FEATURE_OVERVIEW.md`.
+Set `via: browser_payload` to load an endpoint in a headless browser instead of using direct HTTP.
+Code generation emits `capture_page_payload` with the configured script and timeout. The browser
+runtime manages Chromium, `passPayload` injection, `AllowedHost` checks, and resource limits.
 
-**Tier note:** the compiled tier's codegen currently emits the `capture_page_payload` call but not the extraction step from its result (`kani-cli/src/codegen/endpoints.rs::try_emit_browser_fetch` is `unimplemented!()` there). The interpreted tier's `browser_payload` support (§5.1) has no such gap — it extracts the captured JSON payload the same way as any other JSON endpoint.
+**Compiled-tier limitation:** Code generation emits `capture_page_payload` but does not extract its
+result; `kani-cli/src/codegen/endpoints.rs::try_emit_browser_fetch` remains unimplemented. The
+interpreted backend (§5.1) extracts the captured payload as a standard JSON endpoint.
 
 ```yaml
 browser_scripts:
@@ -1871,7 +1879,9 @@ The `kani-cli validate` command checks:
 
 ### 3.10 Scripting Hooks
 
-Scripting hooks let YAML extensions run sandboxed [Rhai](https://rhai.rs) scripts at two points in every HTTP request cycle: before the request is sent (`pre_request:`) and after a response is received with a specific status (`on_status:`). Pure helper functions (§1.5, User Script Methods) are compiled from `scripts.pure:` and are callable from any DSL expression.
+Scripting hooks run sandboxed [Rhai](https://rhai.rs) scripts before a request (`pre_request:`) or
+after a response with a matching status (`on_status:`). DSL expressions may call pure helpers
+defined under `scripts.pure:` (see §1.5).
 
 #### Hook locations
 
@@ -1921,7 +1931,10 @@ The host uses `get_or_insert` internally for caching auth tokens; scripts expres
 
 #### Retry composition
 
-`SmartClient` already retries `429`/`502`/`504` responses automatically (with `Retry-After` header parsing). These retries are exhausted before the response reaches any hook. `on_status` hooks fire on the *final* response after `SmartClient`'s own retry budget is consumed. Hook-driven retries (`retry()` / `retry_after()`) are a separate bounded loop, counted against `metadata.rate_limit.max_hook_requests` (default: 3). This budget exists for statuses `SmartClient` does *not* auto-retry, such as `401` → token-refresh → retry. Authors should not use hook retries to re-fight `429`/`5xx` exhaustion as this compounds with `SmartClient`'s own retries.
+`SmartClient` retries `429`, `502`, and `504` responses, including `Retry-After` handling, before
+hooks run. An `on_status` hook therefore receives only the final response. Hook retries use a
+separate limit, `metadata.rate_limit.max_hook_requests` (default: 3), for cases such as refreshing
+credentials after a `401`. Do not retry exhausted `429` or `5xx` responses in hooks.
 
 #### Sandbox limits
 
@@ -2025,7 +2038,9 @@ Expired entries are not returned by `cache::get` and are pruned by a background 
 
 ## 5. Runtime Backends
 
-A source is loaded by one of two interchangeable backends, abstracted behind `SourceBackend` (`kani-app/src/source/mod.rs`) and held in the `SourceRegistry` (`DashMap<i64, Arc<ArcSwap<SourceBackend>>>`). Both expose the same async dispatch surface; callers never branch on the backend kind.
+`SourceBackend` (`kani-app/src/source/mod.rs`) abstracts two interchangeable backends stored in
+`SourceRegistry` (`DashMap<i64, Arc<ArcSwap<SourceBackend>>>`). Both provide the same asynchronous
+dispatch interface.
 
 | Backend | Artifact | Toolchain | Execution |
 |---------|----------|-----------|-----------|
@@ -2034,7 +2049,13 @@ A source is loaded by one of two interchangeable backends, abstracted behind `So
 
 ### 5.1 Interpreted YAML backend
 
-A `.yaml` extension is parsed and validated by `kani-yaml::parse_and_validate` into a `ValidatedExtension` (DSL strings already compiled to `Expr` trees) and wrapped in a `YamlSource`. Each dispatch method resolves the relevant endpoint, builds a `Blueprint`, constructs a `HostState`, and calls the same `extract_html`/`extract_json` evaluators the WASM path uses — there is no WIT/FFI hop. Preferences are injected as `$pref:key`; `browser_payload` endpoints first run the V8 subprocess, and the returned payload is extracted via ordinary JSON field blueprints, same as any other JSON endpoint. `Fetched` (`options_fetched_by`) filter option sets are resolved live at request time rather than returning an empty list. `RefreshAuth { endpoint_id }` hook dispatch (§3.10) works identically to the compiled tier. The `Blueprint`-construction logic itself (`build_blueprint`/`build_blueprint_core`, `kani-yaml/src/lib.rs`) is shared with `kani-cli`'s codegen, so the two tiers cannot silently diverge on field/scalar/binding/pagination assembly.
+`kani-yaml::parse_and_validate` compiles a `.yaml` extension's DSL strings into `Expr` trees within
+a `ValidatedExtension`, which is then wrapped in `YamlSource`. Dispatch resolves the endpoint,
+builds a `Blueprint` and `HostState`, and calls the same `extract_html` or `extract_json` evaluator
+as the WASM backend without crossing WIT or FFI. Preferences are injected as `$pref:key`.
+`browser_payload` endpoints pass V8 output through standard JSON blueprints. Fetched filter option
+sets resolve at request time, and `RefreshAuth { endpoint_id }` hooks behave as in the compiled
+backend. Both backends share `build_blueprint` and `build_blueprint_core` in `kani-yaml/src/lib.rs`.
 
 ### 5.2 Evaluator resource limits
 
@@ -2050,7 +2071,9 @@ Sources live in a single directory (`wasm_storage_path`). When both `<name>.yaml
 
 ## 6. Signed Distribution
 
-Extensions are distributed from git-hosted **repositories** described by a signed `index.json`. Integrity and provenance are enforced with Ed25519 signatures + SHA-256 digests; third-party repositories use Trust-On-First-Use (TOFU) key pinning.
+Git-hosted repositories distribute extensions through a signed `index.json`. Ed25519 signatures
+and SHA-256 digests protect provenance and integrity. Third-party repositories use trust on first
+use (TOFU) key pinning.
 
 ### 6.1 Repository index (`index.json`)
 

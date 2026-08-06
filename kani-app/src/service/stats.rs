@@ -324,7 +324,6 @@ fn calculate_streaks(activity: &[DailyActivity]) -> (i64, i64) {
         return (0, 0);
     }
 
-    // Longest consecutive streak
     let mut longest: i64 = 1;
     let mut run: i64 = 1;
     for i in 1..dates.len() {
@@ -338,7 +337,6 @@ fn calculate_streaks(activity: &[DailyActivity]) -> (i64, i64) {
         }
     }
 
-    // Current streak: must end today or yesterday to be "live"
     let now = time::OffsetDateTime::now_utc();
     let today = now.date().format(DATE_FMT).unwrap_or_default();
     let yesterday = (now - time::Duration::days(1))

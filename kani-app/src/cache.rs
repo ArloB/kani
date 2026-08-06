@@ -1,3 +1,5 @@
+//! Request-result caches and their cross-entity invalidation helpers.
+
 use crate::models::ReadingStats;
 use dashmap::DashMap;
 use kani_core::cache::CacheBackend;
@@ -11,6 +13,8 @@ type LibraryListingCache =
     Cache<(i64, u64, i32, i32), Arc<(Vec<crate::models::LibraryManga>, bool, Option<u32>)>>;
 
 #[derive(Clone)]
+/// Bounded application read caches shared by cloned [`crate::AppService`] handles.
+/// Mutating service methods must invalidate every affected key through this type's helpers.
 pub struct RequestCache {
     manga_details: Cache<(i64, String), String>,
     popular_manga: Cache<(i64, i32, i32, String), String>,
@@ -571,9 +575,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_page_fetch_is_not_cached_as_a_success() {
-        // moka's try_get_with must not persist an Err: a failing origin
-        // (a 500) followed by a healthy one (a 200) must re-run init and
-        // return the success, never a poisoned cached error.
         let cache = RequestCache::new();
         let calls = Arc::new(AtomicU32::new(0));
 

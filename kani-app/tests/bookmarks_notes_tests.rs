@@ -56,7 +56,6 @@ async fn chapter_note_round_trips() {
     let note = svc.get_chapter_note(uid, cid).await.unwrap();
     assert_eq!(note.as_deref(), Some("great chapter"));
 
-    // Overwrite.
     svc.set_chapter_note(uid, cid, "updated").await.unwrap();
     let note2 = svc.get_chapter_note(uid, cid).await.unwrap();
     assert_eq!(note2.as_deref(), Some("updated"));
@@ -72,10 +71,8 @@ async fn get_noted_chapter_ids_excludes_empty_notes() {
     let c2 = insert_chapter(&svc.db, mid, "c4b", 2.0).await;
 
     svc.set_chapter_note(uid, c1, "note here").await.unwrap();
-    svc.set_chapter_note(uid, c2, "").await.unwrap(); // empty — should be excluded
+    svc.set_chapter_note(uid, c2, "").await.unwrap();
 
-    // The dedicated id-only query was a redundant second path; the note
-    // listing applies the same `note != ''` filter and is what the UI uses.
     let noted = svc
         .get_manga_chapter_notes_with_text(uid, mid)
         .await
@@ -117,7 +114,7 @@ async fn get_manga_chapter_notes_with_text_excludes_empty() {
     let c2 = insert_chapter(&svc.db, mid, "c6b", 2.0).await;
 
     svc.set_chapter_note(uid, c1, "has a note").await.unwrap();
-    svc.set_chapter_note(uid, c2, "").await.unwrap(); // should be excluded
+    svc.set_chapter_note(uid, c2, "").await.unwrap();
 
     let notes = svc
         .get_manga_chapter_notes_with_text(uid, mid)

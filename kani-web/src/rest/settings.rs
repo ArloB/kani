@@ -26,12 +26,6 @@ pub(crate) async fn get_settings(
 ) -> Result<impl IntoResponse, AppError> {
     let mut settings = svc.get_settings().await;
 
-    // `settings:view` belongs to the default `user` role, and this payload
-    // carries infrastructure: the FlareSolverr address, the SMTP host and
-    // username, the public URL and the server's filesystem paths. The SMTP
-    // password is already masked, but the rest describes the deployment to
-    // anyone with an account. Only a caller who may edit those fields needs to
-    // read them; the toggles the UI keys off stay visible to everyone.
     let may_see_infrastructure = auth
         .backend
         .has_perm(

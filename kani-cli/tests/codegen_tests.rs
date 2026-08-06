@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Codegen snapshot tests: validate each fixture, generate code, snapshot with insta.
 
 use kani_cli::{
     codegen,
@@ -87,8 +86,6 @@ fn codegen_filter_format_snapshot() {
 
 #[test]
 fn codegen_filter_format_default_matches_unformatted_output() {
-    // With filter_format omitted, multiselect/checkbox/sort_pair codegen
-    // must be byte-identical to the pre-Phase-3 emission.
     let with_format = load_and_validate("search.yaml");
     let generated = codegen::generate(&with_format, false);
     assert!(
@@ -254,7 +251,6 @@ fn codegen_embedded_bytes_flag() {
     let validated = load_and_validate("popular.yaml");
     let plain = codegen::generate(&validated, false);
     let embedded = codegen::generate(&validated, true);
-    // The two outputs differ: embedded mode pre-serialises blueprints
     assert_ne!(
         plain.lib_rs, embedded.lib_rs,
         "embedded_bytes=true should produce different lib.rs output"

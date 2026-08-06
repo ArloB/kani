@@ -1,3 +1,5 @@
+//! Host-side evaluation of declarative extraction blueprints over HTML and JSON.
+
 pub mod html_eval;
 pub mod id_encoding;
 pub mod json_eval;

@@ -11,10 +11,6 @@ use crate::ids::{ChapterId, MangaId};
 use crate::jobs::error::{DownloadErrorKind, JobError};
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
-// ---------------------------------------------------------------------------
-// Shared helper
-// ---------------------------------------------------------------------------
-
 pub(crate) fn classify_download_error(err: DownloadError) -> DownloadErrorKind {
     match err {
         DownloadError::Cancelled => DownloadErrorKind::Cancelled,
@@ -132,10 +128,7 @@ pub(crate) async fn run_chapter_download(
             .execute(&svc.db)
             .await?;
 
-            // The downloader always writes to the title-derived location, so any
-            // stored path from before a rename is stale here. Drop it first and
-            // let resolution fall back to derivation, otherwise the manifest
-            // would be recorded against a file the download did not write.
+            // Clear a renamed chapter's stored path before resolving the downloader's derived path.
             let _ = svc.clear_chapter_manifest(chapter_id).await;
             if let Ok(info) = svc.chapter_cbz_path(chapter_id).await {
                 svc.record_chapter_manifest(chapter_id, info.path).await;
@@ -171,10 +164,6 @@ pub(crate) async fn run_chapter_download(
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// ChapterDownloadJob
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChapterDownloadJob {
@@ -256,10 +245,6 @@ impl BackgroundJob for ChapterDownloadJob {
         run_chapter_download(&svc, chapter_id, job_id, ctx.cancel.clone(), on_page).await
     }
 }
-
-// ---------------------------------------------------------------------------
-// MangaDownloadAllJob
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MangaDownloadAllJob {
@@ -419,10 +404,6 @@ impl BackgroundJob for MangaDownloadAllJob {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SourceScanJob
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceScanJob {
     id: JobId,
@@ -475,10 +456,6 @@ impl BackgroundJob for SourceScanJob {
         Ok(chapter_ids.len())
     }
 }
-
-// ---------------------------------------------------------------------------
-// LibraryScanJob
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LibraryScanJob {

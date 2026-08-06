@@ -64,8 +64,8 @@ pub(crate) async fn auth_login(
     let ip = extract_client_ip(&headers);
     let username = form.username.clone();
 
-    // Phase 1: read-only pre-flight check — is this identity/IP already locked out?
-    // Does NOT record an attempt, so successful logins don't accumulate as failures.
+    // The pre-flight check must not record an attempt; successful logins do not
+    // contribute to the failure window.
     use crate::rate_limit::RateLimitResult;
     let pre_check = state.rate_limiter.check_lockout(&username, &ip).await;
     if let RateLimitResult::LockedOutByIdentity { retry_after_secs }
@@ -93,7 +93,7 @@ pub(crate) async fn auth_login(
     };
     match auth.authenticate(creds).await {
         Ok(Some(user)) => {
-            // Phase 2: record success (resets failure window for this identity).
+            // A successful authentication resets the identity's failure window.
             state
                 .rate_limiter
                 .record_and_check(&username, &ip, true)
@@ -120,7 +120,7 @@ pub(crate) async fn auth_login(
             }
         }
         Ok(None) => {
-            // Phase 2: record failure and check if lockout is now triggered.
+            // Record the failure before deciding whether this attempt triggered lockout.
             let post_check = state
                 .rate_limiter
                 .record_and_check(&username, &ip, false)
@@ -129,7 +129,6 @@ pub(crate) async fn auth_login(
             state
                 .audit(None, "auth.login.failed", Some(&username), None)
                 .await;
-            // If this failure just crossed the threshold, tell the client.
             if let RateLimitResult::LockedOutByIdentity { retry_after_secs }
             | RateLimitResult::LockedOutByIp { retry_after_secs } = post_check
             {
@@ -470,7 +469,6 @@ pub(crate) async fn totp_setup(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let (secret, uri, qr_data_url) = state.begin_totp_setup(user.id, &user.username).await?;
-    // Expose the base32 secret once for QR manual entry.
     use secrecy::ExposeSecret;
     Ok(Json(json!({
         "secret": secret.expose_secret(),
@@ -562,13 +560,11 @@ pub(crate) async fn totp_step_up(
     auth: AuthSession,
     Json(body): Json<TotpCodeRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Try TOTP code first, then backup codes.
     let verified = state.verify_totp_code(user.id, &body.code).await?
         || state.verify_totp_backup_code(user.id, &body.code).await?;
     if !verified {
         return Err(AppError::ValidationError("Incorrect TOTP code".into()));
     }
-    // Mark step-up in session.
     let _ = auth.session.insert("totp_verified", true).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -584,7 +580,6 @@ pub(crate) async fn get_features(
     State(state): State<AppState>,
     auth: AuthSession,
 ) -> impl IntoResponse {
-    // `totp_enabled` will be populated once the TOTP service is implemented (task 9).
     let totp_enabled = if let Some(user) = &auth.user {
         state.is_totp_enabled(user.id).await.unwrap_or(false)
     } else {

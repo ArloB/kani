@@ -1,6 +1,4 @@
 // @ts-check
-// SidebarNav — shared vertical navigation sidebar component.
-// Used by SourcesSidebar (sources) and Settings (settings categories).
 
 import { h } from 'preact';
 import htm from 'htm';
