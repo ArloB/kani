@@ -12,10 +12,16 @@ permissions:
   contents: read
   pull-requests: read
 
+# rust-cache folds CARGO_*/RUST* env into its cache key, so these must be identical in every
+# job here and in cache-warmer.yml. Per-job values give each job a private cache and leave the
+# warm one on develop unreachable. Nothing here needs debuginfo to answer "does it compile".
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_BUILD_JOBS: "4"
 
 jobs:
   changes:
@@ -56,14 +62,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # Same reasoning as the test job. Clippy builds dev rlibs with `debug = 1`, and `cargo bench
-    # --no-run` uses [profile.bench], which inherits release and then re-adds `debug = 1` — the
-    # one release profile that is not stripped. Neither needs debuginfo to answer "does it compile".
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_BENCH_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@v6
 
@@ -76,9 +74,11 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get install -y mold
 
+      # Kept identical to the test job and cache-warmer.yml so all three resolve one cache key.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -136,10 +136,11 @@ jobs:
             static/fonts
           key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
 
-      # Benches are not run in CI (a shared runner gives meaningless numbers), but
-      # they must keep compiling. No --workspace: kani-extensions/* are WASM-only.
+      # bench.yml runs these weekly, so this only answers "do they still compile". `cargo check`
+      # does that in the dev profile and reuses the Clippy build, where `cargo bench --no-run`
+      # rebuilds the whole tree under [profile.bench]'s fat LTO. kani-extensions/* are WASM-only.
       - name: Check benchmarks compile
-        run: cargo bench --locked --no-run
+        run: cargo check --locked --benches
         env:
           SQLX_OFFLINE: "true"
 
@@ -154,11 +155,6 @@ jobs:
   test:
     name: Test
     needs: changes
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -173,8 +169,10 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get install -y mold
 
+      # Kept identical to the lint job and cache-warmer.yml so all three resolve one cache key.
       - uses: dtolnay/rust-toolchain@stable
         with:
+          components: rustfmt, clippy
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
@@ -241,10 +239,6 @@ jobs:
   js:
     name: JS
     needs: changes
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.js == 'true'
     runs-on: ubuntu-latest
     steps:

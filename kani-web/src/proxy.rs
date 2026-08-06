@@ -257,8 +257,10 @@ mod tests {
             URL_SAFE_NO_PAD.encode([0xAAu8; 32]),
         )
         .unwrap();
+        // Safety: this test is single-threaded for the mutation, and clears the var after.
         unsafe { std::env::set_var("KANI_PROXY_SECRET", &encoded) };
         let result = load_or_persist_secret(dir.path());
+        // Safety: this test is single-threaded for the mutation, and clears the var after.
         unsafe { std::env::remove_var("KANI_PROXY_SECRET") };
         assert_eq!(result, known, "env var must override the file");
     }

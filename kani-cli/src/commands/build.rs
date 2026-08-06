@@ -502,11 +502,13 @@ mod dir_resolution_tests {
     /// concurrently with each other.
     fn with_env<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
         let previous = std::env::var(key).ok();
+        // Safety: single-threaded within the guard, and restored after.
         match value {
             Some(v) => unsafe { std::env::set_var(key, v) },
             None => unsafe { std::env::remove_var(key) },
         }
         let out = f();
+        // Safety: single-threaded within the guard, and restored after.
         match previous {
             Some(p) => unsafe { std::env::set_var(key, p) },
             None => unsafe { std::env::remove_var(key) },
