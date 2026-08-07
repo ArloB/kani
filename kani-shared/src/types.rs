@@ -1816,9 +1816,9 @@ mod tests {
     fn source_json_round_trip() {
         json_rt(&Source {
             id: 1,
-            name: "MangaDex".into(),
+            name: "Example Source".into(),
             version: "1.0.0".into(),
-            base_url: "https://mangadex.org".into(),
+            base_url: "https://example.com".into(),
             enabled: true,
             favourited: false,
             unrestricted_http: false,

@@ -188,3 +188,48 @@ async fn users_are_isolated_from_each_others_tokens() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn token_timestamps_are_rfc3339_strings() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_opds(state).await;
+    let cookie = login(&app, u, p).await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_post(
+            "/rest/me/api-tokens",
+            &cookie,
+            serde_json::json!({ "name": "reader", "expires_in_days": 30 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let created = body_json(res).await;
+
+    for field in ["created_at", "expires_at"] {
+        let raw = &created[field];
+        let text = raw.as_str().unwrap_or_else(|| {
+            panic!(
+                "{field} must be an RFC 3339 string, got {raw}; a bare epoch integer forces \
+                    every client to guess seconds versus milliseconds"
+            )
+        });
+        time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|e| panic!("{field} = {text:?} does not parse as RFC 3339: {e}"));
+    }
+
+    let res = app
+        .clone()
+        .oneshot(authed_get("/rest/me/api-tokens", &cookie))
+        .await
+        .unwrap();
+    let list = body_json(res).await;
+    let listed = &list.as_array().unwrap()[0];
+    assert!(
+        listed["created_at"].is_string(),
+        "the listing must agree with the creation response, got {}",
+        listed["created_at"]
+    );
+}

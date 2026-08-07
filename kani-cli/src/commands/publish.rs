@@ -34,12 +34,33 @@ pub struct RepoEntry {
     pub url: String,
 }
 
+/// Metadata a `.wasm` artifact cannot supply for itself.
+///
+/// A YAML extension declares its identity in the file, but reading a component's metadata means
+/// instantiating it against async host imports, which this binary has no runtime for. These are
+/// therefore operator-supplied and must match what the extension reports, or the index will
+/// describe something different from what the server installs.
+#[derive(Debug, Default, Clone)]
+pub struct WasmMetadata {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub language: Option<String>,
+    pub nsfw: bool,
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle)
+}
+
 pub fn run(
     file: &Path,
     sign_key_path: &Path,
     repo_dir: &Path,
     repo_sign_key_path: Option<&Path>,
     min_kani_version: Option<&str>,
+    wasm_meta: &WasmMetadata,
 ) -> Result<(), CliError> {
     let format = file
         .extension()
@@ -79,9 +100,45 @@ pub fn run(
             validated.nsfw,
         )
     } else {
-        return Err(CliError::Other(
-            "WASM publishing requires metadata flags (--ext-id, --ext-name, --ext-version); not yet supported".to_string(),
-        ));
+        let missing: Vec<&str> = [
+            ("--ext-id", wasm_meta.id.is_none()),
+            ("--ext-name", wasm_meta.name.is_none()),
+            ("--ext-version", wasm_meta.version.is_none()),
+        ]
+        .into_iter()
+        .filter_map(|(flag, absent)| absent.then_some(flag))
+        .collect();
+        if !missing.is_empty() {
+            return Err(CliError::Other(format!(
+                "publishing a .wasm needs {} — a component's metadata cannot be read without \
+                 instantiating it. Use the values the extension itself reports.",
+                missing.join(", ")
+            )));
+        }
+        let id = wasm_meta.id.clone().unwrap_or_default();
+        let version = wasm_meta.version.clone().unwrap_or_default();
+        if semver::Version::parse(version.trim_start_matches('v')).is_err() {
+            return Err(CliError::Other(format!(
+                "--ext-version '{version}' is not valid semver; update detection compares these"
+            )));
+        }
+        // The metadata string is embedded in the component, so an ID that appears nowhere in the
+        // binary is a typo. This cannot prove the value is right, only catch it being wrong.
+        if !contains_bytes(&artifact_bytes, id.as_bytes()) {
+            return Err(CliError::Other(format!(
+                "--ext-id '{id}' does not appear anywhere in {}; it will not match the metadata \
+                 the server reads back at install time",
+                file.display()
+            )));
+        }
+        (
+            id,
+            wasm_meta.name.clone().unwrap_or_default(),
+            version,
+            wasm_meta.description.clone(),
+            wasm_meta.language.clone(),
+            wasm_meta.nsfw,
+        )
     };
 
     let author_key = signing::load_signing_key(sign_key_path)?;

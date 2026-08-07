@@ -142,17 +142,21 @@ async fn check_hibp(
     const MAX_HIBP_BYTES: usize = 1024 * 1024;
     let mut buf: Vec<u8> = Vec::new();
     let mut response = response;
+    use http_body_util::BodyExt;
     loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
+        match response.frame().await {
+            Some(Ok(frame)) => {
+                let Ok(chunk) = frame.into_data() else {
+                    continue;
+                };
                 if buf.len() + chunk.len() > MAX_HIBP_BYTES {
                     tracing::warn!("HIBP response exceeded {MAX_HIBP_BYTES} bytes; ignoring it");
                     return None;
                 }
                 buf.extend_from_slice(&chunk);
             }
-            Ok(None) => break,
-            Err(_) => return None,
+            None => break,
+            Some(Err(_)) => return None,
         }
     }
     let body = String::from_utf8_lossy(&buf).into_owned();

@@ -90,7 +90,7 @@ pub struct RateState {
 }
 
 fn host_of(url: &str) -> Option<String> {
-    url.parse::<rquest::Url>()
+    url.parse::<url::Url>()
         .ok()
         .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
 }
@@ -246,14 +246,24 @@ pub enum SmartResponse {
     Normal(rquest::Response),
     Buffered {
         status: rquest::StatusCode,
-        url: rquest::Url,
+        url: rquest::Uri,
         headers: rquest::header::HeaderMap,
         body: bytes::Bytes,
     },
     NotModified {
-        url: rquest::Url,
+        url: rquest::Uri,
         headers: rquest::header::HeaderMap,
     },
+}
+
+async fn response_chunk(response: &mut rquest::Response) -> Result<Option<bytes::Bytes>> {
+    use http_body_util::BodyExt;
+    while let Some(frame) = response.frame().await {
+        if let Ok(data) = frame?.into_data() {
+            return Ok(Some(data));
+        }
+    }
+    Ok(None)
 }
 
 impl SmartResponse {
@@ -265,9 +275,9 @@ impl SmartResponse {
         }
     }
 
-    pub fn url(&self) -> &rquest::Url {
+    pub fn url(&self) -> &rquest::Uri {
         match self {
-            SmartResponse::Normal(r) => r.url(),
+            SmartResponse::Normal(r) => r.uri(),
             SmartResponse::Buffered { url, .. } => url,
             SmartResponse::NotModified { url, .. } => url,
         }
@@ -299,7 +309,7 @@ impl SmartResponse {
 
     pub async fn chunk(&mut self) -> Result<Option<bytes::Bytes>> {
         match self {
-            SmartResponse::Normal(r) => Ok(r.chunk().await?),
+            SmartResponse::Normal(r) => response_chunk(r).await,
             SmartResponse::Buffered { body, .. } => {
                 if body.is_empty() {
                     Ok(None)
@@ -366,12 +376,12 @@ fn ssrf_aware_redirect_policy(
     allow_private: Arc<std::sync::atomic::AtomicBool>,
 ) -> rquest::redirect::Policy {
     rquest::redirect::Policy::custom(move |attempt| {
-        if attempt.previous().len() >= REDIRECT_LIMIT {
+        if attempt.previous.len() >= REDIRECT_LIMIT {
             return attempt.error(Box::<dyn std::error::Error + Send + Sync>::from(
                 "too many redirects",
             ));
         }
-        if redirect_egress_forbidden(&allow_private, attempt.url().as_str()) {
+        if redirect_egress_forbidden(&allow_private, &attempt.uri.to_string()) {
             return attempt.error(Box::<dyn std::error::Error + Send + Sync>::from(
                 "redirect to a forbidden host refused",
             ));
@@ -574,11 +584,7 @@ impl SmartClient {
     pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
 
-        let domain = request
-            .url()
-            .host_str()
-            .map(base_domain)
-            .unwrap_or_default();
+        let domain = request.uri().host().map(base_domain).unwrap_or_default();
         let creds_map = self.credentials.load();
         if let Some(creds) = creds_map.get(&domain) {
             let expired = creds
@@ -713,11 +719,11 @@ impl SmartClient {
 
                 if is_html {
                     let status = resp.status();
-                    let url = resp.url().clone();
+                    let url = resp.uri().clone();
                     let headers = resp.headers().clone();
                     let bytes = collect_bytes_limited(
                         Box::pin(futures::stream::unfold(resp, |mut r| async move {
-                            match r.chunk().await {
+                            match response_chunk(&mut r).await {
                                 Ok(Some(b)) => Some((Ok(b), r)),
                                 Ok(None) => None,
                                 Err(e) => Some((Err(e), r)),
@@ -737,7 +743,7 @@ impl SmartClient {
                         && self.solver_url.load().is_some()
                         && request_clone_for_retry.is_some()
                     {
-                        let url_str = url.as_str().to_string();
+                        let url_str = url.to_string();
                         let resp = self.get_rendered_page_once(&url_str).await?;
                         self.record_success(&domain);
                         return Ok(resp);
@@ -761,9 +767,9 @@ impl SmartClient {
                 && self.solver_url.load().is_some()
                 && request_clone_for_retry.is_some()
             {
-                let url = resp.url().as_str().to_string();
+                let url = resp.uri().to_string();
                 let cf_domain = url
-                    .parse::<rquest::Url>()
+                    .parse::<url::Url>()
                     .ok()
                     .and_then(|u| u.host_str().map(base_domain));
 
@@ -841,12 +847,12 @@ impl SmartClient {
         let mut solved = false;
 
         let circuit_domain = initial_url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .ok()
             .and_then(|u| u.host_str().map(base_domain))
             .unwrap_or_default();
 
-        if let Ok(parsed) = initial_url.parse::<rquest::Url>()
+        if let Ok(parsed) = initial_url.parse::<url::Url>()
             && let Some(domain) = parsed.host_str().map(base_domain)
         {
             let creds_map = self.credentials.load();
@@ -979,7 +985,7 @@ impl SmartClient {
 
             if resp.status() == rquest::StatusCode::NOT_MODIFIED && cond_cache.is_some() {
                 self.record_success(&circuit_domain);
-                let url = resp.url().clone();
+                let url = resp.uri().clone();
                 let response_headers = resp.headers().clone();
                 return Ok(SmartResponse::NotModified {
                     url,
@@ -996,12 +1002,14 @@ impl SmartClient {
                         crate::error::Error::Other("redirect with no Location header".into())
                     })?;
 
-                let next = resp.url().join(location).map_err(|e| {
-                    crate::error::Error::Other(format!(
-                        "invalid redirect URL '{}': {}",
-                        location, e
-                    ))
-                })?;
+                let next = url::Url::parse(&resp.uri().to_string())
+                    .and_then(|url| url.join(location))
+                    .map_err(|e| {
+                        crate::error::Error::Other(format!(
+                            "invalid redirect URL '{}': {}",
+                            location, e
+                        ))
+                    })?;
 
                 match next.scheme() {
                     "http" | "https" => {}
@@ -1034,9 +1042,9 @@ impl SmartClient {
                 && !solved
                 && self.solver_url.load().is_some()
             {
-                let url = resp.url().as_str().to_string();
+                let url = resp.uri().to_string();
                 let domain = url
-                    .parse::<rquest::Url>()
+                    .parse::<url::Url>()
                     .ok()
                     .and_then(|u| u.host_str().map(base_domain));
 
@@ -1210,7 +1218,7 @@ impl SmartClient {
         headers: Option<&rquest::header::HeaderMap>,
     ) -> Result<(String, String)> {
         let base = url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .ok()
             .and_then(|u| u.host_str().map(base_domain))
             .unwrap_or_else(|| url.to_string());
@@ -1291,7 +1299,9 @@ impl SmartClient {
 
         Ok(SmartResponse::Buffered {
             status: rquest::StatusCode::OK,
-            url: rquest::Url::parse(url).map_err(|e| crate::error::Error::Other(e.to_string()))?,
+            url: url
+                .parse::<rquest::Uri>()
+                .map_err(|e| crate::error::Error::Other(e.to_string()))?,
             headers,
             body: bytes::Bytes::from(html),
         })
@@ -1299,7 +1309,7 @@ impl SmartClient {
 
     async fn get_rendered_page_once(&self, url: &str) -> Result<SmartResponse> {
         let base = url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .ok()
             .and_then(|u| u.host_str().map(base_domain))
             .unwrap_or_else(|| url.to_string());
@@ -1351,7 +1361,7 @@ impl SmartClient {
 
     fn store_credentials(&self, url: &str, cookies: &str, user_agent: &str) {
         let domain = match url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .ok()
             .and_then(|u| u.host_str().map(base_domain))
         {
@@ -1627,12 +1637,12 @@ mod tests {
         );
         let resp = SmartResponse::Buffered {
             status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/test").unwrap(),
+            url: "https://example.com/test".parse::<rquest::Uri>().unwrap(),
             headers,
             body: bytes::Bytes::from("hello world"),
         };
         assert_eq!(resp.status(), rquest::StatusCode::OK);
-        assert_eq!(resp.url().as_str(), "https://example.com/test");
+        assert_eq!(resp.url().to_string(), "https://example.com/test");
         assert!(resp.headers().contains_key(rquest::header::CONTENT_TYPE));
     }
 
@@ -1640,7 +1650,7 @@ mod tests {
     async fn smart_response_buffered_text() {
         let resp = SmartResponse::Buffered {
             status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/").unwrap(),
+            url: "https://example.com/".parse::<rquest::Uri>().unwrap(),
             headers: rquest::header::HeaderMap::new(),
             body: bytes::Bytes::from("test body"),
         };
@@ -1652,7 +1662,7 @@ mod tests {
     async fn smart_response_buffered_bytes() {
         let resp = SmartResponse::Buffered {
             status: rquest::StatusCode::NOT_FOUND,
-            url: rquest::Url::parse("https://example.com/").unwrap(),
+            url: "https://example.com/".parse::<rquest::Uri>().unwrap(),
             headers: rquest::header::HeaderMap::new(),
             body: bytes::Bytes::from_static(b"\x01\x02\x03"),
         };
@@ -2132,8 +2142,8 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::OK);
         assert_eq!(
-            resp.url().scheme(),
-            "http",
+            resp.url().scheme_str(),
+            Some("http"),
             "the protocol-relative Location inherited the http scheme"
         );
     }

@@ -1,6 +1,7 @@
 //! Clap command schema and top-level dispatch for `kani-cli`.
 
 pub mod archive;
+pub mod backup_verify;
 pub mod build;
 pub mod css;
 pub mod dsl_cmd;
@@ -12,7 +13,6 @@ pub mod new;
 pub mod publish;
 pub mod quality;
 pub mod repo;
-pub mod rollback;
 pub mod setup;
 pub mod validate;
 
@@ -25,6 +25,15 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
+
+/// Subcommands covered by the 1.x compatibility promise: their names, arguments and output
+/// shape may gain optional additions but may not change meaning or be removed within a major
+/// version. Every other subcommand is repo plumbing or a diagnostic and carries no such promise,
+/// which its help text marks with `[unstable]`.
+pub const STABLE_COMMANDS: &[&str] = &["archive-verify", "build", "generate", "new", "validate"];
+
+/// Marker appended to the help text of a subcommand outside [`STABLE_COMMANDS`].
+pub const UNSTABLE_MARKER: &str = "[unstable]";
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -54,7 +63,7 @@ pub enum Command {
     },
     /// Compile extension(s) to WASM
     Build {
-        /// Extension crate name (e.g. kani-example, or kani-weebcentral with --ext-dir)
+        /// Extension crate name (e.g. kani-example, or a catalogue crate with --ext-dir)
         #[arg(conflicts_with_all = ["all", "dev"])]
         extension: Option<String>,
         /// Build all production extensions (excludes dev/test extensions)
@@ -78,7 +87,7 @@ pub enum Command {
         #[arg(long)]
         debug: bool,
     },
-    /// Build the frontend CSS
+    /// Build the frontend CSS [unstable]
     Css {
         /// Rebuild automatically on file changes
         #[arg(long, conflicts_with = "prod")]
@@ -87,7 +96,7 @@ pub enum Command {
         #[arg(long, conflicts_with = "watch")]
         prod: bool,
     },
-    /// Download required build tools and JS vendor files
+    /// Download required build tools and JS vendor files [unstable]
     Setup {
         /// Download only the JS vendor files (Preact, htm)
         #[arg(long)]
@@ -99,9 +108,9 @@ pub enum Command {
         #[arg(long)]
         esbuild: bool,
     },
-    /// Generate PWA icon PNGs from static/icons/kani-mark.svg
+    /// Generate PWA icon PNGs from static/icons/kani-mark.svg [unstable]
     Icons,
-    /// Parse a DSL expression and print the resulting Expr AST
+    /// Parse a DSL expression and print the resulting Expr AST [unstable]
     Dsl {
         /// DSL expression string
         expression: String,
@@ -109,9 +118,9 @@ pub enum Command {
         #[arg(long, value_name = "FILE")]
         scripts: Option<std::path::PathBuf>,
     },
-    /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
+    /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence [unstable]
     Lint,
-    /// Generate an Ed25519 signing keypair for extension authoring
+    /// Generate an Ed25519 signing keypair for extension authoring [unstable]
     Keygen {
         /// Directory to write the keypair files into (default: current directory)
         #[arg(long, value_name = "PATH", default_value = ".")]
@@ -120,7 +129,7 @@ pub enum Command {
         #[arg(long, default_value = "author")]
         name: String,
     },
-    /// Sign an extension and publish it to a local repository
+    /// Sign an extension and publish it to a local repository [unstable]
     Publish {
         /// Path to the extension file (.yaml or .wasm) to publish
         file: std::path::PathBuf,
@@ -136,11 +145,29 @@ pub enum Command {
         /// Minimum Kani version required to install this extension
         #[arg(long, value_name = "SEMVER")]
         min_kani_version: Option<String>,
+        /// Extension ID for a .wasm artifact; must match the metadata the extension reports
+        #[arg(long, value_name = "ID")]
+        ext_id: Option<String>,
+        /// Display name for a .wasm artifact
+        #[arg(long, value_name = "NAME")]
+        ext_name: Option<String>,
+        /// Version for a .wasm artifact; compared by semver for update detection
+        #[arg(long, value_name = "SEMVER")]
+        ext_version: Option<String>,
+        /// Description shown in the repository listing for a .wasm artifact
+        #[arg(long, value_name = "TEXT")]
+        ext_description: Option<String>,
+        /// Language code for a .wasm artifact (e.g. en, multi)
+        #[arg(long, value_name = "LANG")]
+        ext_language: Option<String>,
+        /// Mark a .wasm artifact as NSFW
+        #[arg(long)]
+        ext_nsfw: bool,
     },
-    /// Manage a local extension repository
+    /// Manage a local extension repository [unstable]
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// REPL: inspect, explain, test, replay, or record a YAML extension
+    /// REPL: inspect, explain, test, replay, or record a YAML extension [unstable]
     #[command(subcommand)]
     Repl(ReplCommand),
     /// Re-hash every file a Kani archive export claims, without needing Kani
@@ -149,19 +176,19 @@ pub enum Command {
         #[arg(value_name = "ARCHIVE_DIR")]
         path: std::path::PathBuf,
     },
-    /// Print the quality score and per-page dimensions for a CBZ
+    /// Print the quality score and per-page dimensions for a CBZ [unstable]
     Quality {
         /// Path to a .cbz file
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
-    /// Show what a header probe learns from an image's first few kilobytes
+    /// Show what a header probe learns from an image's first few kilobytes [unstable]
     Probe {
         /// Path to an image file
         #[arg(value_name = "IMAGE")]
         path: std::path::PathBuf,
     },
-    /// Compare two CBZs page by page with perceptual hashes
+    /// Compare two CBZs page by page with perceptual hashes [unstable]
     PhashCompare {
         /// First .cbz
         #[arg(value_name = "A")]
@@ -170,14 +197,14 @@ pub enum Command {
         #[arg(value_name = "B")]
         b: std::path::PathBuf,
     },
-    /// Print the manifest computed from a CBZ on disk
+    /// Print the manifest computed from a CBZ on disk [unstable]
     Manifest {
         /// Path to a .cbz file
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
-    /// Verify a backup archive can be restored onto this build
-    Rollback {
+    /// Verify a backup archive can be restored onto this build [unstable]
+    BackupVerify {
         /// Path to a backup .zip produced by Kani
         #[arg(value_name = "BACKUP_ZIP")]
         path: std::path::PathBuf,
@@ -337,12 +364,26 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             repo_dir,
             repo_sign_key,
             min_kani_version,
+            ext_id,
+            ext_name,
+            ext_version,
+            ext_description,
+            ext_language,
+            ext_nsfw,
         } => publish::run(
             &file,
             &sign_key,
             &repo_dir,
             repo_sign_key.as_deref(),
             min_kani_version.as_deref(),
+            &publish::WasmMetadata {
+                id: ext_id,
+                name: ext_name,
+                version: ext_version,
+                description: ext_description,
+                language: ext_language,
+                nsfw: ext_nsfw,
+            },
         ),
         Command::Repo(repo_cmd) => match repo_cmd {
             RepoCommand::Init {
@@ -369,7 +410,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 repo::run_verify(&repo_dir, repo_key.as_deref())
             }
         },
-        Command::Rollback { path } => rollback::run(&path),
+        Command::BackupVerify { path } => backup_verify::run(&path),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

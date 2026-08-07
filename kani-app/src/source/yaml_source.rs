@@ -217,6 +217,7 @@ impl YamlSource {
         ep: &kani_yaml::ValidatedEndpoint,
         endpoint_name: &str,
         args: &HashMap<String, String>,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::json_eval;
 
@@ -244,6 +245,14 @@ impl YamlSource {
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
         let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved)?;
 
+        let mut params = kani_yaml::build_queries(&ep.queries, &resolved);
+        params.extend(kani_yaml::apply_filters(
+            &ep.filter_mapping,
+            ep.filter_format.as_ref(),
+            filters,
+        ));
+        let page_url = append_query_params(&page_url, &params);
+
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
         let profile_key = state.browser_profile_key.clone();
 
@@ -251,7 +260,7 @@ impl YamlSource {
         // V8 dispatch, mirroring the HTTP path — a restricted source must not be
         // able to point the browser at an arbitrary host.
         let host = page_url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .ok()
             .and_then(|u| u.host_str().map(str::to_string))
             .ok_or_else(|| format!("browser_payload page_url has no host: {page_url}"))?;
@@ -282,7 +291,7 @@ impl YamlSource {
 
         if ep.via == Some(EndpointVia::BrowserPayload) {
             let mut v = self
-                .eval_browser_payload_endpoint(ep, endpoint_name, args)
+                .eval_browser_payload_endpoint(ep, endpoint_name, args, filters)
                 .await
                 .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
             inject_fn_arg_fields(&mut v, ep, args);
@@ -749,6 +758,29 @@ fn inject_fn_arg_fields(
     }
 }
 
+/// Append `params` to `url`'s query string, percent-encoding each pair.
+fn append_query_params(url: &str, params: &[(String, String)]) -> String {
+    if params.is_empty() {
+        return url.to_string();
+    }
+    let (base, fragment) = match url.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (url, None),
+    };
+    let mut out = String::from(base);
+    for (k, v) in params {
+        out.push(if out.contains('?') { '&' } else { '?' });
+        out.push_str(&urlencoding::encode(k));
+        out.push('=');
+        out.push_str(&urlencoding::encode(v));
+    }
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    out
+}
+
 fn unpack_manga_info(result: &serde_json::Value) -> Result<MangaInfo> {
     kani_shared::unpack::unpack_manga_info(result, &[])
         .map(Into::into)
@@ -764,6 +796,57 @@ fn unpack_chapter_list(
 
 fn unpack_chapter(result: &serde_json::Value) -> Chapter {
     kani_shared::unpack::unpack_pages(result, &[]).into()
+}
+
+#[cfg(test)]
+mod page_url_tests {
+    use super::append_query_params;
+
+    fn params(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn no_params_leaves_the_url_alone() {
+        assert_eq!(
+            append_query_params("https://x.test/browse", &[]),
+            "https://x.test/browse"
+        );
+    }
+
+    #[test]
+    fn separator_follows_what_the_template_already_has() {
+        assert_eq!(
+            append_query_params("https://x.test/browse", &params(&[("page", "2")])),
+            "https://x.test/browse?page=2"
+        );
+        assert_eq!(
+            append_query_params("https://x.test/browse?q=a", &params(&[("page", "2")])),
+            "https://x.test/browse?q=a&page=2"
+        );
+    }
+
+    #[test]
+    fn keys_and_values_are_encoded_and_repeat_keys_survive() {
+        assert_eq!(
+            append_query_params(
+                "https://x.test/browse",
+                &params(&[("genres_in[]", "23"), ("genres_in[]", "9"), ("q", "a b")])
+            ),
+            "https://x.test/browse?genres_in%5B%5D=23&genres_in%5B%5D=9&q=a%20b"
+        );
+    }
+
+    #[test]
+    fn params_land_before_a_fragment() {
+        assert_eq!(
+            append_query_params("https://x.test/browse#top", &params(&[("page", "2")])),
+            "https://x.test/browse?page=2#top"
+        );
+    }
 }
 
 #[cfg(test)]

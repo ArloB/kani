@@ -40,12 +40,12 @@ impl http::Host for HostState {
 
         let url = req
             .url
-            .parse::<rquest::Url>()
+            .parse::<url::Url>()
             .map_err(|e| format!("Invalid URL: {}", e))?;
 
         self.check_allowed_host(url.host_str().unwrap_or(""))?;
 
-        let mut builder = self.http_client.inner().request(method, url);
+        let mut builder = self.http_client.inner().request(method, url.as_str());
         for (k, v) in req.headers {
             builder = builder.header(k, v);
         }

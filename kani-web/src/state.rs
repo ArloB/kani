@@ -47,6 +47,9 @@ pub struct AppState {
     /// Records responses to writes carrying an `Idempotency-Key`, so a client's
     /// retry replays the original result instead of repeating the write.
     pub idempotency: crate::idempotency::IdempotencyStore,
+    /// Networks whose `X-Forwarded-For` is believed. Empty unless `KANI_TRUSTED_PROXIES` is set,
+    /// so a direct deployment cannot have its client address forged.
+    pub trusted_proxies: Arc<crate::client_ip::TrustedProxies>,
 }
 
 impl AppState {
@@ -55,6 +58,16 @@ impl AppState {
         let public_instance = std::env::var("KANI_PUBLIC_INSTANCE")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
+        let (trusted_proxies, rejected) = crate::client_ip::TrustedProxies::from_env();
+        for entry in &rejected {
+            tracing::warn!("KANI_TRUSTED_PROXIES: ignoring unparseable entry {entry:?}");
+        }
+        if !trusted_proxies.is_empty() {
+            tracing::info!(
+                "trusting X-Forwarded-For from {} configured network(s)",
+                trusted_proxies.len()
+            );
+        }
 
         Ok(Self {
             proxy_secret: Arc::new(crate::proxy::load_or_persist_secret(&data_dir)),
@@ -87,6 +100,7 @@ impl AppState {
             csrf_secret: Arc::new(random_secret()),
             public_instance,
             idempotency: crate::idempotency::IdempotencyStore::new(),
+            trusted_proxies: Arc::new(trusted_proxies),
             service,
         })
     }
@@ -198,6 +212,7 @@ impl AppState {
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
             idempotency: crate::idempotency::IdempotencyStore::new(),
+            trusted_proxies: Arc::new(crate::client_ip::TrustedProxies::default()),
         }
     }
 }

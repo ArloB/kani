@@ -38,7 +38,7 @@ bundling pipeline through the web crate's build script.
 
 ```bash
 cargo run -p kani-cli -- build kani-example
-cargo run -p kani-cli -- build kani-weebcentral --ext-dir ../kani-extensions
+cargo run -p kani-cli -- build kani-<source> --ext-dir ../kani-extensions
 cargo run -p kani-cli -- build --all
 cargo run -p kani-cli -- build --dev
 ```

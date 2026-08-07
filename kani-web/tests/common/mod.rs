@@ -35,6 +35,7 @@ pub async fn test_state() -> AppState {
     AppState {
         rate_limiter: Arc::new(AuthRateLimiter::new(pool, service.settings.clone())),
         csrf_secret: Arc::new([0u8; 32]),
+        trusted_proxies: Arc::new(Default::default()),
         public_instance: false,
         service,
         proxy_secret: Arc::new([0u8; 32]),

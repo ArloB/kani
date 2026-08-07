@@ -208,7 +208,7 @@ impl HostState {
         let allowed_host = match allowed_host {
             AllowedHost::Restricted(raw) => {
                 let host = raw
-                    .parse::<rquest::Url>()
+                    .parse::<url::Url>()
                     .ok()
                     .and_then(|u| u.host_str().map(|h| h.to_string()))
                     .ok_or_else(|| {

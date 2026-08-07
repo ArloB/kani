@@ -828,3 +828,60 @@ fn parse_user_fn_receiver_is_first_arg() {
         other => panic!("expected UserFn, got {:?}", other),
     }
 }
+
+#[test]
+fn parse_chain_split_across_lines() {
+    let expr = parse_ok("self.ptr(\"/a\")\n  .str()\n  .fallback(\"x\")");
+    assert_eq!(expr, parse_ok(r#"self.ptr("/a").str().fallback("x")"#));
+}
+
+#[test]
+fn parse_multiline_list_and_call_arguments() {
+    let expr = parse_ok("merge([\n  [\"a\"],\n  [\"b\"],\n]).join(\n  \", \"\n)");
+    assert_eq!(expr, parse_ok(r#"merge([["a"],["b"]]).join(", ")"#));
+}
+
+#[test]
+fn parse_empty_list_as_a_later_element() {
+    let expr = parse_ok(r#"merge([["a"], []])"#);
+    assert_eq!(
+        expr,
+        Expr::Merge(vec![
+            Expr::List(vec![Expr::Literal("a".into())]),
+            Expr::List(vec![]),
+        ])
+    );
+}
+
+#[test]
+fn parse_let_bindings_one_per_line() {
+    let expr = parse_ok("let $a = \"x\";\nlet $b = \"y\";\nmerge([[$a], [$b]]).join(\"|\")");
+    assert_eq!(
+        expr,
+        parse_ok(r#"let $a = "x"; let $b = "y"; merge([[$a], [$b]]).join("|")"#)
+    );
+}
+
+#[test]
+fn parse_multiline_if_branches() {
+    let expr = parse_ok("if pref(\"t\") == \"true\"\n  then [\"a\"]\n  else []");
+    assert_eq!(
+        expr,
+        parse_ok(r#"if pref("t") == "true" then ["a"] else []"#)
+    );
+}
+
+#[test]
+fn parse_string_escapes_that_matter() {
+    assert_eq!(parse_ok(r#""a\nb""#), Expr::Literal("a\nb".into()));
+    assert_eq!(parse_ok(r#""a\"b""#), Expr::Literal("a\"b".into()));
+    assert_eq!(parse_ok(r#""a\\b""#), Expr::Literal("a\\b".into()));
+}
+
+#[test]
+fn parse_string_keeps_regex_escapes_intact() {
+    assert_eq!(
+        parse_ok(r#""Chapter\s+(\d+)""#),
+        Expr::Literal(r"Chapter\s+(\d+)".into())
+    );
+}

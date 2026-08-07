@@ -18,6 +18,7 @@ Do not create a `kani.toml`; Kani does not read one.
 | `KANI_STATIC_DIR` | *(unset)* | Serve the frontend from this directory instead of the copy embedded in the binary |
 | `KANI_CORS_ORIGIN` | request origin | Allowed browser origin |
 | `KANI_SECURE_COOKIES` | `false` | Mark session cookies Secure |
+| `KANI_TRUSTED_PROXIES` | *(none)* | Comma-separated addresses or CIDR blocks permitted to set `X-Forwarded-For` |
 
 The container sets `KANI_DATA_DIR` through its working directory, serves static files from
 `/app/static`, and sets the library to `/library`.

@@ -65,6 +65,7 @@ nav:
     - Jobs & maintenance: admin/jobs-maintenance.md
     - Storage: admin/storage.md
     - Upgrades: admin/upgrade.md
+    - Migration policy: admin/migration-policy.md
     - Sources: admin/sources.md
     - Extension Repositories: admin/extension-repositories.md
     - Trackers: admin/trackers.md
@@ -76,12 +77,14 @@ nav:
     - Rhai hooks: extension-authoring/rhai-hooks.md
     - Rust extensions: extension-authoring/rust-extensions.md
     - Publishing & Distribution: extension-authoring/publishing.md
+    - ABI stability: extension-authoring/stability.md
   - Developer Guide:
     - Architecture: developer/architecture.md
     - Crate map: developer/crate-map.md
     - Request flow: developer/request-flow.md
     - Local development: developer/local-dev.md
     - Test conventions: developer/test-conventions.md
+    - API stability: developer/api-stability.md
     - Engineering constraints: developer/engineering-constraints.md
     - Design system: developer/design-system.md
     - Release process: developer/release-process.md

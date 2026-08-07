@@ -1,8 +1,9 @@
 # Publishing and Distribution
 
-This guide creates a signed static repository for declarative YAML extensions. The current CLI can
-build WASM components, but `publish` and `repo add` do not yet accept WASM metadata flags; they
-reject WASM publication instead of guessing identity and version.
+This guide creates a signed static repository. YAML extensions declare their own identity, so
+`publish` reads it from the file. WASM components cannot: reading a component's metadata means
+instantiating it against async host imports, which `kani-cli` has no runtime for, so their
+identity is supplied on the command line.
 
 ## Keys
 
@@ -56,6 +57,28 @@ seed it from its own package version.
 
 Publishing the same extension ID replaces its catalogue entry and writes the artifact under its
 declared semantic version. Bump the YAML version before publishing an update.
+
+## Publish a WASM component
+
+A `.wasm` artifact needs `--ext-id`, `--ext-name` and `--ext-version`, plus optional
+`--ext-description`, `--ext-language` and `--ext-nsfw`:
+
+```bash
+cargo run -p kani-cli -- publish ./kani-my-source.wasm \
+  --ext-id my-source \
+  --ext-name "My Source" \
+  --ext-version 1.2.0 \
+  --sign-key ./author.key \
+  --repo-dir ./repo \
+  --repo-sign-key ./maintainer.key
+```
+
+**These values must match the metadata the extension reports.** The server re-reads metadata from
+the component at install time and registers the source under *that* identity, so a mismatch leaves
+the catalogue describing something the server did not install — update detection compares the
+index version against the installed one, and will misbehave. `publish` checks that `--ext-id`
+appears somewhere in the binary and refuses if it does not, which catches a typo but cannot prove
+the value is right. `--ext-version` must be valid semver for the same reason.
 
 ## Add an already signed YAML artifact
 

@@ -1141,7 +1141,7 @@ mod tests {
         );
         SmartResponse::Buffered {
             status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/img").unwrap(),
+            url: "https://example.com/img".parse::<rquest::Uri>().unwrap(),
             headers,
             body: bytes::Bytes::new(),
         }
@@ -1150,7 +1150,7 @@ mod tests {
     fn buffered_resp_no_ct() -> SmartResponse {
         SmartResponse::Buffered {
             status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/img").unwrap(),
+            url: "https://example.com/img".parse::<rquest::Uri>().unwrap(),
             headers: rquest::header::HeaderMap::new(),
             body: bytes::Bytes::new(),
         }

@@ -32,8 +32,8 @@ tower-http = { version = "0.6", features = [
   "request-id",
 ] }
 sqlx.workspace = true
-rquest = { version = "5.1", features = ["json"] }
-rquest-util = "2.2"
+rquest = { package = "wreq", version = "6.0.0-rc.29", features = ["json"] }
+url = "2.5.8"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

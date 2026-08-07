@@ -366,7 +366,7 @@ impl AppService {
         } else {
             if let Ok(base_url) = self.get_source_base_url(id).await
                 && let Some(domain) = base_url
-                    .parse::<rquest::Url>()
+                    .parse::<url::Url>()
                     .ok()
                     .and_then(|u| u.host_str().map(|h| h.to_owned()))
             {
@@ -952,7 +952,7 @@ impl AppService {
                     && let Some(ref rl) = ext.metadata.rate_limit
                     && let Some(domain) = ext
                         .base_url
-                        .parse::<rquest::Url>()
+                        .parse::<url::Url>()
                         .ok()
                         .and_then(|u| u.host_str().map(|h| h.to_owned()))
                 {
@@ -1062,7 +1062,7 @@ impl AppService {
                 if let Some(ref rl) = metadata.rate_limit
                     && let Some(domain) = metadata
                         .base_url
-                        .parse::<rquest::Url>()
+                        .parse::<url::Url>()
                         .ok()
                         .and_then(|u| u.host_str().map(|h| h.to_owned()))
                 {

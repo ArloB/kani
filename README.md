@@ -34,7 +34,8 @@ Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/
 
 ### Sources & Extensions
 
-- 5 built-in sources: MangaDex, WeebCentral, Mangapill, Comix, Cubari
+- Official source extensions, installed from a signed extension repository — the catalogue is
+  maintained separately and is not bundled with the server
 - WebAssembly Component extension system — sandboxed and fast
 - Declarative YAML + DSL authoring for new sources — no raw Rust required
 - CLI tooling: scaffold, validate, generate, and build extensions
@@ -44,7 +45,7 @@ Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/
 - Tracker sync: AniList and MyAnimeList (OAuth 2.0, read/write)
 - Outbound webhooks with per-manga overrides and a delivery log
 - SMTP email (password reset, email verification, test send)
-- OPDS feed for e-reader clients *(experimental)*
+- OPDS 1.2 feed with page streaming (PSE) for e-reader clients
 
 ### Multi-user
 
@@ -117,6 +118,7 @@ Set these in `docker-compose.yml` or pass as `-e` flags:
 |----------|---------|-------------|
 | `KANI_BIND` | `0.0.0.0:8242` | Listen address |
 | `KANI_SECURE_COOKIES` | `false` | Set `true` when behind a TLS-terminating proxy |
+| `KANI_TRUSTED_PROXIES` | *(none)* | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is believed. Required when behind a reverse proxy, or every client shares one rate-limit bucket |
 | `KANI_CORS_ORIGIN` | *(mirrors request)* | Restrict CORS to a specific origin in production |
 | `KANI_SECRET_KEY` | *(none)* | 32-byte hex key for credential encryption at rest (`openssl rand -hex 32`) |
 | `KANI_SECRET_KEY_FILE` | *(none)* | Load the encryption key from a file (for Docker secrets) |

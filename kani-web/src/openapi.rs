@@ -1,7 +1,92 @@
-use utoipa::OpenApi;
+use utoipa::{Modify, OpenApi};
+
+/// Compatibility tier of a published operation.
+///
+/// `Stable` operations are covered by the 1.x compatibility promise: within a major version they
+/// may gain optional fields but may not remove or repurpose existing ones, change status codes, or
+/// move. `Unstable` operations carry no such promise and may change in any release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stability {
+    Stable,
+    Unstable,
+}
+
+impl Stability {
+    /// Value published as `x-stability` in the OpenAPI document.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stability::Stable => "stable",
+            Stability::Unstable => "unstable",
+        }
+    }
+}
+
+/// Path prefixes excluded from the compatibility promise.
+///
+/// A prefix matches the path itself and anything below it, so `/rest/jobs` covers
+/// `/rest/jobs/{id}`. Anything not listed is stable, which makes the omission of a new
+/// administrative or internal route the failure that must be caught in review.
+const UNSTABLE_PREFIXES: &[&str] = &[
+    "/rest/admin",
+    "/rest/boot_id",
+    "/rest/features",
+    "/rest/image_proxy",
+    "/rest/jobs",
+    "/rest/refresh",
+    "/rest/server",
+    "/rest/trash",
+    "/rest/ui",
+];
+
+fn covers(prefix: &str, path: &str) -> bool {
+    match path.strip_prefix(prefix) {
+        Some("") => true,
+        Some(rest) => rest.starts_with('/'),
+        None => false,
+    }
+}
+
+/// Compatibility tier for a documented path. Unlisted paths are [`Stability::Stable`].
+pub fn stability_for(path: &str) -> Stability {
+    if UNSTABLE_PREFIXES.iter().any(|p| covers(p, path)) {
+        Stability::Unstable
+    } else {
+        Stability::Stable
+    }
+}
+
+/// Stamps every operation with its `x-stability` tier so the published document carries it.
+pub struct StabilityAddon;
+
+impl Modify for StabilityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        for (path, item) in openapi.paths.paths.iter_mut() {
+            let tier = stability_for(path);
+            let operations = [
+                &mut item.get,
+                &mut item.post,
+                &mut item.put,
+                &mut item.patch,
+                &mut item.delete,
+                &mut item.head,
+                &mut item.options,
+                &mut item.trace,
+            ];
+            for op in operations.into_iter().flatten() {
+                let mut extensions = op.extensions.clone().unwrap_or_default();
+                extensions.insert(
+                    "x-stability".to_string(),
+                    serde_json::Value::String(tier.as_str().to_string()),
+                );
+                op.extensions = Some(extensions);
+            }
+        }
+    }
+}
 
 #[derive(OpenApi)]
 #[openapi(
+    modifiers(&StabilityAddon),
     info(
         title = "Kani API",
         version = env!("CARGO_PKG_VERSION"),
@@ -386,3 +471,30 @@ use utoipa::OpenApi;
 )]
 /// Generated OpenAPI document for every registered REST operation and schema.
 pub struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_prefix_covers_itself_and_its_children() {
+        assert!(covers("/rest/admin", "/rest/admin"));
+        assert!(covers("/rest/admin", "/rest/admin/users"));
+        assert!(covers("/rest/admin", "/rest/admin/users/{id}"));
+    }
+
+    #[test]
+    fn a_prefix_does_not_cover_a_longer_sibling_segment() {
+        assert!(!covers("/rest/ui", "/rest/uikit"));
+        assert!(!covers("/rest/jobs", "/rest/jobsearch"));
+        assert!(!covers("/rest/admin", "/rest/administration"));
+    }
+
+    #[test]
+    fn listed_prefixes_are_unstable_and_everything_else_is_stable() {
+        assert_eq!(stability_for("/rest/admin/users"), Stability::Unstable);
+        assert_eq!(stability_for("/rest/ui/themes"), Stability::Unstable);
+        assert_eq!(stability_for("/rest/library"), Stability::Stable);
+        assert_eq!(stability_for("/rest/manga/{id}"), Stability::Stable);
+    }
+}

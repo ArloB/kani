@@ -294,7 +294,7 @@ pub fn unpack_pages<T: JsonRows>(result: &T, fn_args: FnArgs) -> wit_types::Chap
             Some(wit_types::Page {
                 index: row.get_i64("/index").unwrap_or(i as i64) as i32,
                 url: arg_or_field_req(&row, fn_args, "url").ok()?,
-                transform: None,
+                transform: row.get_str("/transform").filter(|s| !s.is_empty()),
             })
         })
         .collect();
@@ -398,5 +398,22 @@ mod tests {
         assert_eq!(out.pages.len(), 2);
         assert_eq!(out.pages[0].index, 0);
         assert_eq!(out.pages[1].index, 5);
+    }
+
+    #[test]
+    fn unpack_pages_carries_a_transform_hint() {
+        let result = json!({"rows": [
+            {"url": "a", "transform": "lcg-tile-5x5-from-header"},
+            {"url": "b"},
+            {"url": "c", "transform": ""},
+        ]});
+        let out = unpack_pages(&result, &[]);
+        assert_eq!(
+            out.pages[0].transform.as_deref(),
+            Some("lcg-tile-5x5-from-header")
+        );
+        assert_eq!(out.pages[1].transform, None);
+        // An empty string is a missing hint, not a transform named "".
+        assert_eq!(out.pages[2].transform, None);
     }
 }

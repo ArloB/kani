@@ -58,5 +58,5 @@ the data volume.
 6. Verify sources, stored credentials, representative downloads, and a chapter read before
    reopening the instance.
 
-The `kani-cli rollback <backup.zip>` command verifies whether a Kani backup archive can be restored
+The `kani-cli backup-verify <backup.zip>` command verifies whether a Kani backup archive can be restored
 by the current build; it does not replace the running database by itself.

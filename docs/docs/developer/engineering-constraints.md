@@ -109,9 +109,10 @@ insertion changes.
 the source ends pagination first. Each additional tolerance unit costs at most one request per
 manga and scan.
 
-**Evidence.** Cubari and WeebCentral return a complete chapter list in one response; a roughly
-200-chapter series therefore completed in two requests and never reached the guard. Page-granular
-sources can hide new chapters beyond a run of known pages, so lowering the value risks omissions.
+**Evidence.** Sources that return a complete chapter list in one response never reach the guard at
+all — a roughly 200-chapter series measured against two such sources completed in two requests.
+Page-granular sources can hide new chapters beyond a run of known pages, so lowering the value
+risks omissions.
 
 **Enforcement.** `scan_barren_page_tolerance` remains runtime-configurable with a default of three.
 

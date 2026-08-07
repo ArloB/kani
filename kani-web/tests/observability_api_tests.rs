@@ -346,6 +346,23 @@ async fn support_bundle_returns_a_zip_with_expected_entries() {
             "missing {expected} in {names:?}"
         );
     }
+
+    let mut info = String::new();
+    {
+        use std::io::Read;
+        zip.by_name("kani_info.json")
+            .unwrap()
+            .read_to_string(&mut info)
+            .unwrap();
+    }
+    let info: serde_json::Value = serde_json::from_str(&info).unwrap();
+    let schema_version = info["db_schema_version"].as_i64();
+    assert!(
+        schema_version.is_some_and(|v| v > 0),
+        "kani_info.json must report the applied migration version so a bug report says which \
+         schema produced it, got {:?}",
+        info["db_schema_version"]
+    );
 }
 
 #[tokio::test]

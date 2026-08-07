@@ -3,6 +3,7 @@
 ## Internet-facing checklist
 
 - Terminate TLS at a maintained reverse proxy and set `KANI_SECURE_COOKIES=true`.
+- Set `KANI_TRUSTED_PROXIES` to that proxy's address whenever one is in front of Kani.
 - Enable `KANI_PUBLIC_INSTANCE=true` for the hardened runtime profile.
 - Restrict direct access to Kani's port and set an explicit `KANI_CORS_ORIGIN`.
 - Complete first-run setup before publishing the service; do not leave
@@ -15,6 +16,37 @@
 - Restrict extension installation and review `unrestricted_http` and required capabilities.
 - Protect and back up encryption keys separately from ordinary logs and support bundles.
 - Authenticate `/metrics` with a token scoped to `metrics:read`.
+
+## Client address and `X-Forwarded-For`
+
+Login lockout and per-IP rate limiting both count against the client address, so whatever decides
+that address decides who gets locked out. `KANI_TRUSTED_PROXIES` is the only input to that
+decision.
+
+**Unset (the default).** The socket peer is always the client and `X-Forwarded-For` is ignored
+entirely. This is correct for a directly exposed Kani: a caller cannot name itself, cannot rotate
+the header to mint fresh rate-limit budget, and cannot blame a bystander for its failed logins.
+
+**Set.** A request whose peer matches an entry is treated as proxied, and the client is the
+rightmost `X-Forwarded-For` hop that is not itself a listed proxy. Anything further left was
+written by a hop nobody vouches for, so it is not believed.
+
+```bash
+KANI_TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8
+```
+
+Accepts addresses and CIDR blocks, IPv4 or IPv6. Unparseable entries are logged and skipped rather
+than silently widening trust. IPv4-mapped IPv6 peers match IPv4 rules, so a dual-stack listener
+needs no special handling.
+
+**Set it whenever a proxy is in front of Kani.** Leaving it unset there is not merely conservative:
+every anonymous request arrives from the proxy's address, so the whole instance shares one
+rate-limit bucket and one lockout counter, and a single noisy client can lock everyone out.
+
+**Never list a network you do not control.** An entry grants that network the ability to assert any
+client address, which means the ability to lock out any user. If the proxy is Cloudflare, list
+Cloudflare's published ranges and also restrict ingress to them, or an attacker who reaches the
+origin directly can claim to be Cloudflare.
 
 ## Accounts, sessions, and two-factor authentication
 

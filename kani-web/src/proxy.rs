@@ -9,7 +9,7 @@ const BUST_PARAMS: &[&str] = &["cb", "ts", "t", "_", "v", "ver", "nc"];
 
 /// Return a canonical cache key by stripping well-known cache-bust query params.
 pub fn canonical_proxy_key(url: &str) -> String {
-    let Ok(mut parsed) = rquest::Url::parse(url) else {
+    let Ok(mut parsed) = url::Url::parse(url) else {
         return url.to_string();
     };
     let kept: Vec<(String, String)> = parsed

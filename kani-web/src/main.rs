@@ -360,7 +360,9 @@ async fn main() {
             .burst_size(api_burst_size)
             // Bucket bearer traffic per token, so a busy integration cannot
             // spend its owner's browsing budget.
-            .key_extractor(kani_web::rate_limit_key::TokenOrPeerIp)
+            .key_extractor(kani_web::rate_limit_key::TokenOrPeerIp::new(
+                state.trusted_proxies.clone(),
+            ))
             // Emit x-ratelimit-* and retry-after: a client that cannot see its
             // budget can only retry blindly, which makes congestion worse.
             .use_headers()

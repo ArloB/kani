@@ -73,7 +73,15 @@ fn publish_yaml_creates_artifact_and_signature() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let artifact_path = repo_dir.join("extensions/test-source/1.0.0/extension.yaml");
     assert!(artifact_path.exists(), "artifact file should exist");
@@ -101,7 +109,15 @@ fn publish_upserts_index_entry() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let (index, _) = load_index(&repo_dir).unwrap();
     assert_eq!(index.extensions.len(), 1);
@@ -142,6 +158,7 @@ fn publish_with_repo_sign_key_creates_index_sig() {
         &repo_dir,
         Some(&maintainer_key_path),
         None,
+        &Default::default(),
     )
     .unwrap();
 
@@ -188,6 +205,7 @@ fn repo_verify_detects_tampered_artifact() {
         &repo_dir,
         Some(&maintainer_key_path),
         None,
+        &Default::default(),
     )
     .unwrap();
 
@@ -284,7 +302,15 @@ fn repo_list_shows_extensions() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     kani_cli::commands::repo::run_list(&repo_dir).unwrap();
 
@@ -316,8 +342,15 @@ fn repo_add_copies_artifact_and_updates_index() {
     let staging_dir = tmp.path().join("staging");
     std::fs::create_dir_all(&staging_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &staging_dir, None, None)
-        .unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &staging_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let staged_artifact = staging_dir.join("extensions/test-source/1.0.0/extension.yaml");
 
@@ -349,8 +382,15 @@ fn repo_add_rejects_tampered_artifact() {
 
     let staging_dir = tmp.path().join("staging");
     std::fs::create_dir_all(&staging_dir).unwrap();
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &staging_dir, None, None)
-        .unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &staging_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let artifact_path = staging_dir.join("extensions/test-source/1.0.0/extension.yaml");
     let mut bytes = std::fs::read(&artifact_path).unwrap();
@@ -385,4 +425,144 @@ fn repo_init_creates_index_and_extensions_dir() {
     let index: RepoIndex = serde_json::from_slice(&raw).unwrap();
     assert_eq!(index.name, "My Test Repo");
     assert!(index.extensions.is_empty());
+}
+
+/// Bytes that look enough like a component for publishing: the metadata string an extension
+/// reports is embedded in the binary, which is what the ID sanity check looks for.
+fn fake_wasm(id: &str) -> Vec<u8> {
+    let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+    bytes.extend_from_slice(format!(r#"{{"id":"{id}","name":"Whatever"}}"#).as_bytes());
+    bytes
+}
+
+fn wasm_meta(id: &str, version: &str) -> kani_cli::commands::publish::WasmMetadata {
+    kani_cli::commands::publish::WasmMetadata {
+        id: Some(id.to_string()),
+        name: Some("Example Source".to_string()),
+        version: Some(version.to_string()),
+        ..Default::default()
+    }
+}
+
+fn wasm_fixture(dir: &std::path::Path, id: &str) -> std::path::PathBuf {
+    let path = dir.join(format!("{id}.wasm"));
+    std::fs::write(&path, fake_wasm(id)).unwrap();
+    path
+}
+
+#[test]
+fn publishing_a_wasm_with_metadata_flags_writes_a_signed_artifact() {
+    let tmp = tempfile::tempdir().unwrap();
+    let author = gen_signing_key();
+    let (_, author_key_path) = write_key_file(tmp.path(), "author", &author);
+    let wasm_path = wasm_fixture(tmp.path(), "example-source");
+    let repo_dir = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    kani_cli::commands::publish::run(
+        &wasm_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &wasm_meta("example-source", "2.1.0"),
+    )
+    .unwrap();
+
+    let artifact = repo_dir.join("extensions/example-source/2.1.0/extension.wasm");
+    assert!(artifact.exists(), "artifact should exist at {artifact:?}");
+    assert!(
+        repo_dir
+            .join("extensions/example-source/2.1.0/extension.wasm.sig")
+            .exists(),
+        "signature should exist"
+    );
+
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(repo_dir.join("index.json")).unwrap()).unwrap();
+    let entry = &index["extensions"][0];
+    assert_eq!(entry["id"], "example-source");
+    assert_eq!(entry["version"], "2.1.0");
+    assert_eq!(entry["format"], "wasm");
+}
+
+#[test]
+fn publishing_a_wasm_without_metadata_names_the_missing_flags() {
+    let tmp = tempfile::tempdir().unwrap();
+    let author = gen_signing_key();
+    let (_, author_key_path) = write_key_file(tmp.path(), "author", &author);
+    let wasm_path = wasm_fixture(tmp.path(), "example-source");
+    let repo_dir = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    let err = kani_cli::commands::publish::run(
+        &wasm_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap_err()
+    .to_string();
+
+    for flag in ["--ext-id", "--ext-name", "--ext-version"] {
+        assert!(err.contains(flag), "error should name {flag}, got: {err}");
+    }
+}
+
+#[test]
+fn a_wrong_ext_id_is_refused_rather_than_published() {
+    let tmp = tempfile::tempdir().unwrap();
+    let author = gen_signing_key();
+    let (_, author_key_path) = write_key_file(tmp.path(), "author", &author);
+    let wasm_path = wasm_fixture(tmp.path(), "example-source");
+    let repo_dir = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    let err = kani_cli::commands::publish::run(
+        &wasm_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &wasm_meta("exmaple-surce", "1.0.0"),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("does not appear"),
+        "a typo'd ID must be caught before it reaches the index, got: {err}"
+    );
+    assert!(
+        !repo_dir.join("index.json").exists(),
+        "nothing should be written when the ID is rejected"
+    );
+}
+
+#[test]
+fn a_non_semver_ext_version_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let author = gen_signing_key();
+    let (_, author_key_path) = write_key_file(tmp.path(), "author", &author);
+    let wasm_path = wasm_fixture(tmp.path(), "example-source");
+    let repo_dir = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    let err = kani_cli::commands::publish::run(
+        &wasm_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &wasm_meta("example-source", "latest"),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("semver"),
+        "update detection compares versions, so a non-semver value must fail: {err}"
+    );
 }
