@@ -103,17 +103,17 @@ mod tests {
 
     #[test]
     fn source_id_conversions() {
-        let from_string = SourceId::from("weebcentral".to_string());
-        let from_str = SourceId::from("weebcentral");
+        let from_string = SourceId::from("example-source".to_string());
+        let from_str = SourceId::from("example-source");
         assert_eq!(from_string, from_str);
-        assert_eq!(from_string.to_string(), "weebcentral");
+        assert_eq!(from_string.to_string(), "example-source");
     }
 
     #[test]
     fn source_id_serde_is_transparent() {
-        let id = SourceId("weebcentral".into());
+        let id = SourceId("example-source".into());
         let json = serde_json::to_string(&id).unwrap();
-        assert_eq!(json, "\"weebcentral\"");
+        assert_eq!(json, "\"example-source\"");
         let back: SourceId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, id);
     }

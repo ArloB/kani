@@ -1917,17 +1917,17 @@ mod extension_integration_tests {
         }
     }
 
-    const MANGAPILL_SEARCH_HTML: &str = r#"<html><body>
+    const LAZY_COVER_SEARCH_HTML: &str = r#"<html><body>
       <div class="grid gap-3">
         <div>
           <a href="/manga/1234/action-hero">
-            <img src="/placeholder.jpg" data-src="https://cdn.mangapill.com/1234.jpg">
+            <img src="/placeholder.jpg" data-src="https://cdn.example.com/1234.jpg">
             <div class="line-clamp-2">Action Hero</div>
           </a>
         </div>
         <div>
           <a href="/manga/5678/romance-story">
-            <img src="https://cdn.mangapill.com/5678.jpg">
+            <img src="https://cdn.example.com/5678.jpg">
             <div class="line-clamp-2">Romance Story</div>
           </a>
         </div>
@@ -1935,9 +1935,9 @@ mod extension_integration_tests {
     </body></html>"#;
 
     #[tokio::test]
-    async fn mangapill_search_id_from_href() {
+    async fn lazy_cover_search_id_from_href() {
         let rows = html_rows(
-            MANGAPILL_SEARCH_HTML,
+            LAZY_COVER_SEARCH_HTML,
             ".grid.gap-3 > div",
             vec![field(
                 "id",
@@ -1951,9 +1951,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangapill_search_cover_fallback_to_src() {
+    async fn lazy_cover_search_cover_fallback_to_src() {
         let rows = html_rows(
-            MANGAPILL_SEARCH_HTML,
+            LAZY_COVER_SEARCH_HTML,
             ".grid.gap-3 > div",
             vec![field(
                 "cover",
@@ -1965,14 +1965,14 @@ mod extension_integration_tests {
             vec![],
         )
         .await;
-        assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/1234.jpg");
-        assert_eq!(rows[1]["cover"], "https://cdn.mangapill.com/5678.jpg");
+        assert_eq!(rows[0]["cover"], "https://cdn.example.com/1234.jpg");
+        assert_eq!(rows[1]["cover"], "https://cdn.example.com/5678.jpg");
     }
 
     #[tokio::test]
-    async fn mangapill_search_title() {
+    async fn lazy_cover_search_title() {
         let rows = html_rows(
-            MANGAPILL_SEARCH_HTML,
+            LAZY_COVER_SEARCH_HTML,
             ".grid.gap-3 > div",
             vec![field("title", text(first(Expr::SelfRef, ".line-clamp-2")))],
             vec![],
@@ -1982,10 +1982,10 @@ mod extension_integration_tests {
         assert_eq!(rows[1]["title"], "Romance Story");
     }
 
-    const MANGAPILL_DETAILS_HTML: &str = r#"<html><body>
+    const LAZY_COVER_DETAILS_HTML: &str = r#"<html><body>
       <h1 class="font-bold">One Piece</h1>
       <p class="text-sm">A story about pirates.</p>
-      <img data-src="https://cdn.mangapill.com/op.jpg">
+      <img data-src="https://cdn.example.com/op.jpg">
       <div class="grid">
         <div>
           <div><div>Type</div><div class="type-val">Manga</div></div>
@@ -2001,9 +2001,9 @@ mod extension_integration_tests {
     </body></html>"#;
 
     #[tokio::test]
-    async fn mangapill_details_title() {
+    async fn lazy_cover_details_title() {
         let rows = html_rows(
-            MANGAPILL_DETAILS_HTML,
+            LAZY_COVER_DETAILS_HTML,
             ":root",
             vec![field("title", text(dom("h1.font-bold")))],
             vec![],
@@ -2013,9 +2013,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangapill_details_description() {
+    async fn lazy_cover_details_description() {
         let rows = html_rows(
-            MANGAPILL_DETAILS_HTML,
+            LAZY_COVER_DETAILS_HTML,
             ":root",
             vec![field("desc", text(dom("p.text-sm")))],
             vec![],
@@ -2025,21 +2025,21 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangapill_details_cover() {
+    async fn lazy_cover_details_cover() {
         let rows = html_rows(
-            MANGAPILL_DETAILS_HTML,
+            LAZY_COVER_DETAILS_HTML,
             ":root",
             vec![field("cover", attr(dom("img"), "data-src"))],
             vec![],
         )
         .await;
-        assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/op.jpg");
+        assert_eq!(rows[0]["cover"], "https://cdn.example.com/op.jpg");
     }
 
     #[tokio::test]
-    async fn mangapill_details_status_lookup() {
+    async fn lazy_cover_details_status_lookup() {
         let rows = html_rows(
-            MANGAPILL_DETAILS_HTML,
+            LAZY_COVER_DETAILS_HTML,
             ":root",
             vec![field(
                 "status",
@@ -2064,9 +2064,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangapill_details_tags_join() {
+    async fn lazy_cover_details_tags_join() {
         let rows = html_rows(
-            MANGAPILL_DETAILS_HTML,
+            LAZY_COVER_DETAILS_HTML,
             ":root",
             vec![field(
                 "tags",
@@ -2087,7 +2087,7 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["tags"], "Action, Adventure");
     }
 
-    const MANGAPILL_CHAPTER_HTML: &str = r#"<html><body>
+    const COMPACT_CHAPTER_HTML: &str = r#"<html><body>
       <div class="grid">
         <a class="border" href="/chapters/1234567">Chapter 42</a>
         <a class="border" href="/chapters/1234568">Chapter 1.5</a>
@@ -2096,9 +2096,9 @@ mod extension_integration_tests {
     </body></html>"#;
 
     #[tokio::test]
-    async fn mangapill_chapter_id_from_href() {
+    async fn compact_html_chapter_id_from_href() {
         let rows = html_rows(
-            MANGAPILL_CHAPTER_HTML,
+            COMPACT_CHAPTER_HTML,
             "div.grid a.border",
             vec![field("id", at(split(attr(Expr::SelfRef, "href"), "/"), 2))],
             vec![],
@@ -2109,10 +2109,10 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangapill_chapter_number_from_capture() {
+    async fn compact_html_chapter_number_from_capture() {
         let chapter_text = trim(text(Expr::SelfRef));
         let rows = html_rows(
-            MANGAPILL_CHAPTER_HTML,
+            COMPACT_CHAPTER_HTML,
             "div.grid a.border",
             vec![field(
                 "number",
@@ -2135,15 +2135,15 @@ mod extension_integration_tests {
         assert!((rows[2]["number"].as_f64().unwrap() - 1.0).abs() < 1e-9);
     }
 
-    const MANGAPILL_PAGES_HTML: &str = r#"<html><body>
-      <img class="js-page" data-src="https://cdn.mangapill.com/p/001.jpg">
-      <img class="js-page" data-src="https://cdn.mangapill.com/p/002.jpg">
+    const COMPACT_PAGES_HTML: &str = r#"<html><body>
+      <img class="js-page" data-src="https://cdn.example.com/p/001.jpg">
+      <img class="js-page" data-src="https://cdn.example.com/p/002.jpg">
     </body></html>"#;
 
     #[tokio::test]
-    async fn mangapill_pages_url_and_index() {
+    async fn compact_html_pages_url_and_index() {
         let rows = html_rows(
-            MANGAPILL_PAGES_HTML,
+            COMPACT_PAGES_HTML,
             "img.js-page",
             vec![
                 field("url", attr(Expr::SelfRef, "data-src")),
@@ -2152,27 +2152,27 @@ mod extension_integration_tests {
             vec![],
         )
         .await;
-        assert_eq!(rows[0]["url"], "https://cdn.mangapill.com/p/001.jpg");
-        assert_eq!(rows[1]["url"], "https://cdn.mangapill.com/p/002.jpg");
+        assert_eq!(rows[0]["url"], "https://cdn.example.com/p/001.jpg");
+        assert_eq!(rows[1]["url"], "https://cdn.example.com/p/002.jpg");
         assert_eq!(rows[0]["index"], "0");
         assert_eq!(rows[1]["index"], "1");
     }
 
-    const WC_SEARCH_HTML: &str = r#"<html><body>
+    const SEMANTIC_SEARCH_HTML: &str = r#"<html><body>
       <article>
         <a class="line-clamp-1" href="/series/01JKABCDEF/dungeon-hero">Dungeon Hero</a>
-        <img src="https://cdn.weebcentral.com/covers/1.jpg">
+        <img src="https://cdn.example.com/covers/1.jpg">
       </article>
       <article>
         <a class="line-clamp-1" href="/series/01JKGHIJKL/spirit-blade">Spirit Blade</a>
-        <img src="https://cdn.weebcentral.com/covers/2.jpg">
+        <img src="https://cdn.example.com/covers/2.jpg">
       </article>
     </body></html>"#;
 
     #[tokio::test]
-    async fn weebcentral_search_id_from_href() {
+    async fn semantic_html_search_id_from_href() {
         let rows = html_rows(
-            WC_SEARCH_HTML,
+            SEMANTIC_SEARCH_HTML,
             "body > article",
             vec![field(
                 "id",
@@ -2189,9 +2189,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_search_title_and_cover() {
+    async fn semantic_html_search_title_and_cover() {
         let rows = html_rows(
-            WC_SEARCH_HTML,
+            SEMANTIC_SEARCH_HTML,
             "body > article",
             vec![
                 field("title", text(first(Expr::SelfRef, "a.line-clamp-1"))),
@@ -2201,10 +2201,10 @@ mod extension_integration_tests {
         )
         .await;
         assert_eq!(rows[0]["title"], "Dungeon Hero");
-        assert_eq!(rows[0]["cover"], "https://cdn.weebcentral.com/covers/1.jpg");
+        assert_eq!(rows[0]["cover"], "https://cdn.example.com/covers/1.jpg");
     }
 
-    const WC_DETAILS_HTML: &str = r#"<html><body>
+    const SEMANTIC_DETAILS_HTML: &str = r#"<html><body>
       <h1 class="hidden">Spirit Blade Chronicle</h1>
       <p class="whitespace-pre-wrap">A sword saint travels the land.</p>
       <ul class="flex-col">
@@ -2219,14 +2219,14 @@ mod extension_integration_tests {
         <li><span>Shonen</span></li>
       </ul>
       <section class="flex" style="nth-child(3)">
-        <picture><img src="/cover-small.jpg"><img src="https://cdn.weebcentral.com/cover.jpg"></picture>
+        <picture><img src="/cover-small.jpg"><img src="https://cdn.example.com/cover.jpg"></picture>
       </section>
     </body></html>"#;
 
     #[tokio::test]
-    async fn weebcentral_details_title() {
+    async fn semantic_html_details_title() {
         let rows = html_rows(
-            WC_DETAILS_HTML,
+            SEMANTIC_DETAILS_HTML,
             ":root",
             vec![field("title", text(dom("h1.hidden")))],
             vec![],
@@ -2236,9 +2236,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_details_description() {
+    async fn semantic_html_details_description() {
         let rows = html_rows(
-            WC_DETAILS_HTML,
+            SEMANTIC_DETAILS_HTML,
             ":root",
             vec![field("desc", text(dom(".whitespace-pre-wrap")))],
             vec![],
@@ -2248,9 +2248,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_details_status() {
+    async fn semantic_html_details_status() {
         let rows = html_rows(
-            WC_DETAILS_HTML,
+            SEMANTIC_DETAILS_HTML,
             ":root",
             vec![field("status", text(dom("ul.flex-col li:nth-child(4) a")))],
             vec![],
@@ -2260,9 +2260,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_details_authors_as_list() {
+    async fn semantic_html_details_authors_as_list() {
         let rows = html_rows(
-            WC_DETAILS_HTML,
+            SEMANTIC_DETAILS_HTML,
             ":root",
             vec![field(
                 "authors",
@@ -2280,15 +2280,15 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["authors"], "John Doe, Jane Smith");
     }
 
-    const WC_CHAPTERS_HTML: &str = r#"<html><body>
+    const SEMANTIC_CHAPTERS_HTML: &str = r#"<html><body>
       <div>
-        <a href="https://weebcentral.com/chapters/01JKCH0001">
+        <a href="https://example.com/chapters/01JKCH0001">
           <span class="gap-2"><span>Chapter 1</span></span>
         </a>
         <time datetime="2024-03-15T12:00:00+00:00">Mar 15, 2024</time>
       </div>
       <div>
-        <a href="https://weebcentral.com/chapters/01JKCH0002">
+        <a href="https://example.com/chapters/01JKCH0002">
           <span class="gap-2"><span>Chapter 2</span></span>
         </a>
         <time datetime="2024-03-22T12:00:00+00:00">Mar 22, 2024</time>
@@ -2296,9 +2296,9 @@ mod extension_integration_tests {
     </body></html>"#;
 
     #[tokio::test]
-    async fn weebcentral_chapter_id_last_segment() {
+    async fn semantic_html_chapter_id_last_segment() {
         let rows = html_rows(
-            WC_CHAPTERS_HTML,
+            SEMANTIC_CHAPTERS_HTML,
             "body > div",
             vec![field(
                 "id",
@@ -2312,9 +2312,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_chapter_number_last_word() {
+    async fn semantic_html_chapter_number_last_word() {
         let rows = html_rows(
-            WC_CHAPTERS_HTML,
+            SEMANTIC_CHAPTERS_HTML,
             "body > div",
             vec![field(
                 "number",
@@ -2331,9 +2331,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn weebcentral_chapter_date_rfc3339() {
+    async fn semantic_html_chapter_date_rfc3339() {
         let rows = html_rows(
-            WC_CHAPTERS_HTML,
+            SEMANTIC_CHAPTERS_HTML,
             "body > div",
             vec![field(
                 "date",
@@ -2345,17 +2345,17 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["date"].as_i64().unwrap(), 1710504000);
     }
 
-    const WC_PAGES_HTML: &str = r#"<html><body>
+    const SEMANTIC_PAGES_HTML: &str = r#"<html><body>
       <section>
-        <img src="https://cdn.weebcentral.com/p/001.jpg">
-        <img src="https://cdn.weebcentral.com/p/002.jpg">
+        <img src="https://cdn.example.com/p/001.jpg">
+        <img src="https://cdn.example.com/p/002.jpg">
       </section>
     </body></html>"#;
 
     #[tokio::test]
-    async fn weebcentral_pages_src_and_index() {
+    async fn semantic_html_pages_src_and_index() {
         let rows = html_rows(
-            WC_PAGES_HTML,
+            SEMANTIC_PAGES_HTML,
             "section img",
             vec![
                 field("url", attr(Expr::SelfRef, "src")),
@@ -2364,12 +2364,12 @@ mod extension_integration_tests {
             vec![],
         )
         .await;
-        assert_eq!(rows[0]["url"], "https://cdn.weebcentral.com/p/001.jpg");
-        assert_eq!(rows[1]["url"], "https://cdn.weebcentral.com/p/002.jpg");
+        assert_eq!(rows[0]["url"], "https://cdn.example.com/p/001.jpg");
+        assert_eq!(rows[1]["url"], "https://cdn.example.com/p/002.jpg");
         assert_eq!(rows[0]["index"], "0");
     }
 
-    const MD_POPULAR_JSON: &str = r#"{
+    const RELATIONAL_POPULAR_JSON: &str = r#"{
       "data": [
         {
           "id": "uuid-manga-1",
@@ -2405,9 +2405,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn mangadex_popular_id() {
+    async fn relational_json_popular_id() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field("id", jstr(ptr_e(Expr::SelfRef, "/id")))],
             vec![],
@@ -2418,9 +2418,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_localized_title_en_fallback_ja_ro() {
+    async fn relational_json_localized_title_en_fallback_ja_ro() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field(
                 "title",
@@ -2437,9 +2437,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_cover_url_from_relationships_find() {
+    async fn relational_json_cover_url_from_relationships_find() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field(
                 "cover_file",
@@ -2460,9 +2460,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_tags_map_and_join() {
+    async fn relational_json_tags_map_and_join() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field(
                 "tags",
@@ -2492,9 +2492,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_authors_from_relationships() {
+    async fn relational_json_authors_from_relationships() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field(
                 "authors",
@@ -2529,9 +2529,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_status_lookup() {
+    async fn relational_json_status_lookup() {
         let rows = json_rows(
-            MD_POPULAR_JSON,
+            RELATIONAL_POPULAR_JSON,
             "/data",
             vec![field(
                 "status",
@@ -2552,7 +2552,7 @@ mod extension_integration_tests {
         assert_eq!(rows[1]["status"], "completed");
     }
 
-    const MD_CHAPTER_JSON: &str = r#"{
+    const RELATIONAL_CHAPTER_JSON: &str = r#"{
       "data": [
         {
           "id": "ch-uuid-1",
@@ -2572,9 +2572,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn mangadex_chapter_number_parse_float() {
+    async fn relational_json_chapter_number_parse_float() {
         let rows = json_rows(
-            MD_CHAPTER_JSON,
+            RELATIONAL_CHAPTER_JSON,
             "/data",
             vec![field(
                 "number",
@@ -2590,9 +2590,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_chapter_date_rfc3339() {
+    async fn relational_json_chapter_date_rfc3339() {
         let rows = json_rows(
-            MD_CHAPTER_JSON,
+            RELATIONAL_CHAPTER_JSON,
             "/data",
             vec![field(
                 "date",
@@ -2605,9 +2605,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn mangadex_scanlator_from_relationships_find() {
+    async fn relational_json_scanlator_from_relationships_find() {
         let rows = json_rows(
-            MD_CHAPTER_JSON,
+            RELATIONAL_CHAPTER_JSON,
             "/data",
             vec![field(
                 "scanlator",
@@ -2626,8 +2626,8 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["scanlator"], "ScanGroup A");
     }
 
-    const MD_AT_HOME_JSON: &str = r#"{
-      "baseUrl": "https://uploads.mangadex.org",
+    const RELATIONAL_HOST_JSON: &str = r#"{
+      "baseUrl": "https://uploads.example.com",
       "chapter": {
         "hash": "abc123def456",
         "data": ["001-x1.jpg", "002-x2.jpg", "003-x3.jpg"]
@@ -2635,9 +2635,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn mangadex_pages_construct_url() {
+    async fn relational_json_pages_construct_url() {
         let rows = json_rows(
-            MD_AT_HOME_JSON,
+            RELATIONAL_HOST_JSON,
             "/chapter/data",
             vec![
                 field(
@@ -2660,19 +2660,19 @@ mod extension_integration_tests {
         .await;
         assert_eq!(
             rows[0]["url"],
-            "https://uploads.mangadex.org/data/abc123def456/001-x1.jpg"
+            "https://uploads.example.com/data/abc123def456/001-x1.jpg"
         );
         assert_eq!(
             rows[1]["url"],
-            "https://uploads.mangadex.org/data/abc123def456/002-x2.jpg"
+            "https://uploads.example.com/data/abc123def456/002-x2.jpg"
         );
         assert_eq!(rows[2]["index"], "2");
     }
 
-    const COMIX_LIST_JSON: &str = r#"{
+    const OBJECT_LIST_JSON: &str = r#"{
       "result": {
         "items": [
-          {"hash_id": "abc123", "title": "Hero Academia", "poster": {"large": "https://cdn.comix.to/ha.jpg"}},
+          {"hash_id": "abc123", "title": "Hero Academia", "poster": {"large": "https://cdn.example.net/ha.jpg"}},
           {"hash_id": "def456", "title": "Solo Leveling"}
         ],
         "pagination": {"last_page": 5, "current_page": 1}
@@ -2680,9 +2680,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn comix_list_id_and_title() {
+    async fn object_json_list_id_and_title() {
         let rows = json_rows(
-            COMIX_LIST_JSON,
+            OBJECT_LIST_JSON,
             "/result/items",
             vec![
                 field("id", jstr(ptr_e(Expr::SelfRef, "/hash_id"))),
@@ -2697,9 +2697,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn comix_optional_cover_url() {
+    async fn object_json_optional_cover_url() {
         let rows = json_rows(
-            COMIX_LIST_JSON,
+            OBJECT_LIST_JSON,
             "/result/items",
             vec![opt_field(
                 "cover",
@@ -2708,14 +2708,14 @@ mod extension_integration_tests {
             vec![],
         )
         .await;
-        assert_eq!(rows[0]["cover"], "https://cdn.comix.to/ha.jpg");
+        assert_eq!(rows[0]["cover"], "https://cdn.example.net/ha.jpg");
         assert_eq!(rows[1]["cover"], serde_json::Value::Null);
     }
 
     #[tokio::test]
-    async fn comix_pagination_last_page() {
+    async fn object_json_pagination_last_page() {
         let rows = json_rows(
-            COMIX_LIST_JSON,
+            OBJECT_LIST_JSON,
             "",
             vec![field(
                 "last_page",
@@ -2727,12 +2727,12 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["last_page"], "5");
     }
 
-    const COMIX_DETAIL_JSON: &str = r#"{
+    const OBJECT_DETAIL_JSON: &str = r#"{
       "result": {
         "title": "Hero Academia",
         "synopsis": "A story of heroes.",
         "status": "RELEASING",
-        "poster": {"large": "https://cdn.comix.to/ha-large.jpg"},
+        "poster": {"large": "https://cdn.example.net/ha-large.jpg"},
         "type": "Manga",
         "genre": [
           {"title": "Action"},
@@ -2744,9 +2744,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn comix_details_title_and_description() {
+    async fn object_json_details_title_and_description() {
         let rows = json_rows(
-            COMIX_DETAIL_JSON,
+            OBJECT_DETAIL_JSON,
             "",
             vec![
                 field("title", jstr(json("/result/title"))),
@@ -2760,9 +2760,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn comix_details_status_lookup() {
+    async fn object_json_details_status_lookup() {
         let rows = json_rows(
-            COMIX_DETAIL_JSON,
+            OBJECT_DETAIL_JSON,
             "",
             vec![field(
                 "status",
@@ -2783,9 +2783,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn comix_details_tags_from_genre_array() {
+    async fn object_json_details_tags_from_genre_array() {
         let rows = json_rows(
-            COMIX_DETAIL_JSON,
+            OBJECT_DETAIL_JSON,
             "",
             vec![field(
                 "tags",
@@ -2801,9 +2801,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn comix_details_authors() {
+    async fn object_json_details_authors() {
         let rows = json_rows(
-            COMIX_DETAIL_JSON,
+            OBJECT_DETAIL_JSON,
             "",
             vec![field(
                 "authors",
@@ -2818,7 +2818,7 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["authors"], "Kohei Horikoshi");
     }
 
-    const COMIX_CHAPTER_JSON: &str = r#"{
+    const OBJECT_CHAPTER_JSON: &str = r#"{
       "result": {
         "items": [
           {
@@ -2836,9 +2836,9 @@ mod extension_integration_tests {
     }"#;
 
     #[tokio::test]
-    async fn comix_chapter_id_as_string() {
+    async fn object_json_chapter_id_as_string() {
         let rows = json_rows(
-            COMIX_CHAPTER_JSON,
+            OBJECT_CHAPTER_JSON,
             "/result/items",
             vec![field(
                 "id",
@@ -2853,9 +2853,9 @@ mod extension_integration_tests {
     }
 
     #[tokio::test]
-    async fn comix_chapter_scanlator() {
+    async fn object_json_chapter_scanlator() {
         let rows = json_rows(
-            COMIX_CHAPTER_JSON,
+            OBJECT_CHAPTER_JSON,
             "/result/items",
             vec![field(
                 "scanlator",

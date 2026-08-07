@@ -34,8 +34,8 @@ Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/
 
 ### Sources & Extensions
 
-- Official source extensions (MangaDex, WeebCentral, Mangapill, Comix, Cubari), installed from a
-  signed extension repository — they are not bundled with the server
+- Official source extensions, installed from a signed extension repository — the catalogue is
+  maintained separately and is not bundled with the server
 - WebAssembly Component extension system — sandboxed and fast
 - Declarative YAML + DSL authoring for new sources — no raw Rust required
 - CLI tooling: scaffold, validate, generate, and build extensions

@@ -982,7 +982,7 @@ A complete blueprint is a JSON object with the following fields:
 
 When `pagination` is set, the blueprint must be submitted via `paginated-extract-html` / `paginated-extract-json` rather than `extract-html` / `extract-json`. The host handles chunk-fetching, stitching, and `has_next_page` detection automatically.
 
-**`CursorToken` mode:** The host reads the cursor value from `next_cursor_field` (a JSON Pointer into the chunk response) after each fetch, injects it as the `offset_param` query value on the next request, and stops when the field is absent or `null`. Use this for APIs that return a next-page token rather than a numeric offset (e.g. MangaDex's `offset`+`total` model can also be expressed this way, but opaque-token APIs require it).
+**`CursorToken` mode:** The host reads the cursor value from `next_cursor_field` (a JSON Pointer into the chunk response) after each fetch, injects it as the `offset_param` query value on the next request, and stops when the field is absent or `null`. Use this for APIs that return a next-page token rather than a numeric offset (an API exposing `offset`+`total` can also be expressed this way, but opaque-token APIs require it).
 
 ### 2.4 Binary Encoding
 
