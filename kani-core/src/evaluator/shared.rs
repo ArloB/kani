@@ -985,12 +985,7 @@ pub async fn fetch_body(
             m => return Err(format!("Unsupported HTTP method: {}", m)),
         };
 
-        let rquest_url = url
-            .to_string()
-            .parse::<rquest::Url>()
-            .map_err(|e| format!("Invalid URL: {}", e))?;
-
-        let mut builder = state.http_client.inner().request(method, rquest_url);
+        let mut builder = state.http_client.inner().request(method, url.to_string());
         for (k, v) in &working.headers {
             builder = builder.header(k, v);
         }
@@ -1207,12 +1202,7 @@ pub async fn send_prepared_request(
     if !req.queries.is_empty() {
         url.query_pairs_mut().extend_pairs(req.queries.iter());
     }
-    let rquest_url = url
-        .to_string()
-        .parse::<rquest::Url>()
-        .map_err(|e| format!("Invalid URL: {}", e))?;
-
-    let mut builder = client.inner().request(method, rquest_url);
+    let mut builder = client.inner().request(method, url.to_string());
     for (k, v) in &req.headers {
         builder = builder.header(k, v);
     }

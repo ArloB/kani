@@ -140,6 +140,7 @@ async function getPuppeteerBrowser(profileDir) {
             '--disable-sync',
             '--disable-translate',
             '--no-first-run',
+            '--disable-blink-features=AutomationControlled',
             '--js-flags=--max-old-space-size=64',
         ],
         headless: true,
@@ -363,18 +364,25 @@ rl.on('line', (line) => {
                         payloadReject  = rej;
                     });
 
-                    const timer = setTimeout(() => {
-                        payloadReject(new Error(`Payload not captured within ${timeoutMs}ms from: ${name}`));
-                    }, timeoutMs);
+                    let timer = null;
+                    const armTimer = () => {
+                        if (timer) clearTimeout(timer);
+                        timer = setTimeout(() => {
+                            payloadReject(new Error(`Payload not captured within ${timeoutMs}ms from: ${name}`));
+                        }, timeoutMs);
+                    };
+                    armTimer();
 
                     await page.exposeFunction('passPayload', (data) => {
                         dbg(`passPayload called (${String(data).length} chars)`);
-                        clearTimeout(timer);
+                        if (timer) clearTimeout(timer);
+                        timer = null;
                         payloadResolve(String(data));
                     });
 
                     await page.exposeFunction('resetPayloadTimer', () => {
                         dbg('resetPayloadTimer called');
+                        if (timer) armTimer();
                     });
 
                     if (initScript) {

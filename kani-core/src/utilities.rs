@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// Parse a date string using a format pattern, falling back from datetime to date-only.
 /// Returns a Unix timestamp in seconds.
 pub fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64, String> {
-    let fmt = time::format_description::parse(format)
+    let fmt = time::format_description::parse_borrowed::<1>(format)
         .map_err(|e| format!("Invalid format string: {}", e))?;
     if let Ok(dt) = time::PrimitiveDateTime::parse(date, &fmt) {
         return Ok(dt.assume_utc().unix_timestamp());

@@ -44,8 +44,22 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
         .map(|s: &str| format!("${s}"))
         .padded_by(ws());
 
+    let escape = just('\\').ignore_then(any::<&str, ParserError>().map(|c: char| match c {
+        'n' => "\n".to_string(),
+        't' => "\t".to_string(),
+        'r' => "\r".to_string(),
+        '"' => "\"".to_string(),
+        '\\' => "\\".to_string(),
+        other => format!("\\{other}"),
+    }));
+
     let string_literal = just('"')
-        .ignore_then(none_of('"').repeated().collect::<String>())
+        .ignore_then(
+            choice((escape, none_of("\"\\").map(|c: char| c.to_string())))
+                .repeated()
+                .collect::<Vec<String>>()
+                .map(|parts| parts.concat()),
+        )
         .then_ignore(just('"'))
         .padded_by(ws());
 
@@ -102,40 +116,48 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
 
     let terminator = choice((just(';').ignored(), just('\n').ignored())).padded_by(hws());
 
+    let open_brack = || just('[').padded_by(ws());
+    let close_brack = || just(']').padded_by(ws());
+    let open_paren = || just('(').padded_by(ws());
+    let close_paren = || just(')').padded_by(ws());
+    let comma = || just(',').padded_by(ws());
+
     let expr = recursive(|expr| {
         let comma_list = expr
             .clone()
-            .separated_by(just(','))
+            .separated_by(comma())
             .allow_trailing()
             .collect::<Vec<_>>();
 
         let array = comma_list
             .clone()
-            .delimited_by(just('['), just(']'))
-            .map(ParseExpr::List);
+            .delimited_by(open_brack(), close_brack())
+            .map(ParseExpr::List)
+            .padded_by(ws());
 
         let merge = text::keyword("merge")
             .ignore_then(
                 comma_list
                     .clone()
-                    .delimited_by(just('['), just(']'))
-                    .delimited_by(just('('), just(')')),
+                    .delimited_by(open_brack(), close_brack())
+                    .delimited_by(open_paren(), close_paren()),
             )
-            .map(ParseExpr::Merge);
+            .map(ParseExpr::Merge)
+            .padded_by(ws());
 
         let format = text::keyword("format")
             .ignore_then(
                 string_literal
                     .then(
-                        just(',')
-                            .padded_by(ws())
+                        comma()
                             .ignore_then(comma_list.clone())
                             .or_not()
                             .map(|opt| opt.unwrap_or_default()),
                     )
-                    .delimited_by(just('('), just(')')),
+                    .delimited_by(open_paren(), close_paren()),
             )
-            .map(|(template, args)| ParseExpr::Format { template, args });
+            .map(|(template, args)| ParseExpr::Format { template, args })
+            .padded_by(ws());
 
         let let_expr = text::keyword("let")
             .ignore_then(variable)
@@ -147,7 +169,8 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
                 name,
                 value: Box::new(value),
                 body: Box::new(body),
-            });
+            })
+            .padded_by(ws());
 
         let if_then_else = text::keyword("if")
             .ignore_then(expr.clone())
@@ -159,12 +182,13 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
                 condition: Box::new(cond),
                 then: Box::new(then_b),
                 else_: Box::new(else_b),
-            });
+            })
+            .padded_by(ws());
 
         let arg_choice = choice((map_literal, expr.clone()));
 
         let arg_list = arg_choice
-            .separated_by(just(','))
+            .separated_by(comma())
             .allow_trailing()
             .collect::<Vec<_>>();
 
@@ -184,7 +208,7 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
             format,
             if_then_else,
             array,
-            expr.clone().delimited_by(just('('), just(')')),
+            expr.clone().delimited_by(open_paren(), close_paren()),
         ))
         .boxed();
 
@@ -194,15 +218,14 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
             .padded_by(ws())
             .ignore_then(just('.'))
             .ignore_then(fn_ident)
-            .then(arg_list.clone().delimited_by(just('('), just(')')))
+            .then(arg_list.clone().delimited_by(open_paren(), close_paren()))
             .map_with(|(fn_name, args), extra| (format!("__user::{fn_name}"), args, extra.span()));
 
-        let method_call = ident.then(arg_list.delimited_by(just('('), just(')')));
+        let method_call = ident.then(arg_list.delimited_by(open_paren(), close_paren()));
 
         let chain = atom
             .foldl(
-                hws()
-                    .ignore_then(just('.'))
+                ws().ignore_then(just('.'))
                     .ignore_then(choice((
                         user_fn_call,
                         method_call.map_with(|(name, args), extra| (name, args, extra.span())),

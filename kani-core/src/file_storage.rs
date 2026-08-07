@@ -78,6 +78,26 @@ pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()>
     Ok(())
 }
 
+pub async fn delete_yaml_file(wasm_storage_path: &str, name: &str) -> Result<()> {
+    let name = crate::utilities::sanitize_filename(name);
+    let dir = PathBuf::from(wasm_storage_path);
+    let filename = format!("{}.yaml", name);
+    let path = dir.join(&filename);
+
+    if path.exists() {
+        let canonical_dir = dir.canonicalize()?;
+
+        if let Some(parent) = path.parent()
+            && parent.canonicalize()? != canonical_dir
+        {
+            return Err(Error::PathTraversal(name));
+        }
+
+        fs::remove_file(&path).await?;
+    }
+    Ok(())
+}
+
 /// Validates that the bytes start with WASM magic bytes.
 pub fn validate_wasm_magic(bytes: &[u8]) -> bool {
     bytes.len() >= 4 && bytes[..4] == WASM_MAGIC
@@ -149,6 +169,24 @@ mod tests {
     async fn delete_wasm_file_nonexistent_is_ok() {
         let dir = tempfile::tempdir().unwrap();
         let result = delete_wasm_file(dir.path().to_str().unwrap(), "nonexistent").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn delete_yaml_file_removes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = dir.path().to_str().unwrap();
+        save_yaml(storage, "ext_to_delete", "id: ext_to_delete\n")
+            .await
+            .unwrap();
+        delete_yaml_file(storage, "ext_to_delete").await.unwrap();
+        assert!(!dir.path().join("ext_to_delete.yaml").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_yaml_file_nonexistent_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = delete_yaml_file(dir.path().to_str().unwrap(), "nonexistent").await;
         assert!(result.is_ok());
     }
 

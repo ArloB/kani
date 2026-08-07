@@ -15,7 +15,7 @@ Each expression extracts one value from a document element.
 
 **Variable names:** `$` followed by an identifier: `$base`, `$cover_path`
 
-**String literals:** Double-quoted with standard escapes: `"hello"`, `"/manga"`, `"Chapter\s+"`. Single quotes are not supported to avoid YAML quoting conflicts.
+**String literals:** Double-quoted: `"hello"`, `"/manga"`, `"Chapter\s+"`. Single quotes are not supported to avoid YAML quoting conflicts. `\n`, `\t`, `\r`, `\"`, and `\\` are decoded; every other backslash sequence is passed through unchanged, so a regex literal such as `"Chapter\s+(\d+)"` reaches the regex engine intact.
 
 **Numeric literals:** Integer or float: `0`, `2`, `3.14`, `-1`
 
@@ -23,7 +23,7 @@ Each expression extracts one value from a document element.
 
 **Operators:** `.` (method chain), `=` (binding), `;` (statement separator), `,` (argument separator), `{` `}` (map literal), `(` `)` (grouping/call), `+` `-` `*` `/` (arithmetic), `==` `!=` `<` `>` `<=` `>=` (comparison), `&&` `||` (logical)
 
-**Whitespace:** Ignored between tokens. Newlines may replace `;` between `let` statements.
+**Whitespace:** Ignored between tokens, newlines included — an expression may be laid out over as many lines as it likes (one method of a chain per line, one list element per line), which is how a YAML block scalar naturally reads. `let` statements are separated by `;`; a newline alone does not end one.
 
 **Comments:** `/* */` block comments; nesting is unsupported.
 
@@ -31,7 +31,7 @@ Each expression extracts one value from a document element.
 
 ```ebnf
 program        = let_expr | expr ;
-let_expr       = "let" variable "=" expr ( ";" | NEWLINE ) ( let_expr | expr ) ;
+let_expr       = "let" variable "=" expr ";" ( let_expr | expr ) ;
 
 (* Binary operators, in ascending precedence order *)
 expr           = or_expr ;
@@ -1380,7 +1380,17 @@ pages:
   fields:
     index: "index()"
     url: 'self.attr("data-src")'
+    transform:                       # Optional. Names an image transform.
+      expr: '"lcg-tile-5x5-from-header"'
+      optional: true
 ```
+
+**`transform`:** an optional per-page field naming a transform from the host's
+transform registry (`kani_core::transform`), the declarative equivalent of a
+compiled extension setting `Page.transform`. The name is carried to the image
+proxy, which resolves it against the upstream response headers and applies it if
+it resolves; an unknown name, or one whose parameters are absent from the
+response, is a passthrough. An empty value counts as absent.
 
 ### 3.3 Pagination
 
@@ -1845,6 +1855,8 @@ endpoints:
 
 **`page_url`:** the absolute URL to load. May use `$manga_id$` and `$chapter_id$` placeholders (substituted from endpoint function arguments).
 
+**`queries` and `filter_mapping`:** a browser endpoint issues no request of its own — the page is the request, and the site's scripts turn its query string into whatever API call the payload comes from. Both are therefore appended to `page_url` as query parameters (endpoint queries first, then mapped filters), giving browser endpoints the same filter surface as HTTP ones. Note that sites commonly read a repeated parameter as its *first* occurrence, so a name used in `queries` should not also be the target of a mapped filter.
+
 **`route`:** ignored when `via: browser_payload` is set (produces a warning).
 
 **Validation rules for `via: browser_payload`:**
@@ -1862,7 +1874,7 @@ The `kani-cli validate` command checks:
 3. **Version format:** Must be valid semver.
 4. **Base URL format:** Must be a valid URL with scheme.
 5. **DSL syntax:** All DSL strings must parse without errors.
-6. **Field completeness:** For `manga_details`, the required fields are `id`, `title`, `status`. For `chapter_list`, the required fields are `id`, `number`, `language`. For `pages`, the required fields are `index`, `url`.
+6. **Field completeness:** For `manga_details`, the required fields are `id`, `title`, `status`. For `chapter_list`, the required fields are `id`, `number`, `language`. For `pages`, the required fields are `index`, `url`, and `transform` is optional.
 7. **Variable references:** All `$variable$` references in routes and queries must correspond to available function arguments or preference keys.
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
 9. **Filter mapping:** All filter mapping keys must correspond to declared filter group IDs.

@@ -579,8 +579,15 @@ impl AppService {
         let text = std::str::from_utf8(bytes).map_err(|_| {
             ServiceError::Validation("YAML artifact is not valid UTF-8".to_string())
         })?;
-        let dummy_path = std::path::Path::new("extension.yaml");
-        let validated = kani_yaml::parse_and_validate(text, dummy_path).map_err(|errs| {
+        let text_owned = text.to_owned();
+        let validated = tokio::task::spawn_blocking(move || {
+            stacker::grow(16 * 1024 * 1024, || {
+                kani_yaml::parse_and_validate(&text_owned, std::path::Path::new("extension.yaml"))
+            })
+        })
+        .await
+        .map_err(|e| ServiceError::Internal(format!("YAML validation task panicked: {e}")))?
+        .map_err(|errs| {
             let msg = errs
                 .iter()
                 .map(|e| e.to_string())
@@ -593,6 +600,9 @@ impl AppService {
             .map_err(ServiceError::Validation)?;
 
         kani_core::file_storage::save_yaml(storage_path, &validated.id, text)
+            .await
+            .map_err(ServiceError::Core)?;
+        kani_core::file_storage::delete_wasm_file(storage_path, &validated.id)
             .await
             .map_err(ServiceError::Core)?;
 
@@ -653,6 +663,9 @@ impl AppService {
             .map_err(ServiceError::Validation)?;
 
         kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
+            .await
+            .map_err(ServiceError::Core)?;
+        kani_core::file_storage::delete_yaml_file(storage_path, &metadata.id)
             .await
             .map_err(ServiceError::Core)?;
 

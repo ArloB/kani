@@ -468,7 +468,7 @@ async fn a_wasm_source_honours_its_declared_rate_limit() {
 
     let host = origin
         .base()
-        .parse::<rquest::Url>()
+        .parse::<url::Url>()
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
         .expect("origin has a host");

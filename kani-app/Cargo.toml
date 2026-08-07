@@ -22,9 +22,12 @@ thiserror.workspace = true
 urlencoding.workspace = true
 tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
 tokio-util.workspace = true
+stacker = "0.1.23"
 sqlx.workspace = true
 log = "0.4"
-rquest        = { version = "5.1", features = ["json"] }
+rquest        = { package = "wreq", version = "6.0.0-rc.29", features = ["form", "json", "query"] }
+http-body-util = "0.1"
+url            = "2.5.8"
 tracing.workspace = true
 futures.workspace = true
 indexmap.workspace = true
@@ -79,4 +82,3 @@ mail-parser = "0.11.5"
 [build-dependencies]
 prost-build = "0.14.3"
 protox = "0.9.1"
-

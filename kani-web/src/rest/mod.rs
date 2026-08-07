@@ -518,7 +518,7 @@ pub(crate) async fn image_proxy(
             .into_response());
     }
 
-    let host = rquest::Url::parse(&url)
+    let host = url::Url::parse(&url)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| url.clone());

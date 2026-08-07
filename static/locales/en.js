@@ -144,7 +144,7 @@ export default {
   'settings.security.status.load_failed': 'Could not load the security status.',
 
   'repo.tab': 'Repositories',
-  'repo.add.placeholder': 'https://example.com/index.json',
+  'repo.add.placeholder': 'https://example.com',
   'repo.add.button': 'Add',
   'repo.add.adding': 'Adding…',
   'repo.empty.title': 'No repositories yet',

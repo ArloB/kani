@@ -15,6 +15,12 @@ struct Transition {
 
 const TRANSITIONS: &[Transition] = &[
     Transition {
+        version: 20260519000000,
+        legacy: "253b7eebcc89cfe2ec4fc97395d0655722297656656bfcb319dcc3b67819c828d6634b049ef3ab473abe0b4156e0d98e",
+        current: "32cf4ace237f881df414f6152ebb45684d4f6e0d0bc7b3a3b771f1ca290cc3ce722ba61444971c97237f0da6c0c17c20",
+        semantic: "5a5ccd0603c81adedfe79804b58ddceca06b6b944a522621ff534ce192baab85638b78fa7634d6bba47106a11bf3f979",
+    },
+    Transition {
         version: 20260604000005,
         legacy: "77f6ba83e42af3f24daffc90daa46251d6674158da7c800542b1f31cba5b76bf08d95637153c543803bd7ccc6d199643",
         current: "89b675ea8e95448a152389eb8b57f4a69ae3fd11a6b07de09a7e6e89aac8a9407588e837d5c17c633a6205914d12bbcd",
