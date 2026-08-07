@@ -95,8 +95,9 @@ async fn a_forged_header_cannot_lock_out_a_bystander() {
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap();
-    req.extensions_mut()
-        .insert(ConnectInfo("203.0.113.42:33333".parse::<SocketAddr>().unwrap()));
+    req.extensions_mut().insert(ConnectInfo(
+        "203.0.113.42:33333".parse::<SocketAddr>().unwrap(),
+    ));
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(
@@ -137,8 +138,9 @@ async fn behind_a_trusted_proxy_each_forwarded_client_gets_its_own_budget() {
         .header("x-forwarded-for", "203.0.113.2")
         .body(Body::from(body.to_string()))
         .unwrap();
-    req.extensions_mut()
-        .insert(ConnectInfo("198.51.100.7:44444".parse::<SocketAddr>().unwrap()));
+    req.extensions_mut().insert(ConnectInfo(
+        "198.51.100.7:44444".parse::<SocketAddr>().unwrap(),
+    ));
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(

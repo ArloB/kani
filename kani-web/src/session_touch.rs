@@ -50,12 +50,8 @@ pub async fn session_touch_middleware(
                 .extensions()
                 .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
                 .map(|info| info.0.ip());
-            let ip = crate::client_ip::client_ip(
-                request.headers(),
-                peer,
-                &state.trusted_proxies,
-            )
-            .map(|a| a.to_string());
+            let ip = crate::client_ip::client_ip(request.headers(), peer, &state.trusted_proxies)
+                .map(|a| a.to_string());
 
             if let Err(e) = state
                 .service

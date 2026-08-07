@@ -73,7 +73,15 @@ fn publish_yaml_creates_artifact_and_signature() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None, &Default::default()).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let artifact_path = repo_dir.join("extensions/test-source/1.0.0/extension.yaml");
     assert!(artifact_path.exists(), "artifact file should exist");
@@ -101,7 +109,15 @@ fn publish_upserts_index_entry() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None, &Default::default()).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let (index, _) = load_index(&repo_dir).unwrap();
     assert_eq!(index.extensions.len(), 1);
@@ -286,7 +302,15 @@ fn repo_list_shows_extensions() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None, &Default::default()).unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &repo_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     kani_cli::commands::repo::run_list(&repo_dir).unwrap();
 
@@ -318,8 +342,15 @@ fn repo_add_copies_artifact_and_updates_index() {
     let staging_dir = tmp.path().join("staging");
     std::fs::create_dir_all(&staging_dir).unwrap();
 
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &staging_dir, None, None, &Default::default())
-        .unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &staging_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let staged_artifact = staging_dir.join("extensions/test-source/1.0.0/extension.yaml");
 
@@ -351,8 +382,15 @@ fn repo_add_rejects_tampered_artifact() {
 
     let staging_dir = tmp.path().join("staging");
     std::fs::create_dir_all(&staging_dir).unwrap();
-    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &staging_dir, None, None, &Default::default())
-        .unwrap();
+    kani_cli::commands::publish::run(
+        &yaml_path,
+        &author_key_path,
+        &staging_dir,
+        None,
+        None,
+        &Default::default(),
+    )
+    .unwrap();
 
     let artifact_path = staging_dir.join("extensions/test-source/1.0.0/extension.yaml");
     let mut bytes = std::fs::read(&artifact_path).unwrap();

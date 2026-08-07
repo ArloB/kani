@@ -339,6 +339,9 @@ mod tests {
     fn malformed_entries_are_reported_rather_than_silently_dropped() {
         let (t, rejected) = TrustedProxies::parse("10.0.0.0/8, nonsense, 1.2.3.4/99, ,2001:db8::1");
         assert_eq!(t.len(), 2, "only the two valid entries are kept");
-        assert_eq!(rejected, vec!["nonsense".to_string(), "1.2.3.4/99".to_string()]);
+        assert_eq!(
+            rejected,
+            vec!["nonsense".to_string(), "1.2.3.4/99".to_string()]
+        );
     }
 }
