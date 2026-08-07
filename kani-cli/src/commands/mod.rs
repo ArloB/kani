@@ -145,6 +145,24 @@ pub enum Command {
         /// Minimum Kani version required to install this extension
         #[arg(long, value_name = "SEMVER")]
         min_kani_version: Option<String>,
+        /// Extension ID for a .wasm artifact; must match the metadata the extension reports
+        #[arg(long, value_name = "ID")]
+        ext_id: Option<String>,
+        /// Display name for a .wasm artifact
+        #[arg(long, value_name = "NAME")]
+        ext_name: Option<String>,
+        /// Version for a .wasm artifact; compared by semver for update detection
+        #[arg(long, value_name = "SEMVER")]
+        ext_version: Option<String>,
+        /// Description shown in the repository listing for a .wasm artifact
+        #[arg(long, value_name = "TEXT")]
+        ext_description: Option<String>,
+        /// Language code for a .wasm artifact (e.g. en, multi)
+        #[arg(long, value_name = "LANG")]
+        ext_language: Option<String>,
+        /// Mark a .wasm artifact as NSFW
+        #[arg(long)]
+        ext_nsfw: bool,
     },
     /// Manage a local extension repository [unstable]
     #[command(subcommand)]
@@ -346,12 +364,26 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             repo_dir,
             repo_sign_key,
             min_kani_version,
+            ext_id,
+            ext_name,
+            ext_version,
+            ext_description,
+            ext_language,
+            ext_nsfw,
         } => publish::run(
             &file,
             &sign_key,
             &repo_dir,
             repo_sign_key.as_deref(),
             min_kani_version.as_deref(),
+            &publish::WasmMetadata {
+                id: ext_id,
+                name: ext_name,
+                version: ext_version,
+                description: ext_description,
+                language: ext_language,
+                nsfw: ext_nsfw,
+            },
         ),
         Command::Repo(repo_cmd) => match repo_cmd {
             RepoCommand::Init {
