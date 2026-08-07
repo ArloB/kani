@@ -1,3 +1,79 @@
+const DEV_VENDOR_ASSETS: &[&str] = &[
+    "js/vendor/preact.module.js",
+    "js/vendor/preact-hooks.module.js",
+    "js/vendor/htm.module.js",
+    "js/vendor/signals-core.module.js",
+    "js/vendor/signals.module.js",
+    "js/vendor/compat.module.js",
+    "js/vendor/debug.module.js",
+    "js/vendor/devtools.module.js",
+];
+
+fn validate_dev_assets(assets: &kani_web::assets::Assets) -> Result<(), String> {
+    let missing = DEV_VENDOR_ASSETS
+        .iter()
+        .filter(|path| assets.get(path).is_none())
+        .copied()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "missing frontend vendor assets:\n  {}\n\nRun: cargo run -p kani-cli -- setup --vendors",
+        missing.join("\n  ")
+    ))
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn inline_script_hashes(html: &[u8]) -> Result<Vec<String>, &'static str> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use sha2::{Digest as _, Sha256};
+
+    let mut hashes = Vec::new();
+    let mut remaining = html;
+    while let Some(script_start) = find_subslice(remaining, b"<script") {
+        remaining = &remaining[script_start..];
+        let tag_end = find_subslice(remaining, b">").ok_or("unterminated script tag")?;
+        let body_start = tag_end + 1;
+        let body_end = find_subslice(&remaining[body_start..], b"</script>")
+            .ok_or("unterminated inline script")?;
+        let tag = &remaining[..tag_end];
+        if !tag.windows(b" src=".len()).any(|window| window == b" src=") {
+            let body = &remaining[body_start..body_start + body_end];
+            hashes.push(format!(
+                "'sha256-{}'",
+                STANDARD.encode(Sha256::digest(body))
+            ));
+        }
+        remaining = &remaining[body_start + body_end + b"</script>".len()..];
+    }
+
+    if hashes.is_empty() {
+        return Err("no inline scripts found");
+    }
+    Ok(hashes)
+}
+
+fn script_src(assets: &kani_web::assets::Assets, index_name: &str) -> Result<String, String> {
+    if !cfg!(debug_assertions) {
+        return Ok("script-src 'self' 'wasm-unsafe-eval'".to_owned());
+    }
+
+    let index = assets
+        .get(index_name)
+        .ok_or_else(|| format!("frontend shell '{index_name}' is missing"))?;
+    let hashes = inline_script_hashes(index.bytes.as_ref()).map_err(str::to_owned)?;
+    Ok(format!(
+        "script-src 'self' 'wasm-unsafe-eval' {}",
+        hashes.join(" ")
+    ))
+}
 /// Sets `Cache-Control` on all `/js/*` and `/css/*` responses.
 ///
 /// Release builds get long-lived immutable caching — filenames are content-hashed.
@@ -567,6 +643,12 @@ async fn main() {
         "index.prod.html"
     };
 
+    if cfg!(debug_assertions) {
+        validate_dev_assets(&assets).unwrap_or_else(|error| panic!("{error}"));
+    }
+    let script_src = script_src(&assets, index_name)
+        .unwrap_or_else(|error| panic!("invalid frontend shell: {error}"));
+
     let app = Router::new()
         .route(
             "/manifest.webmanifest",
@@ -645,7 +727,10 @@ async fn main() {
         .merge(asset_routes("css", &assets))
         .merge(asset_routes("locales", &assets))
         .merge(asset_routes("fonts", &assets))
-        .route("/changelog.md", axum::routing::get(named_asset(&assets, "changelog.md")))
+        .route(
+            "/changelog.md",
+            axum::routing::get(named_asset(&assets, "changelog.md")),
+        )
         // Anything unmatched is a client-side route, so the SPA shell answers.
         .fallback(named_asset(&assets, index_name))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
@@ -673,26 +758,17 @@ async fn main() {
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
-            {
-                let script_src = if cfg!(debug_assertions) {
-                    // Two hashes: the importmap script, then the FOUC theme-application
-                    // script in index.html. Recompute (sha256, base64) if either changes.
-                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-ZTuQJVyh0iAW+hoad/K7BcW9ZJN1l+yFJ/1Da8LGDJc=' 'sha256-OY6s4Q2QijBQ9AZF47LzWDgWw4/01jCMVcnpiCFAyRg='"
-                } else {
-                    "script-src 'self' 'wasm-unsafe-eval'"
-                };
-                HeaderValue::try_from(format!(
-                    "default-src 'self'; \
-                     img-src 'self' data: blob:; \
-                     style-src 'self' 'unsafe-inline'; \
-                     {script_src}; \
-                     object-src 'none'; \
-                     base-uri 'self'; \
-                     form-action 'self'; \
-                     frame-ancestors 'none'"
-                ))
-                .expect("CSP header value is statically valid")
-            },
+            HeaderValue::try_from(format!(
+                "default-src 'self'; \
+                 img-src 'self' data: blob:; \
+                 style-src 'self' 'unsafe-inline'; \
+                 {script_src}; \
+                 object-src 'none'; \
+                 base-uri 'self'; \
+                 form-action 'self'; \
+                 frame-ancestors 'none'"
+            ))
+            .expect("CSP header value is statically valid"),
         ))
         // HSTS: only when KANI_SECURE_COOKIES=true, meaning TLS is terminated upstream.
         .layer(tower::util::option_layer(if secure_cookies {
@@ -814,6 +890,51 @@ mod rate_limit_config_tests {
     use super::replenish_period;
     use std::time::Duration;
 
+    #[test]
+    fn missing_development_vendors_report_the_recovery_command() {
+        let dir = tempfile::tempdir().expect("temporary asset directory should exist");
+        let error =
+            super::validate_dev_assets(&kani_web::assets::Assets::Disk(dir.path().to_path_buf()))
+                .expect_err("an empty asset directory is invalid for debug startup");
+
+        assert!(error.contains("js/vendor/preact.module.js"));
+        assert!(error.contains("cargo run -p kani-cli -- setup --vendors"));
+    }
+    #[test]
+    fn inline_script_hashes_ignore_external_scripts() {
+        let hashes = super::inline_script_hashes(
+            br#"<script>window.boot()</script><script type="module" src="/js/app.js"></script>"#,
+        )
+        .expect("well-formed scripts should hash");
+
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(
+            hashes[0],
+            "'sha256-7V6Igl78kAwCDPrKA2yl1sq4zWHW8UjPYq8fNJg+cQE='"
+        );
+    }
+
+    #[test]
+    fn inline_script_hashes_preserve_line_endings() {
+        let lf = super::inline_script_hashes(b"<script>one\ntwo</script>")
+            .expect("LF script should hash");
+        let crlf = super::inline_script_hashes(b"<script>one\r\ntwo</script>")
+            .expect("CRLF script should hash");
+
+        assert_ne!(lf, crlf);
+    }
+
+    #[test]
+    fn inline_script_hashes_reject_malformed_shells() {
+        assert_eq!(
+            super::inline_script_hashes(b"<main></main>"),
+            Err("no inline scripts found")
+        );
+        assert_eq!(
+            super::inline_script_hashes(b"<script>window.boot()"),
+            Err("unterminated inline script")
+        );
+    }
     #[test]
     fn a_rate_becomes_its_reciprocal() {
         assert_eq!(replenish_period(1), Duration::from_secs(1));
