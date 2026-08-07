@@ -58,10 +58,10 @@ pub fn router() -> Router<AppState> {
 pub(crate) async fn auth_login(
     mut auth: AuthSession,
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    client_ip: crate::client_ip::ClientIp,
     Json(form): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    let ip = extract_client_ip(&headers);
+    let ip = client_ip.to_key();
     let username = form.username.clone();
 
     // The pre-flight check must not record an attempt; successful logins do not

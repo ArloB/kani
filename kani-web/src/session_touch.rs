@@ -46,12 +46,16 @@ pub async fn session_touch_middleware(
                 .get("user-agent")
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_owned());
-            let ip = request
-                .headers()
-                .get("x-forwarded-for")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.split(',').next())
-                .map(|s| s.trim().to_owned());
+            let peer = request
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|info| info.0.ip());
+            let ip = crate::client_ip::client_ip(
+                request.headers(),
+                peer,
+                &state.trusted_proxies,
+            )
+            .map(|a| a.to_string());
 
             if let Err(e) = state
                 .service

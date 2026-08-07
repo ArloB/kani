@@ -261,16 +261,6 @@ pub fn image_proxy_route(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Extract the client IP from `X-Forwarded-For` (first value) or fall back to a sentinel.
-fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct PasswordStrengthRequest {
     pub(crate) password: String,

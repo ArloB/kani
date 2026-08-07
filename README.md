@@ -118,6 +118,7 @@ Set these in `docker-compose.yml` or pass as `-e` flags:
 |----------|---------|-------------|
 | `KANI_BIND` | `0.0.0.0:8242` | Listen address |
 | `KANI_SECURE_COOKIES` | `false` | Set `true` when behind a TLS-terminating proxy |
+| `KANI_TRUSTED_PROXIES` | *(none)* | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is believed. Required when behind a reverse proxy, or every client shares one rate-limit bucket |
 | `KANI_CORS_ORIGIN` | *(mirrors request)* | Restrict CORS to a specific origin in production |
 | `KANI_SECRET_KEY` | *(none)* | 32-byte hex key for credential encryption at rest (`openssl rand -hex 32`) |
 | `KANI_SECRET_KEY_FILE` | *(none)* | Load the encryption key from a file (for Docker secrets) |

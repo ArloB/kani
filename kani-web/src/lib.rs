@@ -11,6 +11,7 @@ pub mod app;
 pub mod assets;
 pub mod auth;
 pub mod cache;
+pub mod client_ip;
 pub mod csrf;
 pub mod error;
 pub mod etag;
