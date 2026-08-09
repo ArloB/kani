@@ -445,7 +445,7 @@ impl TryFrom<ParseExpr> for Expr {
 
 /// Conversion from `SpannedParseExpr` — the type produced at the parse boundary.
 ///
-/// This is the entry point for callers of `dsl::parser()`. The outer span is
+/// This is the entry point for callers of `dsl::parse()`. The outer span is
 /// used for accurate source positions in top-level errors (e.g. a bare map
 /// literal outside `.lookup()`). All other variants delegate to the inner
 /// `TryFrom<ParseExpr>` implementation which uses embedded spans where available.

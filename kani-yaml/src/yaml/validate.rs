@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use chumsky::Parser;
 use kani_shared::ast::Expr;
 
 use super::model::{
@@ -18,7 +17,7 @@ use super::schema::{
     MetadataBlock, OnFailure, OptionSetDef, PopularEndpoint, PreferenceEntry, SectionEntry,
     ThenStep, TotalPages, YamlExtension,
 };
-use crate::dsl::parser as dsl_parser;
+use crate::dsl::parse as parse_dsl_expression;
 use crate::error::YamlError;
 use kani_shared::ast::OnFailurePolicy;
 
@@ -1245,54 +1244,16 @@ fn validate_for_each_step(
     }
 }
 
-/// Replaces `\n + optional_hws + '.'` with `' .'` so multiline method chains
-/// are joinable by the horizontal-only whitespace parser before `.`.
-/// Preserves bare newlines (used as `let` terminators) when not followed by `.`.
-fn normalize_multiline_chain(dsl: &str) -> String {
-    let mut result = String::with_capacity(dsl.len());
-    let bytes = dsl.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\n' {
-            let mut j = i + 1;
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b'.' {
-                result.push(' ');
-                i = j;
-            } else {
-                result.push('\n');
-                i += 1;
-            }
-        } else {
-            result.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    result
-}
-
 fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<YamlError>> {
-    let normalized = normalize_multiline_chain(dsl.trim_end());
-    let result = dsl_parser().parse(normalized.as_str());
-
-    if result.has_errors() {
-        return Err(vec![YamlError::Validation(format!(
-            "DSL parse failed in {field_path}"
-        ))]);
-    }
-
-    let parse_ast = result.into_result().map_err(|_| {
-        vec![YamlError::Validation(format!(
-            "DSL parse failed in {field_path}"
-        ))]
+    let parse_ast = parse_dsl_expression(dsl.trim_end()).map_err(|errors| {
+        vec![YamlError::DslParse {
+            field_path: field_path.to_string(),
+            expression: dsl.to_string(),
+            errors,
+        }]
     })?;
-
-    let expr: Result<Expr, Vec<YamlError>> = parse_ast.try_into();
-    expr
+    parse_ast.try_into()
 }
-
 /// Detects `"$varname$"` — a DSL string literal wrapping a dollar-fenced identifier.
 /// These are emitted as direct function-arg passthroughs rather than blueprint fields.
 fn extract_fn_arg_literal(dsl: &str) -> Option<String> {

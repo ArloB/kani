@@ -1,306 +1,708 @@
-//! Parser for the declarative extraction expression language.
+//! Tokenized Pratt parser for the declarative extraction expression language.
 
 mod parseexpr;
 
-use crate::dsl::parseexpr::ParseExpr;
-use chumsky::prelude::*;
+use chumsky::prelude::SimpleSpan;
 use kani_shared::ast::Op;
+use std::ops::Range;
 
+use self::parseexpr::ParseExpr;
 pub use self::parseexpr::SpannedParseExpr;
 
-type ParserError<'a> = extra::Err<Rich<'a, char>>;
+pub const MAX_INPUT_BYTES: usize = 64 * 1024;
+pub const MAX_TOKENS: usize = 16_384;
+pub const MAX_NESTING: usize = 50;
+pub const MAX_AST_NODES: usize = 10_000;
 
-/// Builds a parser that preserves source spans for conversion and validation diagnostics.
-pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a>> {
-    let hws = || {
-        any::<&str, ParserError>()
-            .filter(|c: &char| *c == ' ' || *c == '\t')
-            .repeated()
-            .ignored()
-    };
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DslParseErrorKind {
+    UnexpectedToken,
+    UnexpectedEnd,
+    UnterminatedString,
+    UnterminatedComment,
+    InvalidCharacter,
+    LimitExceeded,
+}
 
-    let ws = || {
-        let block_comment = just("/*")
-            .ignore_then(
-                none_of(['*'])
-                    .ignored()
-                    .or(just('*').then_ignore(none_of(['/'])).ignored())
-                    .repeated(),
-            )
-            .then_ignore(just("*/"))
-            .ignored();
-        let any_ws = any::<&str, ParserError>()
-            .filter(|c: &char| c.is_whitespace())
-            .repeated()
-            .at_least(1)
-            .ignored();
-        choice((any_ws, block_comment)).repeated().ignored()
-    };
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DslParseError {
+    pub kind: DslParseErrorKind,
+    pub message: String,
+    pub span: Range<usize>,
+    pub help: Option<String>,
+}
 
-    let ident = text::ident().map(|s: &str| s.to_string()).padded_by(ws());
+impl std::fmt::Display for DslParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
 
-    let variable = just('$')
-        .ignore_then(text::ident())
-        .map(|s: &str| format!("${s}"))
-        .padded_by(ws());
+#[derive(Debug, Clone, PartialEq)]
+enum TokenKind {
+    Ident(String),
+    Var(String),
+    String(String),
+    Number(f64),
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    LBrace,
+    RBrace,
+    Comma,
+    Dot,
+    Colon,
+    Semicolon,
+    Eq,
+    EqEq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    AndAnd,
+    OrOr,
+    Eof,
+}
 
-    let escape = just('\\').ignore_then(any::<&str, ParserError>().map(|c: char| match c {
-        'n' => "\n".to_string(),
-        't' => "\t".to_string(),
-        'r' => "\r".to_string(),
-        '"' => "\"".to_string(),
-        '\\' => "\\".to_string(),
-        other => format!("\\{other}"),
-    }));
+#[derive(Debug, Clone)]
+struct Token {
+    kind: TokenKind,
+    span: Range<usize>,
+}
 
-    let string_literal = just('"')
-        .ignore_then(
-            choice((escape, none_of("\"\\").map(|c: char| c.to_string())))
-                .repeated()
-                .collect::<Vec<String>>()
-                .map(|parts| parts.concat()),
-        )
-        .then_ignore(just('"'))
-        .padded_by(ws());
+pub fn parse(input: &str) -> Result<SpannedParseExpr, Vec<DslParseError>> {
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(vec![limit_error(
+            input.len(),
+            MAX_INPUT_BYTES,
+            "input bytes",
+        )]);
+    }
+    let tokens = Lexer::new(input).tokenize()?;
+    Parser::new(tokens).parse()
+}
 
-    let number = just('-')
-        .or_not()
-        .then(text::digits(10))
-        .then(just('.').ignore_then(text::digits(10)).or_not())
-        .to_slice()
-        .map(|s: &str| {
-            ParseExpr::Number(
-                s.parse::<f64>()
-                    .expect("grammar restricts this slice to valid float syntax"),
-            )
-        })
-        .padded_by(ws());
+fn limit_error(actual: usize, limit: usize, what: &str) -> DslParseError {
+    DslParseError {
+        kind: DslParseErrorKind::LimitExceeded,
+        span: 0..0,
+        message: format!("DSL {what} limit of {limit} exceeded ({actual})"),
+        help: Some("Split this expression into smaller fields or bindings.".into()),
+    }
+}
 
-    let val_bool = choice((
-        text::keyword("true").to(ParseExpr::Bool(true)),
-        text::keyword("false").to(ParseExpr::Bool(false)),
-    ))
-    .padded_by(ws());
-
-    let val_null = text::keyword("null").to(ParseExpr::Null).padded_by(ws());
-
-    let val_index = text::keyword("index")
-        .ignore_then(just('('))
-        .ignore_then(just(')'))
-        .to(ParseExpr::Index)
-        .padded_by(ws());
-
-    let val_self = text::keyword("self").to(ParseExpr::SelfRef).padded_by(ws());
-
-    let map_entry = string_literal
-        .then_ignore(just(':').padded_by(ws()))
-        .then(string_literal);
-
-    let map_literal = map_entry
-        .separated_by(just(',').padded_by(ws()))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just('{'), just('}'))
-        .padded_by(ws())
-        .map(ParseExpr::MapLiteral);
-
-    let built_in_str = |name| {
-        text::keyword(name)
-            .ignore_then(string_literal.delimited_by(just('('), just(')')))
-            .padded_by(ws())
-    };
-
-    let dom = built_in_str("dom").map(ParseExpr::Dom);
-    let json = built_in_str("json").map(ParseExpr::Json);
-    let pref = built_in_str("pref").map(ParseExpr::Pref);
-
-    let terminator = choice((just(';').ignored(), just('\n').ignored())).padded_by(hws());
-
-    let open_brack = || just('[').padded_by(ws());
-    let close_brack = || just(']').padded_by(ws());
-    let open_paren = || just('(').padded_by(ws());
-    let close_paren = || just(')').padded_by(ws());
-    let comma = || just(',').padded_by(ws());
-
-    let expr = recursive(|expr| {
-        let comma_list = expr
-            .clone()
-            .separated_by(comma())
-            .allow_trailing()
-            .collect::<Vec<_>>();
-
-        let array = comma_list
-            .clone()
-            .delimited_by(open_brack(), close_brack())
-            .map(ParseExpr::List)
-            .padded_by(ws());
-
-        let merge = text::keyword("merge")
-            .ignore_then(
-                comma_list
-                    .clone()
-                    .delimited_by(open_brack(), close_brack())
-                    .delimited_by(open_paren(), close_paren()),
-            )
-            .map(ParseExpr::Merge)
-            .padded_by(ws());
-
-        let format = text::keyword("format")
-            .ignore_then(
-                string_literal
-                    .then(
-                        comma()
-                            .ignore_then(comma_list.clone())
-                            .or_not()
-                            .map(|opt| opt.unwrap_or_default()),
-                    )
-                    .delimited_by(open_paren(), close_paren()),
-            )
-            .map(|(template, args)| ParseExpr::Format { template, args })
-            .padded_by(ws());
-
-        let let_expr = text::keyword("let")
-            .ignore_then(variable)
-            .then_ignore(just('=').padded_by(ws()))
-            .then(expr.clone())
-            .then_ignore(terminator)
-            .then(expr.clone())
-            .map(|((name, value), body)| ParseExpr::Let {
-                name,
-                value: Box::new(value),
-                body: Box::new(body),
-            })
-            .padded_by(ws());
-
-        let if_then_else = text::keyword("if")
-            .ignore_then(expr.clone())
-            .then_ignore(text::keyword("then").padded_by(ws()))
-            .then(expr.clone())
-            .then_ignore(text::keyword("else").padded_by(ws()))
-            .then(expr.clone())
-            .map(|((cond, then_b), else_b)| ParseExpr::If {
-                condition: Box::new(cond),
-                then: Box::new(then_b),
-                else_: Box::new(else_b),
-            })
-            .padded_by(ws());
-
-        let arg_choice = choice((map_literal, expr.clone()));
-
-        let arg_list = arg_choice
-            .separated_by(comma())
-            .allow_trailing()
-            .collect::<Vec<_>>();
-
-        let atom = choice((
-            let_expr,
-            val_self,
-            val_null,
-            val_bool,
-            val_index,
-            dom,
-            json,
-            pref,
-            number,
-            string_literal.map(ParseExpr::Literal),
-            variable.map(ParseExpr::Var),
-            merge,
-            format,
-            if_then_else,
-            array,
-            expr.clone().delimited_by(open_paren(), close_paren()),
-        ))
-        .boxed();
-
-        let fn_ident = text::ident().map(|s: &str| s.to_string()).padded_by(ws());
-
-        let user_fn_call = text::keyword("user")
-            .padded_by(ws())
-            .ignore_then(just('.'))
-            .ignore_then(fn_ident)
-            .then(arg_list.clone().delimited_by(open_paren(), close_paren()))
-            .map_with(|(fn_name, args), extra| (format!("__user::{fn_name}"), args, extra.span()));
-
-        let method_call = ident.then(arg_list.delimited_by(open_paren(), close_paren()));
-
-        let chain = atom
-            .foldl(
-                ws().ignore_then(just('.'))
-                    .ignore_then(choice((
-                        user_fn_call,
-                        method_call.map_with(|(name, args), extra| (name, args, extra.span())),
-                    )))
-                    .repeated(),
-                |target, (name, args, span)| ParseExpr::MethodCall {
-                    target: Box::new(target),
-                    name,
-                    args,
-                    span,
-                },
-            )
-            .boxed();
-
-        let mul_op = choice((just('*').to(Op::Mul), just('/').to(Op::Div)));
-        let mul_expr = chain
-            .clone()
-            .foldl(mul_op.then(chain).repeated(), |lhs, (op, rhs)| {
-                ParseExpr::BinaryOperation {
-                    op,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
+struct Lexer<'a> {
+    input: &'a str,
+    pos: usize,
+    tokens: Vec<Token>,
+}
+impl<'a> Lexer<'a> {
+    fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            pos: 0,
+            tokens: Vec::new(),
+        }
+    }
+    fn tokenize(mut self) -> Result<Vec<Token>, Vec<DslParseError>> {
+        while self.pos < self.input.len() {
+            self.skip_space_and_comments()?;
+            if self.pos >= self.input.len() {
+                break;
+            }
+            let start = self.pos;
+            let ch = self.next_char().expect("in bounds");
+            let kind = match ch {
+                '(' => TokenKind::LParen,
+                ')' => TokenKind::RParen,
+                '[' => TokenKind::LBracket,
+                ']' => TokenKind::RBracket,
+                '{' => TokenKind::LBrace,
+                '}' => TokenKind::RBrace,
+                ',' => TokenKind::Comma,
+                '.' => TokenKind::Dot,
+                ':' => TokenKind::Colon,
+                ';' => TokenKind::Semicolon,
+                '+' => TokenKind::Plus,
+                '-' => TokenKind::Minus,
+                '*' => TokenKind::Star,
+                '/' => TokenKind::Slash,
+                '=' => {
+                    if self.consume('=') {
+                        TokenKind::EqEq
+                    } else {
+                        TokenKind::Eq
+                    }
                 }
+                '!' => {
+                    if self.consume('=') {
+                        TokenKind::Ne
+                    } else {
+                        return Err(vec![self.error(
+                            start..self.pos,
+                            "expected '=' after '!'",
+                            None,
+                        )]);
+                    }
+                }
+                '<' => {
+                    if self.consume('=') {
+                        TokenKind::Le
+                    } else {
+                        TokenKind::Lt
+                    }
+                }
+                '>' => {
+                    if self.consume('=') {
+                        TokenKind::Ge
+                    } else {
+                        TokenKind::Gt
+                    }
+                }
+                '&' => {
+                    if self.consume('&') {
+                        TokenKind::AndAnd
+                    } else {
+                        return Err(vec![self.error(
+                            start..self.pos,
+                            "expected '&' after '&'",
+                            None,
+                        )]);
+                    }
+                }
+                '|' => {
+                    if self.consume('|') {
+                        TokenKind::OrOr
+                    } else {
+                        return Err(vec![self.error(
+                            start..self.pos,
+                            "expected '|' after '|'",
+                            None,
+                        )]);
+                    }
+                }
+                '$' => TokenKind::Var(self.variable(start)?),
+                '"' => TokenKind::String(self.string(start)?),
+                c if is_ident_start(c) => TokenKind::Ident(self.ident(start)),
+                c if c.is_ascii_digit() => TokenKind::Number(self.number(start)?),
+                _ => {
+                    return Err(vec![self.error_kind(
+                        DslParseErrorKind::InvalidCharacter,
+                        start..self.pos,
+                        format!("invalid character '{ch}'"),
+                        None,
+                    )]);
+                }
+            };
+            self.tokens.push(Token {
+                kind,
+                span: start..self.pos,
             });
-
-        let add_op = choice((just('+').to(Op::Add), just('-').to(Op::Sub)));
-        let add_expr =
-            mul_expr
-                .clone()
-                .foldl(add_op.then(mul_expr).repeated(), |lhs, (op, rhs)| {
-                    ParseExpr::BinaryOperation {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
+            if self.tokens.len() > MAX_TOKENS {
+                return Err(vec![limit_error(self.tokens.len(), MAX_TOKENS, "token")]);
+            }
+        }
+        self.tokens.push(Token {
+            kind: TokenKind::Eof,
+            span: self.pos..self.pos,
+        });
+        Ok(self.tokens)
+    }
+    fn skip_space_and_comments(&mut self) -> Result<(), Vec<DslParseError>> {
+        loop {
+            while self.peek_char().is_some_and(char::is_whitespace) {
+                self.next_char();
+            }
+            if self.remaining().starts_with("/*") {
+                let start = self.pos;
+                self.pos += 2;
+                if let Some(end) = self.remaining().find("*/") {
+                    self.pos += end + 2;
+                } else {
+                    return Err(vec![self.error_kind(
+                        DslParseErrorKind::UnterminatedComment,
+                        start..self.input.len(),
+                        "unterminated block comment",
+                        None,
+                    )]);
+                }
+            } else {
+                return Ok(());
+            }
+        }
+    }
+    fn string(&mut self, start: usize) -> Result<String, Vec<DslParseError>> {
+        let mut out = String::new();
+        loop {
+            let Some(c) = self.next_char() else {
+                return Err(vec![self.error_kind(
+                    DslParseErrorKind::UnterminatedString,
+                    start..self.pos,
+                    "unterminated string literal",
+                    None,
+                )]);
+            };
+            match c {
+                '"' => return Ok(out),
+                '\\' => {
+                    let Some(escaped) = self.next_char() else {
+                        return Err(vec![self.error_kind(
+                            DslParseErrorKind::UnterminatedString,
+                            start..self.pos,
+                            "unterminated string escape",
+                            None,
+                        )]);
+                    };
+                    match escaped {
+                        'n' => out.push('\n'),
+                        't' => out.push('\t'),
+                        'r' => out.push('\r'),
+                        '"' => out.push('"'),
+                        '\\' => out.push('\\'),
+                        other => {
+                            out.push('\\');
+                            out.push(other);
+                        }
                     }
-                });
+                }
+                other => out.push(other),
+            }
+        }
+    }
+    fn ident(&mut self, start: usize) -> String {
+        while self.peek_char().is_some_and(is_ident_continue) {
+            self.next_char();
+        }
+        self.input[start..self.pos].to_string()
+    }
+    fn variable(&mut self, start: usize) -> Result<String, Vec<DslParseError>> {
+        let ident_start = self.pos;
+        if !self.peek_char().is_some_and(is_ident_start) {
+            return Err(vec![self.error(
+                start..self.pos,
+                "expected an identifier after '$'",
+                None,
+            )]);
+        }
+        self.next_char();
+        while self.peek_char().is_some_and(is_ident_continue) {
+            self.next_char();
+        }
+        Ok(format!("${}", &self.input[ident_start..self.pos]))
+    }
+    fn number(&mut self, start: usize) -> Result<f64, Vec<DslParseError>> {
+        while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+            self.next_char();
+        }
+        if self.peek_char() == Some('.') {
+            self.next_char();
+            if !self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                return Err(vec![self.error(
+                    start..self.pos,
+                    "expected digits after decimal point",
+                    None,
+                )]);
+            }
+            while self.peek_char().is_some_and(|c| c.is_ascii_digit()) {
+                self.next_char();
+            }
+        }
+        self.input[start..self.pos]
+            .parse()
+            .map_err(|_| vec![self.error(start..self.pos, "invalid number", None)])
+    }
+    fn consume(&mut self, expected: char) -> bool {
+        if self.peek_char() == Some(expected) {
+            self.next_char();
+            true
+        } else {
+            false
+        }
+    }
+    fn remaining(&self) -> &'a str {
+        &self.input[self.pos..]
+    }
+    fn peek_char(&self) -> Option<char> {
+        self.remaining().chars().next()
+    }
+    fn next_char(&mut self) -> Option<char> {
+        let c = self.peek_char()?;
+        self.pos += c.len_utf8();
+        Some(c)
+    }
+    fn error(
+        &self,
+        span: Range<usize>,
+        message: impl Into<String>,
+        help: Option<String>,
+    ) -> DslParseError {
+        self.error_kind(DslParseErrorKind::UnexpectedToken, span, message, help)
+    }
+    fn error_kind(
+        &self,
+        kind: DslParseErrorKind,
+        span: Range<usize>,
+        message: impl Into<String>,
+        help: Option<String>,
+    ) -> DslParseError {
+        DslParseError {
+            kind,
+            message: message.into(),
+            span,
+            help,
+        }
+    }
+}
+fn is_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
+}
+fn is_ident_continue(c: char) -> bool {
+    is_ident_start(c) || c.is_ascii_digit()
+}
 
-        let cmp_op = choice((
-            just("==").to(Op::Eq),
-            just("!=").to(Op::Ne),
-            just("<=").to(Op::Le),
-            just(">=").to(Op::Ge),
-            just('<').to(Op::Lt),
-            just('>').to(Op::Gt),
-        ));
-        let cmp_expr =
-            add_expr
-                .clone()
-                .foldl(cmp_op.then(add_expr).repeated(), |lhs, (op, rhs)| {
-                    ParseExpr::BinaryOperation {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    }
-                });
-
-        let and_expr = cmp_expr.clone().foldl(
-            just("&&").to(Op::And).then(cmp_expr).repeated(),
-            |lhs, (op, rhs)| ParseExpr::BinaryOperation {
+struct Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+    depth: usize,
+    nodes: usize,
+}
+impl Parser {
+    fn new(tokens: Vec<Token>) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            depth: 0,
+            nodes: 0,
+        }
+    }
+    fn parse(mut self) -> Result<SpannedParseExpr, Vec<DslParseError>> {
+        let start = self.peek().span.start;
+        let expr = self.expr(0)?;
+        if !matches!(self.peek().kind, TokenKind::Eof) {
+            return Err(vec![self.unexpected("end of expression")]);
+        }
+        Ok(SpannedParseExpr(
+            expr,
+            SimpleSpan::from(start..self.peek().span.end),
+        ))
+    }
+    fn expr(&mut self, min_bp: u8) -> Result<ParseExpr, Vec<DslParseError>> {
+        self.enter()?;
+        let result = self.expr_inner(min_bp);
+        self.leave();
+        result
+    }
+    fn expr_inner(&mut self, min_bp: u8) -> Result<ParseExpr, Vec<DslParseError>> {
+        let mut lhs = self.prefix()?;
+        while let Some((op, lbp, rbp)) = self.infix() {
+            if lbp < min_bp {
+                break;
+            }
+            self.advance();
+            let rhs = self.expr(rbp)?;
+            lhs = self.node(ParseExpr::BinaryOperation {
                 op,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
+            })?;
+        }
+        Ok(lhs)
+    }
+    fn prefix(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        let token = self.advance();
+        let mut expr = match token.kind {
+            TokenKind::String(s) => ParseExpr::Literal(s),
+            TokenKind::Number(n) => ParseExpr::Number(n),
+            TokenKind::Minus => match self.advance().kind {
+                TokenKind::Number(n) => ParseExpr::Number(-n),
+                _ => return Err(vec![self.unexpected("a number after '-'")]),
             },
-        );
-
-        and_expr.clone().foldl(
-            just("||").to(Op::Or).then(and_expr).repeated(),
-            |lhs, (op, rhs)| ParseExpr::BinaryOperation {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
+            TokenKind::Var(name) => ParseExpr::Var(name),
+            TokenKind::Ident(name) => match name.as_str() {
+                "self" => ParseExpr::SelfRef,
+                "true" => ParseExpr::Bool(true),
+                "false" => ParseExpr::Bool(false),
+                "null" => ParseExpr::Null,
+                "let" => self.let_expr()?,
+                "if" => self.if_expr()?,
+                "merge" => self.merge_expr()?,
+                "format" => self.format_expr()?,
+                "dom" | "json" | "pref" => self.builtin_string(&name)?,
+                "index" => {
+                    self.expect(TokenKind::LParen, "'(' after index")?;
+                    self.expect(TokenKind::RParen, "')' after index(")?;
+                    ParseExpr::Index
+                }
+                _ => {
+                    return Err(vec![self.error(
+                        token.span,
+                        format!("unexpected identifier '{name}'"),
+                        None,
+                    )]);
+                }
             },
+            TokenKind::LBracket => self.list_expr()?,
+            TokenKind::LBrace => self.map_expr()?,
+            TokenKind::LParen => {
+                let value = self.expr(0)?;
+                self.expect(TokenKind::RParen, "')' to close grouping")?;
+                value
+            }
+            _ => return Err(vec![self.error(token.span, "expected an expression", None)]),
+        };
+        while matches!(self.peek().kind, TokenKind::Dot) {
+            self.advance();
+            expr = self.method(expr)?;
+        }
+        self.node(expr)
+    }
+    fn let_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        let name = match self.advance().kind {
+            TokenKind::Var(v) => v,
+            _ => return Err(vec![self.unexpected("a variable after let")]),
+        };
+        self.expect(TokenKind::Eq, "'=' after let variable")?;
+        let value = self.expr(0)?;
+        self.expect(TokenKind::Semicolon, "';' after let binding")?;
+        let body = self.expr(0)?;
+        self.node(ParseExpr::Let {
+            name,
+            value: Box::new(value),
+            body: Box::new(body),
+        })
+    }
+    fn if_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        let condition = self.expr(0)?;
+        self.keyword("then")?;
+        let then = self.expr(0)?;
+        self.keyword("else")?;
+        let else_ = self.expr(0)?;
+        self.node(ParseExpr::If {
+            condition: Box::new(condition),
+            then: Box::new(then),
+            else_: Box::new(else_),
+        })
+    }
+    fn merge_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        self.expect(TokenKind::LParen, "'(' after merge")?;
+        self.expect(TokenKind::LBracket, "'[' as merge argument")?;
+        let values = self.expr_list(TokenKind::RBracket)?;
+        self.expect(TokenKind::RParen, "')' after merge list")?;
+        self.node(ParseExpr::Merge(values))
+    }
+    fn format_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        self.expect(TokenKind::LParen, "'(' after format")?;
+        let template = match self.advance().kind {
+            TokenKind::String(s) => s,
+            _ => {
+                return Err(vec![
+                    self.unexpected("a string template as first format argument"),
+                ]);
+            }
+        };
+        let mut args = Vec::new();
+        if matches!(self.peek().kind, TokenKind::Comma) {
+            self.advance();
+            args = self.expr_list(TokenKind::RParen)?;
+        } else {
+            self.expect(TokenKind::RParen, "')' after format template")?;
+        }
+        self.node(ParseExpr::Format { template, args })
+    }
+    fn builtin_string(&mut self, name: &str) -> Result<ParseExpr, Vec<DslParseError>> {
+        self.expect(TokenKind::LParen, format!("'(' after {name}"))?;
+        let value = match self.advance().kind {
+            TokenKind::String(s) => s,
+            _ => return Err(vec![self.unexpected("a string argument")]),
+        };
+        self.expect(TokenKind::RParen, "')' after string argument")?;
+        Ok(match name {
+            "dom" => ParseExpr::Dom(value),
+            "json" => ParseExpr::Json(value),
+            _ => ParseExpr::Pref(value),
+        })
+    }
+    fn list_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        let values = self.expr_list(TokenKind::RBracket)?;
+        self.node(ParseExpr::List(values))
+    }
+    fn map_expr(&mut self) -> Result<ParseExpr, Vec<DslParseError>> {
+        let mut entries = Vec::new();
+        if matches!(self.peek().kind, TokenKind::RBrace) {
+            self.advance();
+            return self.node(ParseExpr::MapLiteral(entries));
+        }
+        loop {
+            let key = match self.advance().kind {
+                TokenKind::String(s) => s,
+                _ => return Err(vec![self.unexpected("a string map key")]),
+            };
+            self.expect(TokenKind::Colon, "':' after map key")?;
+            let value = match self.advance().kind {
+                TokenKind::String(s) => s,
+                _ => return Err(vec![self.unexpected("a string map value")]),
+            };
+            entries.push((key, value));
+            if matches!(self.peek().kind, TokenKind::Comma) {
+                self.advance();
+                if matches!(self.peek().kind, TokenKind::RBrace) {
+                    self.advance();
+                    break;
+                }
+            } else {
+                self.expect(TokenKind::RBrace, "'}' after map entry")?;
+                break;
+            }
+        }
+        self.node(ParseExpr::MapLiteral(entries))
+    }
+    fn method(&mut self, target: ParseExpr) -> Result<ParseExpr, Vec<DslParseError>> {
+        let start = self.peek().span.start;
+        let name = match self.advance().kind {
+            TokenKind::Ident(v) => v,
+            _ => return Err(vec![self.unexpected("a method name after '.'")]),
+        };
+        let name = if name == "user" {
+            self.expect(TokenKind::Dot, "'.' after user")?;
+            let function = match self.advance().kind {
+                TokenKind::Ident(v) => v,
+                _ => return Err(vec![self.unexpected("a user function name")]),
+            };
+            format!("__user::{function}")
+        } else {
+            name
+        };
+        self.expect(TokenKind::LParen, "'(' after method name")?;
+        let args = self.expr_list(TokenKind::RParen)?;
+        self.node(ParseExpr::MethodCall {
+            target: Box::new(target),
+            name,
+            args,
+            span: SimpleSpan::from(start..self.peek().span.start),
+        })
+    }
+    fn expr_list(&mut self, close: TokenKind) -> Result<Vec<ParseExpr>, Vec<DslParseError>> {
+        let mut values = Vec::new();
+        if same_kind(&self.peek().kind, &close) {
+            self.advance();
+            return Ok(values);
+        }
+        loop {
+            values.push(self.expr(0)?);
+            if matches!(self.peek().kind, TokenKind::Comma) {
+                self.advance();
+                if same_kind(&self.peek().kind, &close) {
+                    self.advance();
+                    break;
+                }
+            } else {
+                self.expect(close.clone(), "a closing delimiter")?;
+                break;
+            }
+        }
+        Ok(values)
+    }
+    fn infix(&self) -> Option<(Op, u8, u8)> {
+        match self.peek().kind {
+            TokenKind::OrOr => Some((Op::Or, 1, 2)),
+            TokenKind::AndAnd => Some((Op::And, 3, 4)),
+            TokenKind::EqEq => Some((Op::Eq, 5, 6)),
+            TokenKind::Ne => Some((Op::Ne, 5, 6)),
+            TokenKind::Lt => Some((Op::Lt, 7, 8)),
+            TokenKind::Gt => Some((Op::Gt, 7, 8)),
+            TokenKind::Le => Some((Op::Le, 7, 8)),
+            TokenKind::Ge => Some((Op::Ge, 7, 8)),
+            TokenKind::Plus => Some((Op::Add, 9, 10)),
+            TokenKind::Minus => Some((Op::Sub, 9, 10)),
+            TokenKind::Star => Some((Op::Mul, 11, 12)),
+            TokenKind::Slash => Some((Op::Div, 11, 12)),
+            _ => None,
+        }
+    }
+    fn keyword(&mut self, expected: &str) -> Result<(), Vec<DslParseError>> {
+        match &self.peek().kind {
+            TokenKind::Ident(s) if s == expected => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err(vec![self.unexpected(format!("'{expected}'"))]),
+        }
+    }
+    fn expect(
+        &mut self,
+        expected: TokenKind,
+        message: impl Into<String>,
+    ) -> Result<(), Vec<DslParseError>> {
+        if same_kind(&self.peek().kind, &expected) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(vec![self.error(self.peek().span.clone(), message, None)])
+        }
+    }
+    fn enter(&mut self) -> Result<(), Vec<DslParseError>> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING {
+            return Err(vec![limit_error(self.depth, MAX_NESTING, "nesting")]);
+        }
+        Ok(())
+    }
+    fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+    fn node(&mut self, value: ParseExpr) -> Result<ParseExpr, Vec<DslParseError>> {
+        self.nodes += 1;
+        if self.nodes > MAX_AST_NODES {
+            Err(vec![limit_error(self.nodes, MAX_AST_NODES, "AST node")])
+        } else {
+            Ok(value)
+        }
+    }
+    fn peek(&self) -> &Token {
+        &self.tokens[self.pos]
+    }
+    fn advance(&mut self) -> Token {
+        let token = self.tokens[self.pos].clone();
+        if !matches!(token.kind, TokenKind::Eof) {
+            self.pos += 1;
+        }
+        token
+    }
+    fn unexpected(&self, expected: impl Into<String>) -> DslParseError {
+        let found = match &self.peek().kind {
+            TokenKind::Eof => "end of input".to_string(),
+            other => format!("{other:?}"),
+        };
+        self.error(
+            self.peek().span.clone(),
+            format!("expected {}, found {found}", expected.into()),
+            None,
         )
-    });
-
-    expr.map_with(|e, extra| SpannedParseExpr(e, extra.span()))
-        .then_ignore(end())
+    }
+    fn error(
+        &self,
+        span: Range<usize>,
+        message: impl Into<String>,
+        help: Option<String>,
+    ) -> DslParseError {
+        DslParseError {
+            kind: if matches!(self.peek().kind, TokenKind::Eof) {
+                DslParseErrorKind::UnexpectedEnd
+            } else {
+                DslParseErrorKind::UnexpectedToken
+            },
+            message: message.into(),
+            span,
+            help,
+        }
+    }
+}
+fn same_kind(a: &TokenKind, b: &TokenKind) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
 }

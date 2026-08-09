@@ -1,4 +1,4 @@
-use crate::error::CliError;
+use crate::error::{CliError, report_dsl_errors};
 use crate::yaml::{schema::YamlExtension, validate::validate};
 use std::path::Path;
 
@@ -16,7 +16,16 @@ pub fn run(file: &str) -> Result<(), CliError> {
         }
         Err(errors) => {
             for e in &errors {
-                eprintln!("error: {e}");
+                match e {
+                    kani_yaml::YamlError::DslParse {
+                        field_path,
+                        expression,
+                        errors,
+                    } => {
+                        report_dsl_errors(file, expression, Some(field_path), errors);
+                    }
+                    _ => eprintln!("error: {e}"),
+                }
             }
             Err(CliError::Other(format!(
                 "{} validation error(s)",

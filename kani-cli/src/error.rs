@@ -28,6 +28,9 @@ impl From<kani_yaml::YamlError> for CliError {
             kani_yaml::YamlError::DslConversion { message, span } => {
                 Self::DslConversion { message, span }
             }
+            kani_yaml::YamlError::DslParse { field_path, .. } => {
+                Self::Other(format!("DSL parse failed in {field_path}"))
+            }
             kani_yaml::YamlError::Validation(msg) => Self::Other(msg),
         }
     }
@@ -35,18 +38,29 @@ impl From<kani_yaml::YamlError> for CliError {
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-pub fn report_errors(filename: &str, source: &str, errors: Vec<chumsky::error::Rich<char>>) {
+pub fn report_dsl_errors(
+    filename: &str,
+    source: &str,
+    field_path: Option<&str>,
+    errors: &[kani_yaml::dsl::DslParseError],
+) {
     for error in errors {
-        let span = error.span();
-        let range = span.start..span.end;
-
-        Report::build(ReportKind::Error, (filename, range.clone()))
-            .with_message(error.to_string())
+        let range = error.span.clone();
+        let headline = match field_path {
+            Some(path) => format!("DSL parse error in {path}"),
+            None => "DSL parse error".to_string(),
+        };
+        let mut report = Report::build(ReportKind::Error, (filename, range.clone()))
+            .with_message(headline)
             .with_label(
                 Label::new((filename, range))
-                    .with_message("Found here")
+                    .with_message(&error.message)
                     .with_color(Color::Red),
-            )
+            );
+        if let Some(help) = &error.help {
+            report = report.with_help(help);
+        }
+        report
             .finish()
             .eprint((filename, Source::from(source)))
             .expect("failed to write diagnostic to stderr");
@@ -59,10 +73,8 @@ pub fn report_custom_error(
     message: &str,
     range: std::ops::Range<usize>,
 ) {
-    use ariadne::{Color, Label, Report, ReportKind, Source};
-
     Report::build(ReportKind::Error, (filename, range.clone()))
-        .with_message("Logic Error")
+        .with_message("DSL conversion error")
         .with_label(
             Label::new((filename, range))
                 .with_message(message)

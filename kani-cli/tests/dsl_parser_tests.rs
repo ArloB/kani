@@ -1,20 +1,17 @@
 #![allow(clippy::unwrap_used)]
 
-use chumsky::Parser;
-use kani_cli::dsl::parser;
+use kani_cli::dsl::parse;
 use kani_shared::ast::{Expr, Op, PadAlign};
 
 fn parse_ok(input: &str) -> Expr {
-    let parse_expr = parser()
-        .parse(input)
-        .into_result()
-        .unwrap_or_else(|e| panic!("parse failed for {:?}: {:?}", input, e));
+    let parse_expr =
+        parse(input).unwrap_or_else(|errors| panic!("parse failed for {input:?}: {errors:?}"));
     Expr::try_from(parse_expr)
-        .unwrap_or_else(|e| panic!("conversion failed for {:?}: {:?}", input, e))
+        .unwrap_or_else(|errors| panic!("conversion failed for {input:?}: {errors:?}"))
 }
 
 fn parse_err(input: &str) -> bool {
-    parser().parse(input).has_errors()
+    parse(input).is_err()
 }
 
 #[test]
@@ -537,10 +534,7 @@ fn parse_error_empty_input() {
 
 #[test]
 fn convert_error_unknown_method() {
-    let parse_expr = parser()
-        .parse(r#"self.nonexistent_method()"#)
-        .into_result()
-        .expect("should parse as a method call");
+    let parse_expr = parse(r#"self.nonexistent_method()"#).expect("should parse as a method call");
     let err = Expr::try_from(parse_expr).expect_err("should fail conversion");
     let msg = err
         .iter()
@@ -759,9 +753,7 @@ fn parse_format_padded_center() {
 
 #[test]
 fn convert_error_format_padded_bad_align() {
-    let parse_expr = parser()
-        .parse(r#"self.text().format_padded(10, "0", "diagonal")"#)
-        .into_result()
+    let parse_expr = parse(r#"self.text().format_padded(10, "0", "diagonal")"#)
         .expect("should parse syntactically");
     let err = Expr::try_from(parse_expr).expect_err("bad align should fail conversion");
     let msg = err
@@ -777,10 +769,8 @@ fn convert_error_format_padded_bad_align() {
 
 #[test]
 fn convert_error_format_padded_empty_fill() {
-    let parse_expr = parser()
-        .parse(r#"self.text().format_padded(10, "", "left")"#)
-        .into_result()
-        .expect("should parse syntactically");
+    let parse_expr =
+        parse(r#"self.text().format_padded(10, "", "left")"#).expect("should parse syntactically");
     let err = Expr::try_from(parse_expr).expect_err("empty fill should fail conversion");
     let msg = err
         .iter()
@@ -883,5 +873,55 @@ fn parse_string_keeps_regex_escapes_intact() {
     assert_eq!(
         parse_ok(r#""Chapter\s+(\d+)""#),
         Expr::Literal(r"Chapter\s+(\d+)".into())
+    );
+}
+
+#[test]
+fn parse_full_comix_description_expression() {
+    let expression = r#"let $synopsis = self.ptr("/synopsis").str().fallback("");
+let $alts = if pref("alt_titles_in_description") == "true"
+  then self.ptr("/altTitles").map($item.str()).join("\n").fallback("")
+  else "";
+let $facts = if pref("extra_info_in_description") == "true"
+  then merge([
+    [format("Year: {}", self.ptr("/year").int().to_string())],
+    [format("Rating: {} from {} ratings",
+            self.ptr("/ratedAvg").float().to_string(),
+            self.ptr("/ratedCount").int().to_string())],
+    [format("Followed by: {}", self.ptr("/followsTotal").int().to_string())]
+  ]).join("\n")
+  else "";
+merge([
+  [$synopsis],
+  [if $alts == "" then "" else format("Alternative names:\n{}", $alts)],
+  [$facts]
+]).filter($item != "").join("\n\n")"#;
+
+    let _ = parse_ok(expression);
+}
+
+#[test]
+fn parse_error_requires_semicolon_between_let_binding_and_body() {
+    let errors = parse("let $value = \"x\"\n$value").expect_err("missing semicolon must fail");
+    assert!(errors.iter().any(|error| error.message.contains("';'")));
+}
+
+#[test]
+fn parse_error_reports_unterminated_string() {
+    let errors = parse("self.text(\"").expect_err("unterminated string must fail");
+    assert!(errors.iter().any(|error| matches!(
+        error.kind,
+        kani_cli::dsl::DslParseErrorKind::UnterminatedString
+    )));
+}
+
+#[test]
+fn parse_error_limits_nesting() {
+    let input = format!("{}self{}", "(".repeat(51), ")".repeat(51));
+    let errors = parse(&input).expect_err("excessive nesting must fail");
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error.kind, kani_cli::dsl::DslParseErrorKind::LimitExceeded))
     );
 }
