@@ -147,7 +147,20 @@ async function getPuppeteerBrowser(profileDir) {
     };
     if (profileDir) launchOpts.userDataDir = profileDir;
 
-    const browser = await puppeteer.launch(launchOpts);
+    let browser;
+    try {
+        browser = await puppeteer.launch(launchOpts);
+    } catch (err) {
+        // A previous worker can leave Chromium alive while its profile lock is
+        // still held. Keep the stable profile as the first choice, then use a
+        // process-scoped recovery profile instead of failing the request.
+        const message = String(err && err.message || err);
+        if (!profileDir || !/already running|user.?data.?dir/i.test(message)) throw err;
+        const recoveryDir = `${profileDir}-recovery-${process.pid}-${Date.now()}`;
+        launchOpts.userDataDir = recoveryDir;
+        process.stderr.write(`[browser] profile locked; using recovery profile ${recoveryDir}\n`);
+        browser = await puppeteer.launch(launchOpts);
+    }
     entry = { browser, idleTimer: null, activePages: 0, lastUsed: Date.now() };
     browsers.set(key, entry);
     return entry;
