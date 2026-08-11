@@ -850,6 +850,7 @@ async fn main() {
             .job_manager
             .drain(std::time::Duration::from_secs(drain_secs))
             .await;
+        state.sources.retire_all("server-shutdown").await;
         state.db.close().await;
         let exit_code = if state
             .restart_requested

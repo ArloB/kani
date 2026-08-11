@@ -15,6 +15,31 @@ fn parse_err(input: &str) -> bool {
 }
 
 #[test]
+fn deeply_flat_binary_expressions_lower_serialize_format_and_drop_without_overflow() {
+    for leaves in [2_000usize, 5_000] {
+        let source = std::iter::repeat_n("1", leaves)
+            .collect::<Vec<_>>()
+            .join("+");
+        let expr = parse_ok(&source);
+        let Expr::Arena { arena, root } = &expr else {
+            panic!("large expressions must use flat arena storage");
+        };
+        assert_eq!(arena.nodes.len(), leaves * 2 - 1);
+        arena.validate(*root).expect("valid arena");
+        let debug = format!("{expr:?}");
+        assert!(debug.starts_with("Arena"));
+        let generated = kani_cli::codegen::expr::emit_expr(&expr);
+        assert!(generated.starts_with("Expr::arena_from_bytes"));
+        assert!(generated.len() > source.len());
+        let bytes = postcard::to_allocvec(&expr).expect("serialize arena expression");
+        let decoded: Expr = postcard::from_bytes(&bytes).expect("deserialize arena expression");
+        assert_eq!(expr, decoded);
+        drop(decoded);
+        drop(expr);
+    }
+}
+
+#[test]
 fn parse_string_literal() {
     assert_eq!(parse_ok(r#""hello""#), Expr::Literal("hello".into()));
 }
@@ -897,7 +922,13 @@ merge([
   [$facts]
 ]).filter($item != "").join("\n\n")"#;
 
-    let _ = parse_ok(expression);
+    let parsed = parse_ok(expression);
+    let Expr::Arena { arena, root } = &parsed else {
+        panic!("the complex Comix expression must use arena storage");
+    };
+    arena.validate(*root).expect("valid Comix arena");
+    assert!(arena.nodes.len() > 32);
+    assert!(kani_cli::codegen::expr::emit_expr(&parsed).starts_with("Expr::arena_from_bytes"));
 }
 
 #[test]

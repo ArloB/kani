@@ -70,8 +70,9 @@ fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
         format!("\"{}\"", rust_page_url)
     };
     let timeout = ep.timeout_ms;
+    let auto_scroll = ep.auto_scroll;
     Some(format!(
-        "let _payload = kani_shared::host_abi::v8_context::capture_page_payload({page_url_expr}, {const_name}, {timeout})?;\n\
+        "let _payload = kani_shared::host_abi::v8_context::capture_page_payload_configured({page_url_expr}, {const_name}, {timeout}, {auto_scroll})?;\n\
          let _json = kani_shared::host_abi::JsonHandle::parse(_payload.as_bytes())?;\n\
          let rows = extract::json(Some(_json.raw_handle()), &bp)?;"
     ))

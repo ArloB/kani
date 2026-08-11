@@ -1,7 +1,7 @@
 use crate::utilities::parse_date_flexible;
 use crate::wasm::{SafeHtml, StoredNode};
 use ego_tree::NodeId;
-use kani_shared::ast::{Expr, Op, PadAlign};
+use kani_shared::ast::{Expr, ExprArena, ExprLeaf, ExprNode, Op, PadAlign};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -18,6 +18,7 @@ pub const MAX_LIST_SIZE: usize = 10_000;
 /// the evaluator that produces it.
 pub use kani_shared::extension::HTTP_STATUS_ERR_PREFIX;
 pub const MAX_STRING_LENGTH: usize = 1_000_000;
+pub const ARENA_ENV_MARKER: &str = "\0kani:arena";
 
 /// Overridable ceilings for the declarative evaluator. Production uses
 /// [`EvalLimits::default`] (the `MAX_*` consts); tests shrink them via
@@ -120,6 +121,115 @@ pub enum Value {
         node_id: NodeId,
     },
     Json(serde_json::Value),
+}
+
+pub fn eval_flat_arena(
+    arena: &ExprArena,
+    root: kani_shared::ast::ExprId,
+    env: &Env,
+    budget: &Arc<EvalBudget>,
+) -> Option<Result<Value, String>> {
+    let mut reachable = vec![false; arena.nodes.len()];
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        let node = arena.nodes.get(id.0 as usize)?;
+        if std::mem::replace(&mut reachable[id.0 as usize], true) {
+            continue;
+        }
+        pending.extend(node.children());
+    }
+    if arena.nodes.iter().enumerate().any(|(index, node)| {
+        reachable[index]
+            && !matches!(
+                node,
+                ExprNode::Leaf(
+                    ExprLeaf::Literal(_)
+                        | ExprLeaf::Number(_)
+                        | ExprLeaf::Null
+                        | ExprLeaf::Bool(_)
+                        | ExprLeaf::Var(_)
+                ) | ExprNode::Unary {
+                    op: kani_shared::ast::UnaryExprOp::Trim,
+                    ..
+                } | ExprNode::BinaryOperation {
+                    op: Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::Div
+                        | Op::Eq
+                        | Op::Ne
+                        | Op::Lt
+                        | Op::Gt
+                        | Op::Le
+                        | Op::Ge,
+                    ..
+                }
+            )
+    }) {
+        return None;
+    }
+
+    Some((|| {
+        arena.validate(root)?;
+        let mut values = vec![None::<Value>; arena.nodes.len()];
+        for (index, node) in arena.nodes.iter().enumerate() {
+            if !reachable[index] {
+                continue;
+            }
+            budget.charge_step()?;
+            let value = match node {
+                ExprNode::Leaf(ExprLeaf::Literal(value)) => Value::Str(value.clone()),
+                ExprNode::Leaf(ExprLeaf::Number(value)) => Value::Num(*value),
+                ExprNode::Leaf(ExprLeaf::Null) => Value::Null,
+                ExprNode::Leaf(ExprLeaf::Bool(value)) => Value::Bool(*value),
+                ExprNode::Leaf(ExprLeaf::Var(name)) => env
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| format!("Undefined variable '{name}'"))?,
+                ExprNode::Unary {
+                    op: kani_shared::ast::UnaryExprOp::Trim,
+                    target,
+                } => values
+                    .get(target.0 as usize)
+                    .and_then(Option::as_ref)
+                    .cloned()
+                    .ok_or_else(|| "invalid arena trim target".to_string())?
+                    .map_str("trim", |value| Ok(Value::Str(value.trim().to_owned())))?,
+                ExprNode::BinaryOperation { op, lhs, rhs } => {
+                    let lhs = values
+                        .get(lhs.0 as usize)
+                        .and_then(Option::as_ref)
+                        .cloned()
+                        .ok_or_else(|| "invalid arena left operand".to_string())?;
+                    let rhs = values
+                        .get(rhs.0 as usize)
+                        .and_then(Option::as_ref)
+                        .cloned()
+                        .ok_or_else(|| "invalid arena right operand".to_string())?;
+                    match op {
+                        Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::Div
+                        | Op::Lt
+                        | Op::Gt
+                        | Op::Le
+                        | Op::Ge => numeric_op(op, lhs, rhs)?,
+                        Op::Eq => Value::Bool(lhs == rhs),
+                        Op::Ne => Value::Bool(lhs != rhs),
+                        Op::And | Op::Or => unreachable!("filtered before evaluation"),
+                    }
+                }
+                _ => unreachable!("filtered before evaluation"),
+            };
+            values[index] = Some(value);
+        }
+        values
+            .get(root.0 as usize)
+            .and_then(Option::as_ref)
+            .cloned()
+            .ok_or_else(|| "expression arena root is missing".to_string())
+    })())
 }
 
 impl Value {
@@ -1466,6 +1576,33 @@ mod tests {
         budget.charge_step().unwrap();
     }
 
+    #[test]
+    fn flat_arena_evaluates_ten_thousand_nodes_without_depth_budget() {
+        use super::{Env, EvalBudget, Value, eval_flat_arena};
+        use kani_shared::ast::{ExprArena, ExprId, ExprLeaf, ExprNode, Op};
+        use std::sync::Arc;
+
+        let mut nodes = vec![ExprNode::Leaf(ExprLeaf::Number(1.0))];
+        let mut root = ExprId(0);
+        for _ in 0..4_999 {
+            let rhs = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::Leaf(ExprLeaf::Number(1.0)));
+            let next = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::BinaryOperation {
+                op: Op::Add,
+                lhs: root,
+                rhs,
+            });
+            root = next;
+        }
+        let arena = ExprArena { nodes };
+        let budget = Arc::new(EvalBudget::new());
+        let value = eval_flat_arena(&arena, root, &Env::new(), &budget)
+            .expect("supported flat expression")
+            .expect("evaluation succeeds");
+        assert_eq!(value, Value::Num(5_000.0));
+    }
+
     #[tokio::test]
     async fn json_eval_depth_limit() {
         use super::MAX_EVAL_DEPTH;
@@ -1490,5 +1627,99 @@ mod tests {
             err.contains("limit:max_depth"),
             "expected depth-limit sentinel, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn arena_structure_does_not_consume_legacy_depth_budget() {
+        use crate::evaluator::json_eval;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{
+            BlueprintBuilder, Expr, ExprArena, ExprId, ExprLeaf, ExprNode, UnaryExprOp,
+        };
+        use std::sync::Arc;
+
+        let mut nodes = vec![ExprNode::Leaf(ExprLeaf::Literal(" value ".into()))];
+        let mut root = ExprId(0);
+        for _ in 0..100 {
+            let next = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::Unary {
+                op: UnaryExprOp::Trim,
+                target: root,
+            });
+            root = next;
+        }
+        let expression = Expr::Arena {
+            arena: Arc::new(ExprArena { nodes }),
+            root,
+        };
+        let blueprint = BlueprintBuilder::new("/items")
+            .field("value", expression)
+            .build();
+        let mut state = HostState::default();
+        let result = json_eval::extract_json_str(
+            &mut state,
+            &serde_json::json!({ "items": [{}] }).to_string(),
+            &blueprint,
+        )
+        .await
+        .expect("arena evaluation");
+        assert_eq!(result["rows"][0]["value"], "value");
+    }
+
+    #[tokio::test]
+    async fn complex_comix_arena_preserves_control_flow_and_collections() {
+        use crate::evaluator::json_eval;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{BlueprintBuilder, Expr};
+
+        let source = r#"let $synopsis = self.ptr("/synopsis").str().fallback("");
+let $alts = if pref("alt_titles_in_description") == "true"
+  then self.ptr("/altTitles").map($item.str()).join("\n").fallback("")
+  else "";
+let $facts = if pref("extra_info_in_description") == "true"
+  then merge([
+    [format("Year: {}", self.ptr("/year").int().to_string())],
+    [format("Rating: {} from {} ratings",
+            self.ptr("/ratedAvg").float().to_string(),
+            self.ptr("/ratedCount").int().to_string())],
+    [format("Followed by: {}", self.ptr("/followsTotal").int().to_string())]
+  ]).join("\n")
+  else "";
+merge([
+  [$synopsis],
+  [if $alts == "" then "" else format("Alternative names:\n{}", $alts)],
+  [$facts]
+]).filter($item != "").join("\n\n")"#;
+        let parsed = kani_yaml::dsl::parse(source).expect("parse Comix expression");
+        let expression = Expr::try_from(parsed).expect("lower Comix expression");
+        assert!(matches!(expression, Expr::Arena { .. }));
+        let blueprint = BlueprintBuilder::new("/items")
+            .field("description", expression)
+            .build();
+        let document = serde_json::json!({
+            "items": [{
+                "synopsis": "Summary",
+                "altTitles": ["Alternative"],
+                "year": 2024,
+                "ratedAvg": 4.5,
+                "ratedCount": 12,
+                "followsTotal": 99
+            }]
+        });
+        let mut state = HostState::default();
+        state
+            .preferences
+            .insert("alt_titles_in_description".into(), "true".into());
+        state
+            .preferences
+            .insert("extra_info_in_description".into(), "true".into());
+        let result = json_eval::extract_json_str(&mut state, &document.to_string(), &blueprint)
+            .await
+            .expect("evaluate Comix arena");
+        let description = result["rows"][0]["description"].as_str().unwrap();
+        assert!(description.contains("Summary"));
+        assert!(description.contains("Alternative names:\nAlternative"));
+        assert!(description.contains("Year: 2024"));
+        assert!(description.contains("Rating: 4.5 from 12 ratings"));
     }
 }

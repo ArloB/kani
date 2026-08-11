@@ -1,5 +1,7 @@
 //! Declarative extraction blueprint AST and its guest-safe builder API.
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
@@ -399,6 +401,191 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+
+    /// Flat expression storage emitted by the YAML Pratt parser.
+    Arena {
+        arena: Arc<ExprArena>,
+        root: ExprId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct ExprId(pub u32);
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct ExprArena {
+    pub nodes: Vec<ExprNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum ExprNode {
+    Leaf(ExprLeaf),
+    Unary {
+        op: UnaryExprOp,
+        target: ExprId,
+    },
+    BinaryOperation {
+        op: Op,
+        lhs: ExprId,
+        rhs: ExprId,
+    },
+    Binary {
+        op: BinaryExprOp,
+        lhs: ExprId,
+        rhs: ExprId,
+    },
+    Ternary {
+        op: TernaryExprOp,
+        first: ExprId,
+        second: ExprId,
+        third: ExprId,
+    },
+    Let {
+        name: String,
+        value: ExprId,
+        body: ExprId,
+    },
+    Lookup {
+        target: ExprId,
+        table: Vec<(String, String)>,
+    },
+    Many {
+        op: ManyExprOp,
+        items: Vec<ExprId>,
+    },
+    Format {
+        template: String,
+        args: Vec<ExprId>,
+    },
+    UserFn {
+        name: String,
+        args: Vec<ExprId>,
+    },
+    MapLiteral(Vec<(String, String)>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum ExprLeaf {
+    SelfRef,
+    Dom(String),
+    Json(String),
+    Var(String),
+    Literal(String),
+    Number(f64),
+    Null,
+    Bool(bool),
+    Index,
+    Pref(String),
+    ScalarOverride(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum UnaryExprOp {
+    Attr(String),
+    Text,
+    InnerHtml,
+    Select(String),
+    First(String),
+    Split(String),
+    At(i32),
+    Replace(String, String),
+    Trim,
+    Lower,
+    Matches(String),
+    Capture(String),
+    ParseFloat,
+    ParseInt,
+    JsonPtr(String),
+    JsonStr,
+    JsonInt,
+    JsonFloat,
+    JsonBool,
+    ArrayLen,
+    JsonKeys,
+    HasClass(String),
+    Children,
+    StartsWith(String),
+    EndsWith(String),
+    Slice(i32, Option<i32>),
+    DateParse(String),
+    DateParseRfc3339,
+    ToString,
+    Join(String),
+    JsonFold,
+    Not,
+    StringLen,
+    SplitN(String, usize),
+    Take(usize),
+    Skip(usize),
+    Reverse,
+    Unique,
+    UrlEncode,
+    UrlDecode,
+    FormatPadded {
+        width: usize,
+        fill: char,
+        align: PadAlign,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum BinaryExprOp {
+    Prepend,
+    Append,
+    Fallback,
+    Map,
+    FlatMap,
+    Filter,
+    ResolveUrl,
+    JsonGet,
+    SortBy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum TernaryExprOp {
+    Fold,
+    JsonFind,
+    If,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum ManyExprOp {
+    Concat,
+    List,
+    JsonArray,
+    Merge,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -505,8 +692,301 @@ pub enum IdEncoding {
     Hex,
 }
 
+pub const MAX_EXPR_NODES: usize = 10_000;
+
+impl ExprArena {
+    pub fn validate(&self, root: ExprId) -> Result<(), String> {
+        if self.nodes.is_empty() {
+            return Err("expression arena is empty".to_string());
+        }
+        if self.nodes.len() > MAX_EXPR_NODES {
+            return Err(format!(
+                "expression arena has {} nodes; limit is {MAX_EXPR_NODES}",
+                self.nodes.len()
+            ));
+        }
+        if root.0 as usize >= self.nodes.len() {
+            return Err(format!("expression root id {} is out of bounds", root.0));
+        }
+        for (index, node) in self.nodes.iter().enumerate() {
+            for child in node.children() {
+                let child = child.0 as usize;
+                if child >= self.nodes.len() {
+                    return Err(format!(
+                        "expression node {index} references out-of-bounds child {child}"
+                    ));
+                }
+                if child >= index {
+                    return Err(format!(
+                        "expression node {index} references non-topological child {child}"
+                    ));
+                }
+            }
+        }
+        if matches!(self.nodes[root.0 as usize], ExprNode::MapLiteral(_)) {
+            return Err("map literals can only be used by lookup expressions".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn node_expr(self: &Arc<Self>, id: ExprId) -> Result<Expr, String> {
+        let node = self
+            .nodes
+            .get(id.0 as usize)
+            .ok_or_else(|| format!("expression node id {} is out of bounds", id.0))?;
+        let child = |root| Expr::Arena {
+            arena: Arc::clone(self),
+            root,
+        };
+        Ok(match node {
+            ExprNode::Leaf(leaf) => match leaf {
+                ExprLeaf::SelfRef => Expr::SelfRef,
+                ExprLeaf::Dom(value) => Expr::Dom(value.clone()),
+                ExprLeaf::Json(value) => Expr::Json(value.clone()),
+                ExprLeaf::Var(value) => Expr::Var(value.clone()),
+                ExprLeaf::Literal(value) => Expr::Literal(value.clone()),
+                ExprLeaf::Number(value) => Expr::Number(*value),
+                ExprLeaf::Null => Expr::Null,
+                ExprLeaf::Bool(value) => Expr::Bool(*value),
+                ExprLeaf::Index => Expr::Index,
+                ExprLeaf::Pref(value) => Expr::Pref(value.clone()),
+                ExprLeaf::ScalarOverride(value) => Expr::ScalarOverride {
+                    name: value.clone(),
+                },
+            },
+            ExprNode::Unary { op, target } => {
+                let target = Box::new(child(*target));
+                match op {
+                    UnaryExprOp::Attr(name) => Expr::Attr {
+                        target,
+                        name: name.clone(),
+                    },
+                    UnaryExprOp::Text => Expr::Text { target },
+                    UnaryExprOp::InnerHtml => Expr::InnerHtml { target },
+                    UnaryExprOp::Select(selector) => Expr::Select {
+                        target,
+                        selector: selector.clone(),
+                    },
+                    UnaryExprOp::First(selector) => Expr::First {
+                        target,
+                        selector: selector.clone(),
+                    },
+                    UnaryExprOp::Split(delimiter) => Expr::Split {
+                        target,
+                        delimiter: delimiter.clone(),
+                    },
+                    UnaryExprOp::At(index) => Expr::At {
+                        target,
+                        index: *index,
+                    },
+                    UnaryExprOp::Replace(from, to) => Expr::Replace {
+                        target,
+                        from: from.clone(),
+                        to: to.clone(),
+                    },
+                    UnaryExprOp::Trim => Expr::Trim { target },
+                    UnaryExprOp::Lower => Expr::Lower { target },
+                    UnaryExprOp::Matches(pattern) => Expr::Matches {
+                        target,
+                        pattern: pattern.clone(),
+                    },
+                    UnaryExprOp::Capture(pattern) => Expr::Capture {
+                        target,
+                        pattern: pattern.clone(),
+                    },
+                    UnaryExprOp::ParseFloat => Expr::ParseFloat { target },
+                    UnaryExprOp::ParseInt => Expr::ParseInt { target },
+                    UnaryExprOp::JsonPtr(pointer) => Expr::JsonPtr {
+                        target,
+                        pointer: pointer.clone(),
+                    },
+                    UnaryExprOp::JsonStr => Expr::JsonStr { target },
+                    UnaryExprOp::JsonInt => Expr::JsonInt { target },
+                    UnaryExprOp::JsonFloat => Expr::JsonFloat { target },
+                    UnaryExprOp::JsonBool => Expr::JsonBool { target },
+                    UnaryExprOp::ArrayLen => Expr::ArrayLen { target },
+                    UnaryExprOp::JsonKeys => Expr::JsonKeys { target },
+                    UnaryExprOp::HasClass(class) => Expr::HasClass {
+                        target,
+                        class: class.clone(),
+                    },
+                    UnaryExprOp::Children => Expr::Children { target },
+                    UnaryExprOp::StartsWith(prefix) => Expr::StartsWith {
+                        target,
+                        prefix: prefix.clone(),
+                    },
+                    UnaryExprOp::EndsWith(suffix) => Expr::EndsWith {
+                        target,
+                        suffix: suffix.clone(),
+                    },
+                    UnaryExprOp::Slice(start, end) => Expr::Slice {
+                        target,
+                        start: *start,
+                        end: *end,
+                    },
+                    UnaryExprOp::DateParse(format) => Expr::DateParse {
+                        target,
+                        format: format.clone(),
+                    },
+                    UnaryExprOp::DateParseRfc3339 => Expr::DateParseRfc3339 { target },
+                    UnaryExprOp::ToString => Expr::ToString { target },
+                    UnaryExprOp::Join(delimiter) => Expr::Join {
+                        target,
+                        delimiter: delimiter.clone(),
+                    },
+                    UnaryExprOp::JsonFold => Expr::JsonFold { target },
+                    UnaryExprOp::Not => Expr::Not { target },
+                    UnaryExprOp::StringLen => Expr::StringLen { target },
+                    UnaryExprOp::SplitN(delimiter, n) => Expr::SplitN {
+                        target,
+                        delimiter: delimiter.clone(),
+                        n: *n,
+                    },
+                    UnaryExprOp::Take(n) => Expr::Take { target, n: *n },
+                    UnaryExprOp::Skip(n) => Expr::Skip { target, n: *n },
+                    UnaryExprOp::Reverse => Expr::Reverse { target },
+                    UnaryExprOp::Unique => Expr::Unique { target },
+                    UnaryExprOp::UrlEncode => Expr::UrlEncode { target },
+                    UnaryExprOp::UrlDecode => Expr::UrlDecode { target },
+                    UnaryExprOp::FormatPadded { width, fill, align } => Expr::FormatPadded {
+                        target,
+                        width: *width,
+                        fill: *fill,
+                        align: align.clone(),
+                    },
+                }
+            }
+            ExprNode::BinaryOperation { op, lhs, rhs } => Expr::BinaryOperation {
+                op: op.clone(),
+                lhs: Box::new(child(*lhs)),
+                rhs: Box::new(child(*rhs)),
+            },
+            ExprNode::Binary { op, lhs, rhs } => {
+                let lhs = Box::new(child(*lhs));
+                let rhs = Box::new(child(*rhs));
+                match op {
+                    BinaryExprOp::Prepend => Expr::Prepend {
+                        target: lhs,
+                        prefix: rhs,
+                    },
+                    BinaryExprOp::Append => Expr::Append {
+                        target: lhs,
+                        suffix: rhs,
+                    },
+                    BinaryExprOp::Fallback => Expr::Fallback {
+                        target: lhs,
+                        default: rhs,
+                    },
+                    BinaryExprOp::Map => Expr::Map {
+                        target: lhs,
+                        transform: rhs,
+                    },
+                    BinaryExprOp::FlatMap => Expr::FlatMap {
+                        target: lhs,
+                        transform: rhs,
+                    },
+                    BinaryExprOp::Filter => Expr::Filter {
+                        target: lhs,
+                        filter: rhs,
+                    },
+                    BinaryExprOp::ResolveUrl => Expr::ResolveUrl {
+                        target: lhs,
+                        base: rhs,
+                    },
+                    BinaryExprOp::JsonGet => Expr::JsonGet {
+                        target: lhs,
+                        key: rhs,
+                    },
+                    BinaryExprOp::SortBy => Expr::SortBy {
+                        target: lhs,
+                        key: rhs,
+                    },
+                }
+            }
+            ExprNode::Ternary {
+                op,
+                first,
+                second,
+                third,
+            } => {
+                let first = Box::new(child(*first));
+                let second = Box::new(child(*second));
+                let third = Box::new(child(*third));
+                match op {
+                    TernaryExprOp::Fold => Expr::Fold {
+                        target: first,
+                        base: second,
+                        transform: third,
+                    },
+                    TernaryExprOp::JsonFind => Expr::JsonFind {
+                        target: first,
+                        key: second,
+                        value: third,
+                    },
+                    TernaryExprOp::If => Expr::If {
+                        condition: first,
+                        then: second,
+                        else_: third,
+                    },
+                }
+            }
+            ExprNode::Let { name, value, body } => Expr::Let {
+                name: name.clone(),
+                value: Box::new(child(*value)),
+                body: Box::new(child(*body)),
+            },
+            ExprNode::Lookup { target, table } => Expr::Lookup {
+                target: Box::new(child(*target)),
+                table: table.clone(),
+            },
+            ExprNode::Many { op, items } => {
+                let values = items.iter().copied().map(child).collect();
+                match op {
+                    ManyExprOp::Concat => Expr::Concat(values),
+                    ManyExprOp::List => Expr::List(values),
+                    ManyExprOp::JsonArray => Expr::JsonArray(values),
+                    ManyExprOp::Merge => Expr::Merge(values),
+                }
+            }
+            ExprNode::Format { template, args } => Expr::Format {
+                template: template.clone(),
+                args: args.iter().copied().map(child).collect(),
+            },
+            ExprNode::UserFn { name, args } => Expr::UserFn {
+                name: name.clone(),
+                args: args.iter().copied().map(child).collect(),
+            },
+            ExprNode::MapLiteral(_) => {
+                return Err("map literal cannot be evaluated as an expression".to_string());
+            }
+        })
+    }
+}
+
+impl ExprNode {
+    pub fn children(&self) -> Vec<ExprId> {
+        match self {
+            Self::Leaf(_) | Self::MapLiteral(_) => Vec::new(),
+            Self::Unary { target, .. } | Self::Lookup { target, .. } => vec![*target],
+            Self::BinaryOperation { lhs, rhs, .. } | Self::Binary { lhs, rhs, .. } => {
+                vec![*lhs, *rhs]
+            }
+            Self::Ternary {
+                first,
+                second,
+                third,
+                ..
+            } => vec![*first, *second, *third],
+            Self::Let { value, body, .. } => vec![*value, *body],
+            Self::Many { items, .. }
+            | Self::Format { args: items, .. }
+            | Self::UserFn { args: items, .. } => items.clone(),
+        }
+    }
+}
+
 /// Current serialized blueprint schema understood by codegen and the host evaluator.
-pub const DSL_SCHEMA_VERSION: u32 = 5;
+pub const DSL_SCHEMA_VERSION: u32 = 6;
 
 /// Declares that a source paginates in fixed-size chunks, so the framework can
 /// handle the offset algebra instead of each extension doing it manually.
@@ -592,6 +1072,19 @@ pub struct RequestDef {
 #[cfg(feature = "builder")]
 #[allow(clippy::should_implement_trait)]
 impl Expr {
+    #[inline]
+    pub fn arena_from_bytes(bytes: &[u8]) -> Self {
+        let (arena, root): (ExprArena, ExprId) =
+            postcard::from_bytes(bytes).expect("generated expression arena is invalid");
+        arena
+            .validate(root)
+            .expect("generated expression arena failed validation");
+        Self::Arena {
+            arena: Arc::new(arena),
+            root,
+        }
+    }
+
     #[inline]
     pub fn self_ref() -> Self {
         Expr::SelfRef
@@ -2008,7 +2501,56 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_is_five() {
-        assert_eq!(DSL_SCHEMA_VERSION, 5);
+    fn schema_version_is_six() {
+        assert_eq!(DSL_SCHEMA_VERSION, 6);
+    }
+
+    #[test]
+    fn arena_validation_rejects_invalid_ids_and_cycles() {
+        let invalid = ExprArena {
+            nodes: vec![ExprNode::Unary {
+                op: UnaryExprOp::Trim,
+                target: ExprId(9),
+            }],
+        };
+        assert!(
+            invalid
+                .validate(ExprId(0))
+                .unwrap_err()
+                .contains("out-of-bounds")
+        );
+
+        let cyclic = ExprArena {
+            nodes: vec![ExprNode::Unary {
+                op: UnaryExprOp::Trim,
+                target: ExprId(0),
+            }],
+        };
+        assert!(
+            cyclic
+                .validate(ExprId(0))
+                .unwrap_err()
+                .contains("non-topological")
+        );
+    }
+
+    #[test]
+    fn version_six_arena_blueprint_bytes_are_deterministic() {
+        let arena = Arc::new(ExprArena {
+            nodes: vec![ExprNode::Leaf(ExprLeaf::Literal("title".into()))],
+        });
+        let blueprint = BlueprintBuilder::new("")
+            .field(
+                "title",
+                Expr::Arena {
+                    arena,
+                    root: ExprId(0),
+                },
+            )
+            .build();
+        let first = blueprint.to_bytes();
+        assert_eq!(first, blueprint.to_bytes());
+        let (version, _): (u32, &[u8]) = postcard::take_from_bytes(&first).unwrap();
+        assert_eq!(version, 6);
     }
 }

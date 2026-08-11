@@ -465,5 +465,10 @@ fn describe_expr(expr: &Expr) -> (String, String, Vec<&Expr>) {
             format!(".user.{name}() — {} arg(s)", args.len()),
             args.iter().collect(),
         ),
+        Expr::Arena { arena, root } => (
+            "Arena".into(),
+            format!("{} flat nodes, root {}", arena.nodes.len(), root.0),
+            vec![],
+        ),
     }
 }

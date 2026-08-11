@@ -302,8 +302,11 @@ impl AppService {
                 )
                 .execute(&self.db)
                 .await?;
-                {
+                let browser_runtime_changed = {
                     let mut settings = self.settings.write().await;
+                    let changed = settings.browser_max_memory_mb != s.browser_max_memory_mb
+                        || settings.browser_max_instances != s.browser_max_instances
+                        || settings.browser_idle_timeout_s != s.browser_idle_timeout_s;
                     settings.flaresolverr_url = s.flaresolverr_url.clone();
                     settings.library_path = s.library_path.clone().into();
                     settings.wasm_storage_path = s.wasm_storage_path.clone().into();
@@ -318,13 +321,17 @@ impl AppService {
                     settings.update_check_enabled = s.update_check_enabled;
                     settings.global_search_timeout_secs = s.global_search_timeout_secs;
                     settings.opds_page_index_zero_based = s.opds_page_index_zero_based;
-                }
+                    changed
+                };
                 kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);
                 kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {
                     max_memory_mb: s.browser_max_memory_mb as u32,
                     max_instances: s.browser_max_instances as u32,
                     idle_timeout_s: s.browser_idle_timeout_s as u32,
                 });
+                if browser_runtime_changed {
+                    self.sources.shutdown_all("browser-settings-change").await;
+                }
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None
                 } else {

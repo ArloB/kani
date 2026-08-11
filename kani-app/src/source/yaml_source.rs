@@ -109,6 +109,14 @@ impl YamlSource {
         kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
     }
 
+    pub async fn shutdown_v8(&self, reason: &str) -> bool {
+        kani_core::v8_process::shutdown(&self.v8_process, reason).await
+    }
+
+    pub async fn retire_v8(&self, reason: &str) -> bool {
+        kani_core::v8_process::retire(&self.v8_process, reason).await
+    }
+
     pub fn set_browser_enabled(&self, enabled: bool) {
         self.browser_enabled
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
@@ -266,14 +274,17 @@ impl YamlSource {
             .ok_or_else(|| format!("browser_payload page_url has no host: {page_url}"))?;
         state.allowed_host.allows_host(&host)?;
 
-        let payload = kani_core::v8_process::capture_page_payload(
+        let payload = kani_core::v8_process::capture_page_payload_resilient(
             &self.v8_process,
+            &self.http,
             &page_url,
             init_script,
             ep.timeout_ms,
             Some(&profile_key),
+            ep.auto_scroll,
         )
-        .await?;
+        .await
+        .map_err(|error| error.to_string())?;
 
         let req = Self::make_request(ep, &self.config, args, endpoint_name, &[])?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);

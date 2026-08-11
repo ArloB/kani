@@ -70,6 +70,11 @@ primarily for initial provisioning and managed deployments.
 Raising scripting budgets weakens a resource limit applied to untrusted extension logic. Prefer
 rewriting the extension unless a measured workload requires the change.
 
+Browser-backed sources can reuse Cloudflare clearance obtained through the FlareSolverr URL in
+**Settings → Advanced**. Kani and FlareSolverr must use the same public egress IP, because the
+clearance is commonly bound to both the solver's user agent and network path. Kani does not attempt
+to complete interactive Turnstile prompts.
+
 ## Capacity and diagnostics
 
 | Variable | Purpose |

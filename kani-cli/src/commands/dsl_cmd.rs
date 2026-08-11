@@ -224,6 +224,13 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
                 collect_user_fn_names(v, out);
             }
         }
+        Expr::Arena { arena, .. } => {
+            for node in &arena.nodes {
+                if let kani_shared::ast::ExprNode::UserFn { name, .. } = node {
+                    out.push(name.clone());
+                }
+            }
+        }
         Expr::SelfRef
         | Expr::Dom(_)
         | Expr::Json(_)

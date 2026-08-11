@@ -40,6 +40,20 @@ impl SourceBackend {
         }
     }
 
+    pub async fn shutdown_v8(&self, reason: &str) -> bool {
+        match self {
+            Self::Wasm(w) => w.shutdown_v8(reason).await,
+            Self::Yaml(y) => y.shutdown_v8(reason).await,
+        }
+    }
+
+    pub async fn retire_v8(&self, reason: &str) -> bool {
+        match self {
+            Self::Wasm(w) => w.retire_v8(reason).await,
+            Self::Yaml(y) => y.retire_v8(reason).await,
+        }
+    }
+
     /// Flips the operator gate for this source's browser capability. Takes effect
     /// on the next browser call (WASM) or the next browser endpoint eval (YAML).
     pub fn set_browser_enabled(&self, enabled: bool) {

@@ -246,6 +246,9 @@ pub struct EndpointBody {
     /// Timeout for the browser page load, in milliseconds. Default: 30000.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u32,
+    /// Whether browser-backed endpoints periodically scroll to trigger lazy loading.
+    #[serde(default)]
+    pub auto_scroll: Option<bool>,
     /// Per-endpoint Rhai script body for pre_request (overrides source-level).
     #[serde(default)]
     pub pre_request: Option<String>,
@@ -677,4 +680,20 @@ pub enum YamlCacheScope {
     Extension,
     Installation,
     User,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::EndpointBody;
+
+    #[test]
+    fn browser_auto_scroll_is_optional_and_can_be_disabled() {
+        let omitted: EndpointBody = serde_yaml::from_str("route: /browse").unwrap();
+        assert_eq!(omitted.auto_scroll, None);
+        let disabled: EndpointBody =
+            serde_yaml::from_str("route: /browse\nauto_scroll: false").unwrap();
+        assert_eq!(disabled.auto_scroll, Some(false));
+    }
 }

@@ -78,6 +78,14 @@ impl WasmSource {
         kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
     }
 
+    pub async fn shutdown_v8(&self, reason: &str) -> bool {
+        kani_core::v8_process::shutdown(&self.v8_process, reason).await
+    }
+
+    pub async fn retire_v8(&self, reason: &str) -> bool {
+        kani_core::v8_process::retire(&self.v8_process, reason).await
+    }
+
     pub fn set_browser_enabled(&self, enabled: bool) {
         self.browser_enabled.store(enabled, Ordering::Relaxed);
     }

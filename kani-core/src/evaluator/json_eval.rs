@@ -429,8 +429,30 @@ fn eval_json_expr<'a>(
     budget: Arc<EvalBudget>,
 ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
     Box::pin(async move {
+        if let Expr::Arena { arena, root } = expression {
+            if let Some(result) =
+                crate::evaluator::shared::eval_flat_arena(arena, *root, &env, &budget)
+            {
+                return result;
+            }
+            tokio::task::yield_now().await;
+            let materialized = arena.node_expr(*root)?;
+            let mut env = env;
+            env.set(
+                crate::evaluator::shared::ARENA_ENV_MARKER,
+                Value::Bool(true),
+            );
+            return eval_json_expr(&materialized, doc, current, env, registry, budget).await;
+        }
         budget.charge_step()?;
-        let _depth_guard = budget.enter_depth()?;
+        let _depth_guard = if env
+            .get(crate::evaluator::shared::ARENA_ENV_MARKER)
+            .is_some()
+        {
+            None
+        } else {
+            Some(budget.enter_depth()?)
+        };
 
         if let Some(result) = eval_common_expr(
             expression,

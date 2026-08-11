@@ -235,10 +235,9 @@ impl AppService {
                 .await
                 .map_err(ServiceError::Core)?;
 
+            self.sources.remove_and_shutdown(id, "source-delete").await;
             let profile_dir = kani_core::v8_process::profile_dir_for(&row.name);
             let _ = tokio::fs::remove_dir_all(&profile_dir).await;
-
-            self.sources.remove(id);
             self.cache.invalidate_source(id);
             self.audit(
                 Some(user_id),
@@ -295,7 +294,7 @@ impl AppService {
                     prefs,
                     browser_enabled,
                 );
-                self.sources.insert(id, backend);
+                self.sources.hot_swap(id, backend).await;
                 return Ok(());
             }
 
@@ -362,7 +361,7 @@ impl AppService {
                 max_hook_requests,
             );
 
-            self.sources.insert(id, backend);
+            self.sources.hot_swap(id, backend).await;
         } else {
             if let Ok(base_url) = self.get_source_base_url(id).await
                 && let Some(domain) = base_url
@@ -372,7 +371,9 @@ impl AppService {
             {
                 self.smart_client.deregister_rate_limit(&domain);
             }
-            self.sources.remove(id);
+            self.sources
+                .remove_and_shutdown(id, "source-disabled")
+                .await;
             self.cache.invalidate_source(id);
         }
 

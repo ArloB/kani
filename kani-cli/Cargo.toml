@@ -19,7 +19,6 @@ path = "src/main.rs"
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
 tempfile = "3"
-postcard = { version = "1", features = ["alloc"] }
 
 [dependencies]
 clap        = { version = "4", features = ["derive"] }
@@ -27,6 +26,7 @@ thiserror   = "2.0"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 serde_yaml  = "0.9"
+postcard    = { version = "1", features = ["alloc"] }
 tar         = "0.4"
 flate2      = "1"
 kani-shared = { path = "../kani-shared", features = ["builder"] }

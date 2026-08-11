@@ -182,6 +182,13 @@ pub struct CachedCredentials {
     challenge_url: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct BrowserChallengeCredentials {
+    pub cookie_header: String,
+    pub user_agent: String,
+    pub from_cache: bool,
+}
+
 #[derive(Clone)]
 pub struct CircuitOpenedEvent {
     pub host: String,
@@ -1245,6 +1252,60 @@ impl SmartClient {
         Ok((cookies, ua))
     }
 
+    pub fn solver_configured(&self) -> bool {
+        self.solver_url
+            .load()
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty())
+    }
+
+    pub async fn browser_challenge_credentials(
+        &self,
+        url: &str,
+        force_refresh: bool,
+    ) -> Result<BrowserChallengeCredentials> {
+        let base = url
+            .parse::<url::Url>()
+            .ok()
+            .and_then(|url| url.host_str().map(base_domain))
+            .unwrap_or_else(|| url.to_string());
+        let mutex = self
+            .solving
+            .entry(base.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let _guard = mutex.lock().await;
+
+        if force_refresh {
+            self.credentials.rcu(|old| {
+                let mut credentials = (**old).clone();
+                credentials.remove(&base);
+                Arc::new(credentials)
+            });
+        } else if let Some(credentials) = self.credentials.load().get(&base)
+            && !credentials.cookies.is_empty()
+        {
+            return Ok(BrowserChallengeCredentials {
+                cookie_header: credentials.cookies.clone(),
+                user_agent: credentials.user_agent.clone().unwrap_or_default(),
+                from_cache: true,
+            });
+        }
+
+        let (cookie_header, user_agent) = self.solve_challenge(url, None).await?;
+        if cookie_header.is_empty() || user_agent.is_empty() {
+            return Err(crate::error::Error::Other(
+                "FlareSolverr returned incomplete browser credentials".into(),
+            ));
+        }
+        self.store_credentials(url, &cookie_header, &user_agent);
+        Ok(BrowserChallengeCredentials {
+            cookie_header,
+            user_agent,
+            from_cache: false,
+        })
+    }
+
     async fn get_rendered_page(&self, url: &str) -> Result<SmartResponse> {
         let guard = self.solver_url.load();
         let solver_url = guard
@@ -1732,6 +1793,47 @@ mod tests {
 
     use wiremock::matchers::{body_partial_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn empty_solver_url_is_not_configured() {
+        let client = SmartClient::new(Some("   ".into())).unwrap();
+        assert!(!client.solver_configured());
+    }
+
+    #[tokio::test]
+    async fn browser_clearance_is_cached_and_force_refresh_invalidates_it() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "solution": {
+                    "userAgent": "solver-agent",
+                    "cookies": [{"name": "cf_clearance", "value": "clearance"}]
+                }
+            })))
+            .mount(&server)
+            .await;
+        let client = SmartClient::new(Some(server.uri())).unwrap();
+
+        let fresh = client
+            .browser_challenge_credentials("https://sub.example.com/browse", false)
+            .await
+            .expect("fresh credentials");
+        assert!(!fresh.from_cache);
+        assert_eq!(fresh.cookie_header, "cf_clearance=clearance");
+        let cached = client
+            .browser_challenge_credentials("https://example.com/next", false)
+            .await
+            .expect("cached credentials");
+        assert!(cached.from_cache);
+        let refreshed = client
+            .browser_challenge_credentials("https://example.com/next", true)
+            .await
+            .expect("refreshed credentials");
+        assert!(!refreshed.from_cache);
+
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
 
     #[tokio::test]
     async fn get_request_reaches_server() {

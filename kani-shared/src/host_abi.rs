@@ -898,6 +898,19 @@ pub mod v8_context {
         scripting::capture_page_payload(page_url, init_script, timeout_ms)
             .map_err(ExtensionError::unknown)
     }
+
+    pub fn capture_page_payload_configured(
+        page_url: &str,
+        init_script: &str,
+        timeout_ms: u32,
+        auto_scroll: bool,
+    ) -> Result<String, ExtensionError> {
+        if auto_scroll {
+            return capture_page_payload(page_url, init_script, timeout_ms);
+        }
+        let script = format!("/*kani:auto-scroll=false*/\n{init_script}");
+        capture_page_payload(page_url, &script, timeout_ms)
+    }
 }
 
 pub mod cache {

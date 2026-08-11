@@ -14,16 +14,189 @@ use crate::wasm::kani::extension::{
 use postcard;
 
 fn decode_blueprint(bytes: &[u8]) -> Result<kani_shared::ast::Blueprint, String> {
+    const MAX_BLUEPRINT_BYTES: usize = 8 * 1024 * 1024;
+    if bytes.len() > MAX_BLUEPRINT_BYTES {
+        return Err(format!(
+            "Blueprint exceeds the {MAX_BLUEPRINT_BYTES}-byte decode limit"
+        ));
+    }
     let (version, rest) = postcard::take_from_bytes::<u32>(bytes)
         .map_err(|e| format!("Invalid blueprint header: {}", e))?;
-    if version != kani_shared::ast::DSL_SCHEMA_VERSION {
+    if !matches!(version, 5 | kani_shared::ast::DSL_SCHEMA_VERSION) {
         return Err(format!(
-            "Blueprint DSL schema version {} is not supported (host requires {}); recompile the extension",
+            "Blueprint DSL schema version {} is not supported (host accepts 5 or {}); recompile the extension",
             version,
             kani_shared::ast::DSL_SCHEMA_VERSION,
         ));
     }
-    postcard::from_bytes(rest).map_err(|e| format!("Invalid blueprint: {}", e))
+    let decoded = || postcard::from_bytes(rest).map_err(|e| format!("Invalid blueprint: {e}"));
+    let blueprint: kani_shared::ast::Blueprint = if version == 5 {
+        stacker::maybe_grow(32 * 1024, MAX_BLUEPRINT_BYTES, decoded)
+    } else {
+        decoded()
+    }?;
+    validate_blueprint_arenas(&blueprint)?;
+    Ok(blueprint)
+}
+
+fn validate_blueprint_arenas(blueprint: &kani_shared::ast::Blueprint) -> Result<(), String> {
+    use kani_shared::ast::{Expr, OnFailurePolicy};
+
+    let mut blueprints = vec![blueprint];
+    let mut expressions = Vec::new();
+    while let Some(blueprint) = blueprints.pop() {
+        expressions.extend(blueprint.fields.iter().map(|field| &field.expr));
+        expressions.extend(blueprint.scalars.iter().map(|field| &field.expr));
+        expressions.extend(blueprint.bindings.iter().map(|binding| &binding.expr));
+        while let Some(expr) = expressions.pop() {
+            match expr {
+                Expr::Arena { arena, root } => arena.validate(*root)?,
+                Expr::Attr { target, .. }
+                | Expr::Text { target }
+                | Expr::InnerHtml { target }
+                | Expr::Select { target, .. }
+                | Expr::First { target, .. }
+                | Expr::Split { target, .. }
+                | Expr::At { target, .. }
+                | Expr::Replace { target, .. }
+                | Expr::Trim { target }
+                | Expr::Lower { target }
+                | Expr::Matches { target, .. }
+                | Expr::Capture { target, .. }
+                | Expr::ParseFloat { target }
+                | Expr::ParseInt { target }
+                | Expr::JsonPtr { target, .. }
+                | Expr::JsonStr { target }
+                | Expr::JsonInt { target }
+                | Expr::JsonFloat { target }
+                | Expr::JsonBool { target }
+                | Expr::ArrayLen { target }
+                | Expr::JsonKeys { target }
+                | Expr::HasClass { target, .. }
+                | Expr::Children { target }
+                | Expr::StartsWith { target, .. }
+                | Expr::EndsWith { target, .. }
+                | Expr::Slice { target, .. }
+                | Expr::JsonFold { target }
+                | Expr::DateParse { target, .. }
+                | Expr::DateParseRfc3339 { target }
+                | Expr::ToString { target }
+                | Expr::Join { target, .. }
+                | Expr::Not { target }
+                | Expr::StringLen { target }
+                | Expr::SplitN { target, .. }
+                | Expr::Take { target, .. }
+                | Expr::Skip { target, .. }
+                | Expr::Reverse { target }
+                | Expr::Unique { target }
+                | Expr::UrlEncode { target }
+                | Expr::UrlDecode { target }
+                | Expr::FormatPadded { target, .. } => expressions.push(target),
+                Expr::Lookup { target, .. } => expressions.push(target),
+                Expr::BinaryOperation { lhs, rhs, .. } => {
+                    expressions.push(lhs);
+                    expressions.push(rhs);
+                }
+                Expr::Prepend { target, prefix } => {
+                    expressions.push(target);
+                    expressions.push(prefix);
+                }
+                Expr::Append { target, suffix } => {
+                    expressions.push(target);
+                    expressions.push(suffix);
+                }
+                Expr::Let { value, body, .. } => {
+                    expressions.push(value);
+                    expressions.push(body);
+                }
+                Expr::Fallback { target, default } => {
+                    expressions.push(target);
+                    expressions.push(default);
+                }
+                Expr::Map { target, transform } | Expr::FlatMap { target, transform } => {
+                    expressions.push(target);
+                    expressions.push(transform);
+                }
+                Expr::Fold {
+                    target,
+                    transform,
+                    base,
+                } => {
+                    expressions.push(target);
+                    expressions.push(transform);
+                    expressions.push(base);
+                }
+                Expr::Filter { target, filter } => {
+                    expressions.push(target);
+                    expressions.push(filter);
+                }
+                Expr::ResolveUrl { target, base } => {
+                    expressions.push(target);
+                    expressions.push(base);
+                }
+                Expr::If {
+                    condition,
+                    then,
+                    else_,
+                } => {
+                    expressions.push(condition);
+                    expressions.push(then);
+                    expressions.push(else_);
+                }
+                Expr::JsonGet { target, key } => {
+                    expressions.push(target);
+                    expressions.push(key);
+                }
+                Expr::JsonFind { target, key, value } => {
+                    expressions.push(target);
+                    expressions.push(key);
+                    expressions.push(value);
+                }
+                Expr::SortBy { target, key } => {
+                    expressions.push(target);
+                    expressions.push(key);
+                }
+                Expr::Concat(items)
+                | Expr::List(items)
+                | Expr::JsonArray(items)
+                | Expr::Merge(items)
+                | Expr::Format { args: items, .. }
+                | Expr::UserFn { args: items, .. } => expressions.extend(items),
+                Expr::EncodedField { subfields, .. } => {
+                    expressions.extend(subfields.iter().map(|(_, expr)| expr.as_ref()));
+                }
+                Expr::Fetch {
+                    url_expr,
+                    blueprint,
+                    headers,
+                    on_failure,
+                    ..
+                } => {
+                    expressions.push(url_expr);
+                    for (name, value) in headers {
+                        expressions.push(name);
+                        expressions.push(value);
+                    }
+                    if let OnFailurePolicy::Use(fallback) = on_failure {
+                        expressions.push(fallback);
+                    }
+                    blueprints.push(blueprint);
+                }
+                Expr::SelfRef
+                | Expr::Dom(_)
+                | Expr::Json(_)
+                | Expr::Var(_)
+                | Expr::Literal(_)
+                | Expr::Number(_)
+                | Expr::Null
+                | Expr::Bool(_)
+                | Expr::Index
+                | Expr::Pref(_)
+                | Expr::ScalarOverride { .. } => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 impl http::Host for HostState {
@@ -625,16 +798,62 @@ impl scripting::Host for HostState {
             return Err("Browser capability is disabled for this source".to_string());
         }
         self.charge_io()?;
-        let result = crate::v8_process::capture_page_payload(
+        let (auto_scroll, init_script) = init_script
+            .strip_prefix("/*kani:auto-scroll=false*/\n")
+            .map_or((true, init_script.as_str()), |script| (false, script));
+        let result = crate::v8_process::capture_page_payload_resilient(
             &self.v8_process,
+            &self.http_client,
             &page_url,
-            &init_script,
+            init_script,
             timeout_ms,
             Some(&self.browser_profile_key),
+            auto_scroll,
         )
-        .await;
+        .await
+        .map_err(|error| error.to_string());
         self.last_io_at = Some(std::time::Instant::now());
         result
+    }
+}
+
+#[cfg(test)]
+mod blueprint_decode_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::decode_blueprint;
+    use kani_shared::ast::{BlueprintBuilder, Expr, ExprArena, ExprId, ExprNode, UnaryExprOp};
+    use std::sync::Arc;
+
+    #[test]
+    fn version_five_blueprints_remain_readable() {
+        let blueprint = BlueprintBuilder::new("")
+            .field("title", Expr::Literal("legacy".into()))
+            .build();
+        let mut bytes = postcard::to_allocvec(&5u32).unwrap();
+        bytes.extend(postcard::to_allocvec(&blueprint).unwrap());
+        let decoded = decode_blueprint(&bytes).expect("version 5 blueprint");
+        assert_eq!(decoded, blueprint);
+    }
+
+    #[test]
+    fn malformed_version_six_arena_is_rejected() {
+        let blueprint = BlueprintBuilder::new("")
+            .field(
+                "title",
+                Expr::Arena {
+                    arena: Arc::new(ExprArena {
+                        nodes: vec![ExprNode::Unary {
+                            op: UnaryExprOp::Trim,
+                            target: ExprId(0),
+                        }],
+                    }),
+                    root: ExprId(0),
+                },
+            )
+            .build();
+        let error = decode_blueprint(&blueprint.to_bytes()).unwrap_err();
+        assert!(error.contains("non-topological"));
     }
 }
 
