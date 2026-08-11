@@ -64,6 +64,7 @@ fn wire_cover_source(svc: &AppService, source_id: i64, origin: &TestOrigin) {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     };
     let ext = ValidatedExtension {
         id: "cover-source".into(),

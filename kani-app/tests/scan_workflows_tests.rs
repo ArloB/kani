@@ -68,6 +68,7 @@ fn chapter_list_endpoint() -> ValidatedEndpoint {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     }
 }
 
@@ -742,6 +743,7 @@ fn details_endpoint(cover_url: &str) -> ValidatedEndpoint {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     }
 }
 

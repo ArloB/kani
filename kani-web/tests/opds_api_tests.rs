@@ -341,6 +341,7 @@ async fn opds_reflects_what_the_source_actually_returned() {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     };
     let ext = ValidatedExtension {
         id: "src".into(),

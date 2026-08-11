@@ -95,6 +95,7 @@ fn chapter_list_endpoint(route: &str, container: &str) -> ValidatedEndpoint {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     }
 }
 
