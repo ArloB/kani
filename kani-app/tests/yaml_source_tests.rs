@@ -934,10 +934,6 @@ async fn browser_payload_endpoint_missing_script_returns_clear_error() {
 async fn browser_payload_endpoint_reaches_capture_page_payload() {
     use kani_yaml::yaml::schema::EndpointVia;
 
-    unsafe {
-        std::env::set_var("KANI_BROWSER_ENABLED", "false");
-    }
-
     let mut ep = list_endpoint("/popular", ".item");
     ep.via = Some(EndpointVia::BrowserPayload);
     ep.page_url = Some("https://example.com/manga/$manga_id$".into());
@@ -965,8 +961,12 @@ async fn browser_payload_endpoint_reaches_capture_page_payload() {
     assert!(result.is_err());
     let err_str = result.unwrap_err().to_string();
     assert!(
-        err_str.contains("KANI_BROWSER_ENABLED") || err_str.contains("disabled"),
-        "expected the deterministic browser-disabled error, got: {err_str}"
+        err_str.contains("solver_not_configured"),
+        "a browser endpoint with no solver must say so, got: {err_str}"
+    );
+    assert!(
+        err_str.contains("Settings > Advanced"),
+        "the error must name where to fix it, got: {err_str}"
     );
 }
 

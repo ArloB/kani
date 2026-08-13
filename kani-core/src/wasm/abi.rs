@@ -758,36 +758,6 @@ impl scripting::Host for HostState {
         crate::v8_process::v8_context_drop(&self.v8_process, &name).await;
     }
 
-    async fn capture_url_param(
-        &mut self,
-        page_url: String,
-        opts: scripting::CaptureUrlParamOpts,
-    ) -> Result<String, String> {
-        if !self.browser_enabled {
-            return Err("Browser capability is disabled for this source".to_string());
-        }
-        self.charge_io()?;
-        let result = crate::v8_process::capture_url_param(
-            &self.v8_process,
-            &page_url,
-            &crate::v8_process::CaptureUrlParamOpts {
-                url_pattern: &opts.url_pattern,
-                param_name: opts.param_name.as_deref(),
-                header_name: opts.header_name.as_deref(),
-                timeout_ms: opts.timeout_ms,
-                force_refresh: opts.force_refresh,
-                cache_ttl_ms: opts.cache_ttl_ms,
-                extra_headers: &opts.extra_headers,
-            },
-            Some(&self.browser_profile_key),
-        )
-        .await;
-        // Reset the epoch deadline reference point so the post-browser-wait WASM
-        // code doesn't immediately trip the "no recent IO" deadline check.
-        self.last_io_at = Some(std::time::Instant::now());
-        result
-    }
-
     async fn capture_page_payload(
         &mut self,
         page_url: String,

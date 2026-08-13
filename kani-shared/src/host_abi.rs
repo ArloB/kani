@@ -839,13 +839,6 @@ pub mod js_context {
     pub fn drop_ctx(name: &str) {
         super::v8_context::drop_ctx(name);
     }
-
-    pub fn capture_url_param(
-        page_url: &str,
-        opts: crate::bindings::kani::extension::scripting::CaptureUrlParamOpts,
-    ) -> Result<String, ExtensionError> {
-        super::v8_context::capture_url_param(page_url, opts)
-    }
 }
 
 /// Wrappers for the host-side Node.js V8 execution context.
@@ -877,17 +870,6 @@ pub mod v8_context {
     /// Drops the named context and frees its memory on the host.
     pub fn drop_ctx(name: &str) {
         scripting::v8_context_drop(name);
-    }
-
-    /// Loads `page_url` in a headless Chromium instance, intercepts network requests
-    /// whose URL contains `opts.url_pattern`, and returns the value of the named
-    /// query-string parameter or request header from the first matching request.
-    /// Exactly one of `param_name` or `header_name` must be set in `opts`.
-    pub fn capture_url_param(
-        page_url: &str,
-        opts: scripting::CaptureUrlParamOpts,
-    ) -> Result<String, ExtensionError> {
-        scripting::capture_url_param(page_url, &opts).map_err(ExtensionError::unknown)
     }
 
     pub fn capture_page_payload(

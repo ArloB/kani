@@ -34,7 +34,6 @@ const REQUEST_TIMEOUT_SECS: u64 = 35;
 /// caller's capture timeout or the solve alone can exhaust it.
 const SOLVER_CAPTURE_SOLVE_HEADROOM_MS: u64 = 60_000;
 const SOLVER_CAPTURE_TRANSPORT_BUFFER_MS: u64 = 5_000;
-const SOLVER_ROUTE_TTL_SECS: u64 = 30 * 60;
 const SOLVER_SESSION_TTL_MINUTES: u64 = 5;
 const SOLVER_SESSION_CONTROL_TIMEOUT_SECS: u64 = 10;
 /// Allows the complete retry schedule and one solver attempt to finish.
@@ -236,6 +235,7 @@ fn solver_secret() -> Option<&'static str> {
 pub enum SolverCaptureError {
     Unsupported,
     Unauthorized,
+    Unreachable,
     Failed(String),
 }
 
@@ -253,6 +253,7 @@ impl std::fmt::Display for SolverCaptureError {
                 "the solver rejected Kani's key; check KANI_SOLVER_SECRET matches \
                  the solver's API_KEY"
             ),
+            Self::Unreachable => write!(f, "no solver is reachable at the configured URL"),
             Self::Failed(message) => write!(f, "{message}"),
         }
     }
@@ -466,12 +467,17 @@ fn ssrf_aware_redirect_policy(
     })
 }
 
+impl std::fmt::Debug for SmartClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmartClient").finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone)]
 pub struct SmartClient {
     client: rquest::Client,
     pub credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
     solver_url: Arc<ArcSwap<Option<String>>>,
-    solver_routes: Arc<dashmap::DashMap<String, std::time::Instant>>,
     solver_sessions: Arc<dashmap::DashMap<String, std::time::Instant>>,
     solver_capture_support: Arc<std::sync::atomic::AtomicU8>,
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -541,7 +547,6 @@ impl SmartClient {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
-            solver_routes: Arc::new(dashmap::DashMap::new()),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving: Arc::new(dashmap::DashMap::new()),
@@ -576,7 +581,6 @@ impl SmartClient {
             client,
             credentials,
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
-            solver_routes: Arc::new(dashmap::DashMap::new()),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving,
@@ -1433,26 +1437,6 @@ impl SmartClient {
         format!("kani-{digest:x}")
     }
 
-    pub(crate) fn solver_route_preferred(&self, source_key: Option<&str>, url: &str) -> bool {
-        let key = Self::solver_route_key(source_key, url);
-        let Some(route) = self.solver_routes.get(&key) else {
-            return false;
-        };
-        if route.elapsed() < std::time::Duration::from_secs(SOLVER_ROUTE_TTL_SECS) {
-            return true;
-        }
-        drop(route);
-        self.solver_routes.remove(&key);
-        false
-    }
-
-    pub(crate) fn remember_solver_route(&self, source_key: Option<&str>, url: &str) {
-        self.solver_routes.insert(
-            Self::solver_route_key(source_key, url),
-            std::time::Instant::now(),
-        );
-    }
-
     pub async fn browser_challenge_credentials(
         &self,
         url: &str,
@@ -1541,7 +1525,8 @@ impl SmartClient {
             match self.probe_solver_capability(solver_url).await {
                 SolverCapability::Basic => return Err(SolverCaptureError::Unsupported),
                 SolverCapability::Unauthorized => return Err(SolverCaptureError::Unauthorized),
-                SolverCapability::Unreachable | SolverCapability::Capture => {}
+                SolverCapability::Unreachable => return Err(SolverCaptureError::Unreachable),
+                SolverCapability::Capture => {}
             }
         }
         if self.solver_capture_support.load(Ordering::Relaxed) == 2 {
@@ -1644,7 +1629,6 @@ impl SmartClient {
                 }
             }
             self.solver_sessions.remove(&key);
-            self.solver_routes.remove(&key);
             destroyed += 1;
         }
         destroyed
@@ -1867,7 +1851,6 @@ impl SmartClient {
             .collect();
         self.destroy_solver_session_keys(keys).await;
         self.solver_url.store(Arc::new(url));
-        self.solver_routes.clear();
         self.solver_capture_support
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
@@ -1939,7 +1922,6 @@ impl SmartClient {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url: Arc::new(ArcSwap::from_pointee(None)),
-            solver_routes: Arc::new(dashmap::DashMap::new()),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving: Arc::new(dashmap::DashMap::new()),
@@ -2365,6 +2347,14 @@ mod tests {
         let server = MockServer::start().await;
         let key = SmartClient::solver_route_key(Some("source-a"), "https://sub.example.com/a");
         let session = SmartClient::solver_session_id(&key);
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "msg": "ready",
+                "capabilities": ["kani.capture/1", "kani.capture/2"]
+            })))
+            .mount(&server)
+            .await;
         Mock::given(method("POST"))
             .and(body_partial_json(serde_json::json!({
                 "cmd": "kani.capture",

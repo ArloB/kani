@@ -187,6 +187,7 @@ mod tests {
             cache_namespace: "test".to_string(),
             prefs: HashMap::new(),
             v8_process: None,
+            http: None,
             browser_scripts: None,
             browser_profile_key: None,
         }

@@ -23,6 +23,10 @@ fn solver_envelope(rendered: &str) -> String {
     .to_string()
 }
 
+/// A solver index advertising scripted capture. The capability probe reads this
+/// before dispatching, so a mock that serves only /v1 reads as unreachable.
+const CAPABLE_INDEX: &str = r#"{"msg":"ready","capabilities":["kani.capture/1","kani.capture/2"]}"#;
+
 #[tokio::test]
 async fn a_challenge_page_triggers_the_solver_and_replays() {
     let site = TestOrigin::start().await;
@@ -236,6 +240,7 @@ fn capture_envelope(payload: &str) -> String {
 #[tokio::test]
 async fn a_capture_returns_the_payload_the_solver_browser_collected() {
     let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
     solver.set(
         "/v1",
         Response::json(&capture_envelope(r#"{"items":[1,2]}"#)),
@@ -340,6 +345,7 @@ async fn a_solver_that_rejects_the_key_is_reported_as_unauthorized() {
 #[tokio::test]
 async fn a_capture_error_from_a_compatible_solver_surfaces_verbatim() {
     let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
     solver.set(
         "/v1",
         Response::json(
@@ -372,6 +378,7 @@ async fn a_capture_error_from_a_compatible_solver_surfaces_verbatim() {
 #[tokio::test]
 async fn an_ok_envelope_without_a_payload_is_an_error_not_an_empty_capture() {
     let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
     solver.set(
         "/v1",
         Response::json(r#"{"status":"ok","solution":{"userAgent":"FlareUA/1.0"}}"#),

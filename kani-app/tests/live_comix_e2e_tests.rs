@@ -13,7 +13,6 @@
 //! ```text
 //! KANI_LIVE_SOLVER_URL=http://127.0.0.1:8191/v1 \
 //! KANI_COMIX_YAML=/home/arlob/code/kani-extensions/comix.yaml \
-//! CHROMIUM_PATH=... KANI_PUPPETEER_MODULE=... \
 //! cargo test -p kani-app --test live_comix_e2e_tests -- --ignored --nocapture
 //! ```
 

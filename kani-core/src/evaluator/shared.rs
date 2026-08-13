@@ -1068,6 +1068,7 @@ pub async fn fetch_body(
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
                 v8_process: Some(state.v8_process.clone()),
+                http: Some(state.http_client.clone()),
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
             };
@@ -1150,6 +1151,7 @@ pub async fn fetch_body(
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
                 v8_process: Some(state.v8_process.clone()),
+                http: Some(state.http_client.clone()),
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
             };
