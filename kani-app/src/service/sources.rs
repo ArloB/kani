@@ -924,6 +924,7 @@ impl AppService {
                     Ok(ext) => {
                         let err = crate::install_gating::check_required_capabilities(
                             &ext.requires_capabilities,
+                            kani_core::http::SolverCapability::Capture,
                         )
                         .err()
                         .or_else(|| {
@@ -1268,8 +1269,12 @@ impl AppService {
             host_version,
         )
         .map_err(ServiceError::Validation)?;
-        crate::install_gating::check_required_capabilities(&metadata.requires_capabilities)
-            .map_err(ServiceError::Validation)?;
+        crate::install_gating::check_required_capabilities_live(
+            &metadata.requires_capabilities,
+            &self.smart_client,
+        )
+        .await
+        .map_err(ServiceError::Validation)?;
 
         let languages_json = serde_json::to_string(&metadata.languages)
             .map_err(|e| ServiceError::Internal(format!("Failed to encode languages: {e}")))?;

@@ -199,6 +199,8 @@ pub struct BrowserChallengeCredentials {
 /// What the configured solver can do for us, established by probing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolverCapability {
+    /// No solver URL is set at all, as distinct from one that does not answer.
+    NotConfigured,
     Unreachable,
     Unauthorized,
     /// Cannot run scripted capture (stock FlareSolverr, Byparr), but is still
@@ -210,6 +212,7 @@ pub enum SolverCapability {
 impl SolverCapability {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::NotConfigured => "not_configured",
             Self::Unreachable => "unreachable",
             Self::Unauthorized => "unauthorized",
             Self::Basic => "basic",
@@ -1416,7 +1419,7 @@ impl SmartClient {
         let guard = self.solver_url.load();
         match guard.as_deref() {
             Some(url) if !url.trim().is_empty() => self.probe_solver_capability(url).await,
-            _ => SolverCapability::Unreachable,
+            _ => SolverCapability::NotConfigured,
         }
     }
 
@@ -1525,7 +1528,9 @@ impl SmartClient {
             match self.probe_solver_capability(solver_url).await {
                 SolverCapability::Basic => return Err(SolverCaptureError::Unsupported),
                 SolverCapability::Unauthorized => return Err(SolverCaptureError::Unauthorized),
-                SolverCapability::Unreachable => return Err(SolverCaptureError::Unreachable),
+                SolverCapability::NotConfigured | SolverCapability::Unreachable => {
+                    return Err(SolverCaptureError::Unreachable);
+                }
                 SolverCapability::Capture => {}
             }
         }

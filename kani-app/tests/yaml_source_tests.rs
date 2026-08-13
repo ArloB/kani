@@ -285,9 +285,10 @@ async fn empty_without_filters_returns_empty_list_without_http() {
 
 #[test]
 fn capability_mismatch_produces_load_error() {
-    let result = kani_app::install_gating::check_required_capabilities(&[
-        "nonexistent_capability".to_string()
-    ]);
+    let result = kani_app::install_gating::check_required_capabilities(
+        &["nonexistent_capability".to_string()],
+        kani_core::http::SolverCapability::Capture,
+    );
     assert!(result.is_err());
     let msg = result.unwrap_err();
     assert!(msg.contains("nonexistent_capability"));
@@ -304,13 +305,21 @@ fn known_capabilities_are_all_accepted() {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    assert!(kani_app::install_gating::check_required_capabilities(&caps).is_ok());
+    assert!(
+        kani_app::install_gating::check_required_capabilities(
+            &caps,
+            kani_core::http::SolverCapability::Capture,
+        )
+        .is_ok()
+    );
 }
 
 #[test]
 fn capability_unrestricted_http_is_supported() {
-    let result =
-        kani_app::install_gating::check_required_capabilities(&["unrestricted_http".to_string()]);
+    let result = kani_app::install_gating::check_required_capabilities(
+        &["unrestricted_http".to_string()],
+        kani_core::http::SolverCapability::NotConfigured,
+    );
     assert!(result.is_ok());
 }
 
@@ -927,6 +936,88 @@ async fn browser_payload_endpoint_missing_script_returns_clear_error() {
     assert!(
         err_str.contains("undeclared_script"),
         "error should name the missing script: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn installing_a_browser_source_without_a_solver_is_refused_with_guidance() {
+    let yaml_content = br#"
+id: install-browser-source
+name: install-browser-source
+version: "1.0.0"
+base_url: "https://example.com"
+language: en
+requires_capabilities:
+  - browser_payload
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".title").text()'
+"#;
+
+    let svc = test_service().await;
+    let error = svc
+        .install_yaml_source(yaml_content)
+        .await
+        .expect_err("a browser source needs a capture-capable solver");
+    let message = error.to_string();
+
+    assert!(
+        message.contains("browser capture"),
+        "the refusal names what is missing, got: {message}"
+    );
+    assert!(
+        message.contains("Settings > Advanced"),
+        "the refusal names where to fix it, got: {message}"
+    );
+}
+
+#[tokio::test]
+async fn the_startup_scan_does_not_disable_a_browser_source_without_a_solver() {
+    let dir = tempfile::tempdir().unwrap();
+    let yaml_content = r#"
+id: scan-browser-source
+name: scan-browser-source
+version: "1.0.0"
+base_url: "https://example.com"
+language: en
+requires_capabilities:
+  - browser_payload
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".title").text()'
+"#;
+    std::fs::write(dir.path().join("scan-browser-source.yaml"), yaml_content).unwrap();
+
+    let svc = test_service().await;
+    svc.scan_and_load_yaml_dir_for_test(dir.path())
+        .await
+        .unwrap();
+
+    use sqlx::Row as _;
+    let row =
+        sqlx::query("SELECT enabled, load_error FROM sources WHERE name = 'scan-browser-source'")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    let enabled: i64 = row.try_get("enabled").unwrap();
+    let load_error: Option<String> = row.try_get("load_error").unwrap();
+
+    assert_eq!(
+        enabled, 1,
+        "solver reachability is dynamic; a source must not be disabled at boot because \
+         the solver container happened to start second"
+    );
+    assert!(
+        load_error.is_none(),
+        "load_error records static invalidity, not solver state, got: {load_error:?}"
     );
 }
 

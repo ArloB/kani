@@ -596,8 +596,12 @@ impl AppService {
             ServiceError::Validation(format!("Invalid YAML extension: {msg}"))
         })?;
 
-        crate::install_gating::check_required_capabilities(&validated.requires_capabilities)
-            .map_err(ServiceError::Validation)?;
+        crate::install_gating::check_required_capabilities_live(
+            &validated.requires_capabilities,
+            &self.smart_client,
+        )
+        .await
+        .map_err(ServiceError::Validation)?;
 
         kani_core::file_storage::save_yaml(storage_path, &validated.id, text)
             .await
@@ -659,8 +663,12 @@ impl AppService {
             (meta, schema)
         };
 
-        crate::install_gating::check_required_capabilities(&metadata.requires_capabilities)
-            .map_err(ServiceError::Validation)?;
+        crate::install_gating::check_required_capabilities_live(
+            &metadata.requires_capabilities,
+            &self.smart_client,
+        )
+        .await
+        .map_err(ServiceError::Validation)?;
 
         kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
             .await
