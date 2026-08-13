@@ -189,10 +189,12 @@ validates each expansion and emits one extension per source.
 
 ## Browser endpoints
 
-`via: browser_payload` loads `page_url` in Chromium and runs a named `browser_scripts` entry that
-must call `passPayload`. The interpreted YAML backend supports extracting the returned payload.
-Browser support must be present in the image and enabled at runtime. Prefer direct HTTP extraction
-when possible.
+`via: browser_payload` loads `page_url` in Chromium and runs a named `browser_scripts` entry in that
+page before its own scripts. The entry must call `passPayload`; long-running captures can call
+`resetPayloadTimer` after each unit of progress. When a Kani-compatible FlareSolverr is configured,
+managed challenges are solved and captured in its browser without transferring clearance to a
+second browser. The interpreted YAML backend supports extracting the returned payload. Browser
+support must be enabled at runtime. Prefer direct HTTP extraction when possible.
 
 ## Build and inspect
 

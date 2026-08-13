@@ -344,7 +344,7 @@ impl V8Process {
         #[cfg(unix)]
         if let Some(pid) = self.child.id() {
             let _ = Command::new("kill")
-                .args(["-KILL", &format!("-{pid}")])
+                .args(["-KILL", "--", &format!("-{pid}")])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -684,6 +684,22 @@ impl std::fmt::Display for CapturePagePayloadError {
     }
 }
 
+impl CapturePagePayloadError {
+    fn browser_backend_unavailable(&self) -> bool {
+        match self {
+            Self::Transport(_) => true,
+            Self::Action { code, message } if code == "action_error" => {
+                let message = message.to_ascii_lowercase();
+                message.contains("puppeteer-core not found")
+                    || message.contains("failed to launch")
+                    || message.contains("browser was not found")
+                    || message.contains("chromium") && message.contains("not found")
+            }
+            Self::Challenge { .. } | Self::Action { .. } => false,
+        }
+    }
+}
+
 pub async fn capture_page_payload_detailed(
     handle: &V8ProcessHandle,
     page_url: &str,
@@ -748,6 +764,34 @@ pub async fn capture_page_payload_resilient(
     source_key: Option<&str>,
     auto_scroll: bool,
 ) -> Result<String, CapturePagePayloadError> {
+    if http.solver_configured() && http.solver_route_preferred(source_key, page_url) {
+        match http
+            .solver_capture(page_url, init_script, timeout_ms, source_key, auto_scroll)
+            .await
+        {
+            Ok(payload) => {
+                record_browser_solver_result(true);
+                http.remember_solver_route(source_key, page_url);
+                return Ok(payload);
+            }
+            Err(crate::http::SolverCaptureError::Unsupported) => {}
+            Err(error @ crate::http::SolverCaptureError::Unauthorized) => {
+                record_browser_solver_result(false);
+                return Err(CapturePagePayloadError::Action {
+                    code: "solver_unauthorized".to_string(),
+                    message: error.to_string(),
+                });
+            }
+            Err(error) => {
+                record_browser_solver_result(false);
+                return Err(CapturePagePayloadError::Action {
+                    code: "solver_error".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+
     let first = capture_page_payload_detailed(
         handle,
         page_url,
@@ -758,17 +802,93 @@ pub async fn capture_page_payload_resilient(
         None,
     )
     .await;
-    if !matches!(first, Err(CapturePagePayloadError::Challenge { .. })) {
+    let challenged = matches!(first, Err(CapturePagePayloadError::Challenge { .. }));
+    let browser_unavailable = first
+        .as_ref()
+        .is_err_and(CapturePagePayloadError::browser_backend_unavailable);
+    if !challenged && !browser_unavailable {
         return first;
     }
     if !http.solver_configured() {
+        if browser_unavailable {
+            return first;
+        }
         return Err(CapturePagePayloadError::Challenge {
-            message: "Cloudflare managed challenge blocked the browser page; configure the existing FlareSolverr URL setting and ensure it shares Kani's public egress IP".to_string(),
+            message: "Cloudflare managed challenge blocked the browser page; configure the existing FlareSolverr URL setting".to_string(),
             url: Some(page_url.to_string()),
             status: None,
         });
     }
 
+    match http
+        .solver_capture(page_url, init_script, timeout_ms, source_key, auto_scroll)
+        .await
+    {
+        Ok(payload) => {
+            record_browser_solver_result(true);
+            http.remember_solver_route(source_key, page_url);
+            Ok(payload)
+        }
+        Err(crate::http::SolverCaptureError::Unsupported) => {
+            if browser_unavailable {
+                return Err(CapturePagePayloadError::Action {
+                    code: "solver_incompatible".to_string(),
+                    message: crate::http::SolverCaptureError::Unsupported.to_string(),
+                });
+            }
+            tracing::debug!(
+                "solver does not support kani.capture; falling back to credential replay"
+            );
+            match replay_solver_credentials(
+                handle,
+                http,
+                page_url,
+                init_script,
+                timeout_ms,
+                source_key,
+                auto_scroll,
+            )
+            .await
+            {
+                Err(CapturePagePayloadError::Challenge { url, status, .. }) => {
+                    Err(CapturePagePayloadError::Challenge {
+                        message: format!(
+                            "Cloudflare rejected the replayed clearance: {}",
+                            crate::http::SolverCaptureError::Unsupported
+                        ),
+                        url,
+                        status,
+                    })
+                }
+                other => other,
+            }
+        }
+        Err(error @ crate::http::SolverCaptureError::Unauthorized) => {
+            record_browser_solver_result(false);
+            Err(CapturePagePayloadError::Action {
+                code: "solver_unauthorized".to_string(),
+                message: error.to_string(),
+            })
+        }
+        Err(error) => {
+            record_browser_solver_result(false);
+            Err(CapturePagePayloadError::Action {
+                code: "solver_error".to_string(),
+                message: error.to_string(),
+            })
+        }
+    }
+}
+
+async fn replay_solver_credentials(
+    handle: &V8ProcessHandle,
+    http: &crate::http::SmartClient,
+    page_url: &str,
+    init_script: &str,
+    timeout_ms: u32,
+    source_key: Option<&str>,
+    auto_scroll: bool,
+) -> Result<String, CapturePagePayloadError> {
     let credentials = match http.browser_challenge_credentials(page_url, false).await {
         Ok(credentials) => {
             record_browser_solver_result(true);
@@ -870,6 +990,9 @@ let nextPid = 50000;
 let challengeRemaining = process.env.KANI_MOCK_CHALLENGE === '1' ? 1 : 0;
 module.exports.launch = async function launch(options) {
   const profile = options.userDataDir || '';
+  if (process.env.KANI_MOCK_LAUNCH_FAILURE === '1') {
+    throw new Error('Failed to launch Chromium');
+  }
   if (process.env.KANI_MOCK_LOCK_CANONICAL === '1' && !profile.includes('-recovery-')) {
     throw new Error('The browser is already running for ' + profile + '. Use a different userDataDir');
   }
@@ -1149,7 +1272,7 @@ module.exports.launch = async function launch(options) {
     }
 
     #[tokio::test]
-    async fn resilient_capture_solves_once_then_reuses_the_browser_worker() {
+    async fn resilient_capture_remembers_the_solver_route() {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1166,7 +1289,8 @@ module.exports.launch = async function launch(options) {
                 "status": "ok",
                 "solution": {
                     "userAgent": "solver-agent",
-                    "cookies": [{"name": "cf_clearance", "value": "opaque"}]
+                    "cookies": [{"name": "cf_clearance", "value": "opaque"}],
+                    "payload": "{\"ok\":true}"
                 }
             })))
             .mount(&solver)
@@ -1187,7 +1311,22 @@ module.exports.launch = async function launch(options) {
         .expect("solver-assisted capture");
         assert_eq!(payload, r#"{"ok":true}"#);
         assert_eq!(solver.received_requests().await.unwrap().len(), 1);
-        assert!(worker_pid(&handle).await.is_some());
+        let worker = worker_pid(&handle).await.expect("browser worker");
+
+        let payload = capture_page_payload_resilient(
+            &handle,
+            &http,
+            "https://example.test/second",
+            "",
+            200,
+            Some("solver-source"),
+            false,
+        )
+        .await
+        .expect("memoised solver capture");
+        assert_eq!(payload, r#"{"ok":true}"#);
+        assert_eq!(solver.received_requests().await.unwrap().len(), 2);
+        assert_eq!(worker_pid(&handle).await, Some(worker));
 
         assert!(shutdown(&handle, "test-complete").await);
         unsafe {
@@ -1196,6 +1335,81 @@ module.exports.launch = async function launch(options) {
             std::env::remove_var("KANI_PUPPETEER_MODULE");
         }
         let _ = std::fs::remove_file(module);
+    }
+
+    #[tokio::test]
+    async fn resilient_capture_uses_solver_when_the_browser_backend_is_unavailable() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _guard = ENV_LOCK.lock().await;
+        let module = mock_puppeteer_module();
+        unsafe {
+            std::env::set_var("KANI_PUPPETEER_MODULE", &module);
+            std::env::set_var("KANI_MOCK_LAUNCH_FAILURE", "1");
+        }
+        let solver = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "solution": {"payload": "captured"}
+            })))
+            .mount(&solver)
+            .await;
+        let http = crate::http::SmartClient::new(Some(solver.uri())).expect("smart client");
+        let handle = null_handle();
+
+        let payload = capture_page_payload_resilient(
+            &handle,
+            &http,
+            "https://example.test/",
+            "",
+            200,
+            Some("unavailable-browser-source"),
+            false,
+        )
+        .await
+        .expect("solver capture");
+        assert_eq!(payload, "captured");
+        assert_eq!(solver.received_requests().await.unwrap().len(), 1);
+
+        let _ = shutdown(&handle, "test-complete").await;
+        unsafe {
+            std::env::remove_var("KANI_MOCK_LAUNCH_FAILURE");
+            std::env::remove_var("KANI_PUPPETEER_MODULE");
+        }
+        let _ = std::fs::remove_file(module);
+    }
+
+    #[tokio::test]
+    async fn resilient_capture_does_not_bypass_the_browser_security_gate() {
+        use wiremock::{MockServer, ResponseTemplate};
+
+        let _guard = ENV_LOCK.lock().await;
+        unsafe { std::env::set_var("KANI_BROWSER_ENABLED", "false") };
+        let solver = MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&solver)
+            .await;
+        let http = crate::http::SmartClient::new(Some(solver.uri())).expect("smart client");
+        let handle = null_handle();
+
+        let error = capture_page_payload_resilient(
+            &handle,
+            &http,
+            "https://example.test/",
+            "",
+            200,
+            Some("disabled-browser-source"),
+            false,
+        )
+        .await
+        .expect_err("browser gate");
+        assert!(error.to_string().contains("disabled"));
+        assert!(solver.received_requests().await.unwrap().is_empty());
+
+        unsafe { std::env::remove_var("KANI_BROWSER_ENABLED") };
     }
 
     #[tokio::test]

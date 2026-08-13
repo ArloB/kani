@@ -75,15 +75,30 @@ impl WasmSource {
     }
 
     pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
-        kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for),
+            self.smart_client
+                .reap_solver_sessions(self.extension_id(), idle_for)
+        );
+        local || solver > 0
     }
 
     pub async fn shutdown_v8(&self, reason: &str) -> bool {
-        kani_core::v8_process::shutdown(&self.v8_process, reason).await
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::shutdown(&self.v8_process, reason),
+            self.smart_client
+                .destroy_solver_sessions(self.extension_id())
+        );
+        local || solver > 0
     }
 
     pub async fn retire_v8(&self, reason: &str) -> bool {
-        kani_core::v8_process::retire(&self.v8_process, reason).await
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::retire(&self.v8_process, reason),
+            self.smart_client
+                .destroy_solver_sessions(self.extension_id())
+        );
+        local || solver > 0
     }
 
     pub fn set_browser_enabled(&self, enabled: bool) {

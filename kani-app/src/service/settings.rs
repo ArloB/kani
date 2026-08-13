@@ -337,8 +337,10 @@ impl AppService {
                 } else {
                     Some(s.flaresolverr_url)
                 };
-                self.smart_client.update_solver_url(new_solver.clone());
-                self.proxy_client.update_solver_url(new_solver);
+                self.smart_client
+                    .update_solver_url(new_solver.clone())
+                    .await;
+                self.proxy_client.update_solver_url(new_solver).await;
                 self.audit(Some(user_id), "settings.update.advanced", None, None)
                     .await;
             }

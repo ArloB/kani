@@ -797,6 +797,13 @@ impl scripting::Host for HostState {
         if !self.browser_enabled {
             return Err("Browser capability is disabled for this source".to_string());
         }
+        let host = page_url
+            .parse::<url::Url>()
+            .map_err(|error| format!("Invalid browser page URL: {error}"))?
+            .host_str()
+            .unwrap_or_default()
+            .to_string();
+        self.check_allowed_host(&host)?;
         self.charge_io()?;
         let (auto_scroll, init_script) = init_script
             .strip_prefix("/*kani:auto-scroll=false*/\n")

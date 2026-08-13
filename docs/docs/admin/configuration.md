@@ -70,10 +70,14 @@ primarily for initial provisioning and managed deployments.
 Raising scripting budgets weakens a resource limit applied to untrusted extension logic. Prefer
 rewriting the extension unless a measured workload requires the change.
 
-Browser-backed sources can reuse Cloudflare clearance obtained through the FlareSolverr URL in
-**Settings → Advanced**. Kani and FlareSolverr must use the same public egress IP, because the
-clearance is commonly bound to both the solver's user agent and network path. Kani does not attempt
-to complete interactive Turnstile prompts.
+For browser-backed sources behind a managed challenge, run
+`ghcr.io/kani-app/flaresolverr:latest` and configure its `/v1` URL through
+**Settings → Advanced**. It solves the challenge and runs the extension's capture script in the same
+browser, then reuses one cleared session per source and domain. Keep this solver private:
+extension-authored JavaScript is sent to it for execution. A stock FlareSolverr remains supported
+for ordinary HTTP challenge solving and best-effort cookie replay, but cannot reliably capture
+device-bound pages. `KANI_BROWSER_ENABLED=false` and each source's browser toggle disable both the
+local and solver-backed browser paths.
 
 ## Capacity and diagnostics
 

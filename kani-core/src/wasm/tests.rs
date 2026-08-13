@@ -485,3 +485,48 @@ fn ext_error_from_wit_maps_source_updating() {
         kani_shared::extension::ExtensionErrorKind::Updating
     );
 }
+
+#[tokio::test]
+async fn browser_capture_is_blocked_for_a_disallowed_host() {
+    use super::kani::extension::scripting::Host as _;
+
+    let mut state = HostState {
+        allowed_host: AllowedHost::Restricted("example.com".to_string()),
+        ..Default::default()
+    };
+
+    let error = state
+        .capture_page_payload(
+            "https://evil.com/browse".to_string(),
+            "passPayload('x')".to_string(),
+            1000,
+        )
+        .await
+        .expect_err("a capture outside the source's allowed host must be refused");
+
+    assert!(
+        error.contains("evil.com") || error.contains("not permitted") || error.contains("blocked"),
+        "the refusal names the host policy, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn browser_capture_rejects_an_unparseable_url() {
+    use super::kani::extension::scripting::Host as _;
+
+    let mut state = HostState {
+        allowed_host: AllowedHost::Restricted("example.com".to_string()),
+        ..Default::default()
+    };
+
+    let error = state
+        .capture_page_payload(
+            "not a url".to_string(),
+            "passPayload('x')".to_string(),
+            1000,
+        )
+        .await
+        .expect_err("a malformed page URL must not reach the browser");
+
+    assert!(error.contains("Invalid browser page URL"), "got: {error}");
+}

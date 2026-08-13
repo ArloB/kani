@@ -29,6 +29,14 @@ const CIRCUIT_COOLDOWN_SECS: u64 = 30;
 /// unreachable solver cannot hang the request indefinitely.
 const SOLVER_TIMEOUT_SECS: u64 = 65;
 const REQUEST_TIMEOUT_SECS: u64 = 35;
+/// `kani.capture` spends its budget on the challenge solve, the reload, and
+/// only then the capture, so the solver's overall ceiling has to exceed the
+/// caller's capture timeout or the solve alone can exhaust it.
+const SOLVER_CAPTURE_SOLVE_HEADROOM_MS: u64 = 60_000;
+const SOLVER_CAPTURE_TRANSPORT_BUFFER_MS: u64 = 5_000;
+const SOLVER_ROUTE_TTL_SECS: u64 = 30 * 60;
+const SOLVER_SESSION_TTL_MINUTES: u64 = 5;
+const SOLVER_SESSION_CONTROL_TIMEOUT_SECS: u64 = 10;
 /// Allows the complete retry schedule and one solver attempt to finish.
 const WHOLE_CALL_DEADLINE_SECS: u64 = 120;
 
@@ -187,6 +195,67 @@ pub struct BrowserChallengeCredentials {
     pub cookie_header: String,
     pub user_agent: String,
     pub from_cache: bool,
+}
+
+/// What the configured solver can do for us, established by probing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolverCapability {
+    Unreachable,
+    Unauthorized,
+    /// Cannot run scripted capture (stock FlareSolverr, Byparr), but is still
+    /// fully usable for ordinary HTTP challenge solving.
+    Basic,
+    Capture,
+}
+
+impl SolverCapability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unreachable => "unreachable",
+            Self::Unauthorized => "unauthorized",
+            Self::Basic => "basic",
+            Self::Capture => "capture",
+        }
+    }
+}
+
+/// Absent means the solver is unauthenticated; a key is never invented.
+fn solver_secret() -> Option<&'static str> {
+    static SECRET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SECRET
+        .get_or_init(|| {
+            std::env::var("KANI_SOLVER_SECRET")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .as_deref()
+}
+
+/// Failure classes callers use to distinguish an incompatible stock solver from a failed capture.
+#[derive(Debug)]
+pub enum SolverCaptureError {
+    Unsupported,
+    Unauthorized,
+    Failed(String),
+}
+
+impl std::fmt::Display for SolverCaptureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported => write!(
+                f,
+                "the configured solver does not support the 'kani.capture' command; \
+                 a Kani-compatible FlareSolverr image is required for browser sources \
+                 behind a managed challenge"
+            ),
+            Self::Unauthorized => write!(
+                f,
+                "the solver rejected Kani's key; check KANI_SOLVER_SECRET matches \
+                 the solver's API_KEY"
+            ),
+            Self::Failed(message) => write!(f, "{message}"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -402,6 +471,9 @@ pub struct SmartClient {
     client: rquest::Client,
     pub credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
     solver_url: Arc<ArcSwap<Option<String>>>,
+    solver_routes: Arc<dashmap::DashMap<String, std::time::Instant>>,
+    solver_sessions: Arc<dashmap::DashMap<String, std::time::Instant>>,
+    solver_capture_support: Arc<std::sync::atomic::AtomicU8>,
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
     pub rate_states: Arc<dashmap::DashMap<String, Arc<RateState>>>,
@@ -469,6 +541,9 @@ impl SmartClient {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
+            solver_routes: Arc::new(dashmap::DashMap::new()),
+            solver_sessions: Arc::new(dashmap::DashMap::new()),
+            solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
@@ -501,6 +576,9 @@ impl SmartClient {
             client,
             credentials,
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
+            solver_routes: Arc::new(dashmap::DashMap::new()),
+            solver_sessions: Arc::new(dashmap::DashMap::new()),
+            solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving,
             host_circuits,
             rate_states: Arc::new(dashmap::DashMap::new()),
@@ -1172,9 +1250,7 @@ impl SmartClient {
             }
         }
 
-        let response = client
-            .post(solver_url)
-            .header("Content-Type", "application/json")
+        let response = Self::solver_request(&client, solver_url)
             .body(body.to_string())
             .send()
             .await?;
@@ -1259,6 +1335,124 @@ impl SmartClient {
             .is_some_and(|url| !url.trim().is_empty())
     }
 
+    fn solver_request(client: &rquest::Client, solver_url: &str) -> rquest::RequestBuilder {
+        let builder = client
+            .post(solver_url)
+            .header("Content-Type", "application/json");
+        match solver_secret() {
+            Some(secret) => builder.header("X-Api-Key", secret),
+            None => builder,
+        }
+    }
+
+    fn solver_index_url(solver_url: &str) -> Option<String> {
+        let mut parsed = solver_url.parse::<url::Url>().ok()?;
+        parsed.set_path("/");
+        parsed.set_query(None);
+        Some(parsed.to_string())
+    }
+
+    /// Establishes what the configured solver can do, and caches it. The index
+    /// is unauthenticated while the commands are not, so both are checked.
+    pub async fn probe_solver_capability(&self, url: &str) -> SolverCapability {
+        let Ok(client) = rquest::Client::builder()
+            .timeout(self.timings.solver_timeout)
+            .build()
+        else {
+            return SolverCapability::Unreachable;
+        };
+
+        let Some(index_url) = Self::solver_index_url(url) else {
+            return SolverCapability::Unreachable;
+        };
+        let Ok(index) = client.get(&index_url).send().await else {
+            return SolverCapability::Unreachable;
+        };
+        if !index.status().is_success() {
+            return SolverCapability::Unreachable;
+        }
+        let Ok(body) = index.json::<serde_json::Value>().await else {
+            return SolverCapability::Unreachable;
+        };
+
+        let capabilities: Vec<&str> = body["capabilities"]
+            .as_array()
+            .map(|values| values.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        let sessions = capabilities.contains(&"kani.capture/2");
+        let capture = sessions || capabilities.contains(&"kani.capture/1");
+
+        let probe = Self::solver_request(&client, url)
+            .body(json!({ "cmd": "sessions.list" }).to_string())
+            .send()
+            .await;
+        match probe {
+            Ok(response) if response.status().as_u16() == 401 => SolverCapability::Unauthorized,
+            Ok(_) => {
+                let state = if !capture {
+                    2
+                } else if sessions {
+                    3
+                } else {
+                    1
+                };
+                self.solver_capture_support
+                    .store(state, std::sync::atomic::Ordering::Relaxed);
+                if capture {
+                    SolverCapability::Capture
+                } else {
+                    SolverCapability::Basic
+                }
+            }
+            Err(_) => SolverCapability::Unreachable,
+        }
+    }
+
+    pub async fn solver_capability(&self) -> SolverCapability {
+        let guard = self.solver_url.load();
+        match guard.as_deref() {
+            Some(url) if !url.trim().is_empty() => self.probe_solver_capability(url).await,
+            _ => SolverCapability::Unreachable,
+        }
+    }
+
+    fn solver_route_key(source_key: Option<&str>, url: &str) -> String {
+        let source = source_key.unwrap_or("__default__");
+        let domain = url
+            .parse::<url::Url>()
+            .ok()
+            .and_then(|url| url.host_str().map(base_domain))
+            .unwrap_or_else(|| url.to_string());
+        format!("{source}\0{domain}")
+    }
+
+    fn solver_session_id(key: &str) -> String {
+        use sha2::{Digest, Sha256};
+
+        let digest = Sha256::digest(key.as_bytes());
+        format!("kani-{digest:x}")
+    }
+
+    pub(crate) fn solver_route_preferred(&self, source_key: Option<&str>, url: &str) -> bool {
+        let key = Self::solver_route_key(source_key, url);
+        let Some(route) = self.solver_routes.get(&key) else {
+            return false;
+        };
+        if route.elapsed() < std::time::Duration::from_secs(SOLVER_ROUTE_TTL_SECS) {
+            return true;
+        }
+        drop(route);
+        self.solver_routes.remove(&key);
+        false
+    }
+
+    pub(crate) fn remember_solver_route(&self, source_key: Option<&str>, url: &str) {
+        self.solver_routes.insert(
+            Self::solver_route_key(source_key, url),
+            std::time::Instant::now(),
+        );
+    }
+
     pub async fn browser_challenge_credentials(
         &self,
         url: &str,
@@ -1306,6 +1500,184 @@ impl SmartClient {
         })
     }
 
+    /// Runs `init_script` inside the solver's own cleared browser and returns
+    /// the value the page hands to `passPayload`. Cloudflare ties clearance to
+    /// the visitor and device, so replaying the solver's cookies into Kani's
+    /// Puppeteer is rejected; the capture has to happen where the solve did.
+    pub async fn solver_capture(
+        &self,
+        url: &str,
+        init_script: &str,
+        timeout_ms: u32,
+        source_key: Option<&str>,
+        auto_scroll: bool,
+    ) -> std::result::Result<String, SolverCaptureError> {
+        use std::sync::atomic::Ordering;
+
+        if self.solver_capture_support.load(Ordering::Relaxed) == 2 {
+            return Err(SolverCaptureError::Unsupported);
+        }
+        let guard = self.solver_url.load();
+        let solver_url = guard
+            .as_deref()
+            .ok_or_else(|| SolverCaptureError::Failed("No solver URL configured".into()))?;
+
+        let solver_max_timeout =
+            u64::from(timeout_ms).saturating_add(SOLVER_CAPTURE_SOLVE_HEADROOM_MS);
+        let transport_timeout = self
+            .timings
+            .solver_timeout
+            .max(std::time::Duration::from_millis(
+                solver_max_timeout.saturating_add(SOLVER_CAPTURE_TRANSPORT_BUFFER_MS),
+            ));
+        let client = rquest::Client::builder()
+            .timeout(transport_timeout)
+            .build()
+            .map_err(|error| SolverCaptureError::Failed(error.to_string()))?;
+
+        let session_key = source_key.map(|_| Self::solver_route_key(source_key, url));
+        let session_id = session_key.as_deref().map(Self::solver_session_id);
+        if self.solver_capture_support.load(Ordering::Relaxed) == 0 {
+            match self.probe_solver_capability(solver_url).await {
+                SolverCapability::Basic => return Err(SolverCaptureError::Unsupported),
+                SolverCapability::Unauthorized => return Err(SolverCaptureError::Unauthorized),
+                SolverCapability::Unreachable | SolverCapability::Capture => {}
+            }
+        }
+        if self.solver_capture_support.load(Ordering::Relaxed) == 2 {
+            return Err(SolverCaptureError::Unsupported);
+        }
+
+        let use_session =
+            session_id.is_some() && self.solver_capture_support.load(Ordering::Relaxed) != 1;
+
+        let mut body = json!({
+            "cmd": "kani.capture",
+            "url": url,
+            "initScript": init_script,
+            "captureTimeout": timeout_ms,
+            "autoScroll": auto_scroll,
+            "maxTimeout": solver_max_timeout,
+        });
+        if use_session {
+            body["session"] = json!(session_id.as_deref());
+            body["session_ttl_minutes"] = json!(SOLVER_SESSION_TTL_MINUTES);
+            body["profileKey"] = json!(session_id.as_deref());
+        }
+
+        let response = Self::solver_request(&client, solver_url)
+            .body(body.to_string())
+            .send()
+            .await
+            .map_err(|error| SolverCaptureError::Failed(error.to_string()))?;
+
+        let status = response.status();
+        if status.as_u16() == 401 {
+            self.solver_capture_support.store(0, Ordering::Relaxed);
+            return Err(SolverCaptureError::Unauthorized);
+        }
+        let response: serde_json::Value = response.json().await.map_err(|error| {
+            SolverCaptureError::Failed(format!(
+                "FlareSolverr returned HTTP {status} with an unreadable body: {error}"
+            ))
+        })?;
+
+        let message = response["message"].as_str().unwrap_or("no message");
+        if response["status"].as_str().unwrap_or("") != "ok" {
+            return Err(SolverCaptureError::Failed(format!(
+                "FlareSolverr capture failed: {message}"
+            )));
+        }
+
+        let payload = response["solution"]["payload"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                SolverCaptureError::Failed("FlareSolverr capture returned no payload".to_string())
+            })?;
+        self.solver_capture_support
+            .store(if use_session { 3 } else { 1 }, Ordering::Relaxed);
+        if use_session && let Some(key) = session_key.as_ref() {
+            self.solver_sessions
+                .insert(key.clone(), std::time::Instant::now());
+        }
+        Ok(payload)
+    }
+
+    async fn destroy_solver_session_keys(&self, keys: Vec<String>) -> usize {
+        let solver_url = self.solver_url.load_full();
+        let Some(solver_url) = solver_url.as_ref() else {
+            return 0;
+        };
+        let client = match rquest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                SOLVER_SESSION_CONTROL_TIMEOUT_SECS,
+            ))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "failed to build solver session control client");
+                return 0;
+            }
+        };
+        let mut destroyed = 0;
+        for key in keys {
+            let session = Self::solver_session_id(&key);
+            let result = Self::solver_request(&client, solver_url)
+                .body(
+                    json!({
+                        "cmd": "sessions.destroy",
+                        "session": session,
+                    })
+                    .to_string(),
+                )
+                .send()
+                .await;
+            match result {
+                Ok(response) if response.status().is_success() => {}
+                Ok(response) => {
+                    tracing::warn!(status = %response.status(), %session, "solver session destroy failed");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, %session, "solver session destroy failed");
+                }
+            }
+            self.solver_sessions.remove(&key);
+            self.solver_routes.remove(&key);
+            destroyed += 1;
+        }
+        destroyed
+    }
+
+    /// Destroys every solver browser session owned by one source.
+    pub async fn destroy_solver_sessions(&self, source_key: &str) -> usize {
+        let prefix = format!("{source_key}\0");
+        let keys = self
+            .solver_sessions
+            .iter()
+            .filter(|entry| entry.key().starts_with(&prefix))
+            .map(|entry| entry.key().clone())
+            .collect();
+        self.destroy_solver_session_keys(keys).await
+    }
+
+    /// Destroys solver browser sessions for one source after their idle timeout.
+    pub async fn reap_solver_sessions(
+        &self,
+        source_key: &str,
+        idle_for: std::time::Duration,
+    ) -> usize {
+        let prefix = format!("{source_key}\0");
+        let keys = self
+            .solver_sessions
+            .iter()
+            .filter(|entry| entry.key().starts_with(&prefix) && entry.value().elapsed() >= idle_for)
+            .map(|entry| entry.key().clone())
+            .collect();
+        self.destroy_solver_session_keys(keys).await
+    }
+
     async fn get_rendered_page(&self, url: &str) -> Result<SmartResponse> {
         let guard = self.solver_url.load();
         let solver_url = guard
@@ -1322,9 +1694,7 @@ impl SmartClient {
           "maxTimeout": 60000
         });
 
-        let response = client
-            .post(solver_url)
-            .header("Content-Type", "application/json")
+        let response = Self::solver_request(&client, solver_url)
             .body(body.to_string())
             .send()
             .await?;
@@ -1489,8 +1859,17 @@ impl SmartClient {
         }
     }
 
-    pub fn update_solver_url(&self, url: Option<String>) {
+    pub async fn update_solver_url(&self, url: Option<String>) {
+        let keys = self
+            .solver_sessions
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+        self.destroy_solver_session_keys(keys).await;
         self.solver_url.store(Arc::new(url));
+        self.solver_routes.clear();
+        self.solver_capture_support
+            .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -1560,6 +1939,9 @@ impl SmartClient {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url: Arc::new(ArcSwap::from_pointee(None)),
+            solver_routes: Arc::new(dashmap::DashMap::new()),
+            solver_sessions: Arc::new(dashmap::DashMap::new()),
+            solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
@@ -1794,10 +2176,236 @@ mod tests {
     use wiremock::matchers::{body_partial_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    async fn solver_with(capabilities: Option<serde_json::Value>, v1_status: u16) -> MockServer {
+        let server = MockServer::start().await;
+        let mut index = serde_json::json!({ "msg": "ready", "version": "3.5.0" });
+        if let Some(caps) = capabilities {
+            index["capabilities"] = caps;
+        }
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(index))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1"))
+            .respond_with(
+                ResponseTemplate::new(v1_status).set_body_json(serde_json::json!({
+                    "status": "ok", "sessions": []
+                })),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn probe_reports_capture_when_sessions_are_advertised() {
+        let server = solver_with(
+            Some(serde_json::json!(["kani.capture/1", "kani.capture/2"])),
+            200,
+        )
+        .await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+
+        assert_eq!(
+            client
+                .probe_solver_capability(&(server.uri() + "/v1"))
+                .await,
+            SolverCapability::Capture
+        );
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_reports_capture_without_sessions_for_version_one_only() {
+        let server = solver_with(Some(serde_json::json!(["kani.capture/1"])), 200).await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+
+        assert_eq!(
+            client
+                .probe_solver_capability(&(server.uri() + "/v1"))
+                .await,
+            SolverCapability::Capture
+        );
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stock_solver_without_capabilities_probes_as_basic() {
+        let server = solver_with(None, 200).await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+
+        assert_eq!(
+            client
+                .probe_solver_capability(&(server.uri() + "/v1"))
+                .await,
+            SolverCapability::Basic
+        );
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unrelated_capability_list_still_probes_as_basic() {
+        let server = solver_with(Some(serde_json::json!(["something.else/1"])), 200).await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+
+        assert_eq!(
+            client
+                .probe_solver_capability(&(server.uri() + "/v1"))
+                .await,
+            SolverCapability::Basic
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_probes_as_unauthorized_and_does_not_cache() {
+        let server = solver_with(Some(serde_json::json!(["kani.capture/2"])), 401).await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+
+        assert_eq!(
+            client
+                .probe_solver_capability(&(server.uri() + "/v1"))
+                .await,
+            SolverCapability::Unauthorized
+        );
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a rejected key says nothing about the image's capabilities"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_absent_solver_probes_as_unreachable() {
+        let client = SmartClient::new(Some("http://127.0.0.1:1/v1".into())).unwrap();
+        assert_eq!(
+            client
+                .probe_solver_capability("http://127.0.0.1:1/v1")
+                .await,
+            SolverCapability::Unreachable
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_the_solver_url_forces_a_re_probe() {
+        let server = solver_with(Some(serde_json::json!(["kani.capture/2"])), 200).await;
+        let client = SmartClient::new(Some(server.uri() + "/v1")).unwrap();
+        client
+            .probe_solver_capability(&(server.uri() + "/v1"))
+            .await;
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
+
+        client
+            .update_solver_url(Some("http://example.invalid/v1".into()))
+            .await;
+        assert_eq!(
+            client
+                .solver_capture_support
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn the_index_url_is_derived_from_the_command_url() {
+        assert_eq!(
+            SmartClient::solver_index_url("http://solver:8191/v1").as_deref(),
+            Some("http://solver:8191/")
+        );
+    }
+
     #[test]
     fn empty_solver_url_is_not_configured() {
         let client = SmartClient::new(Some("   ".into())).unwrap();
         assert!(!client.solver_configured());
+    }
+
+    #[test]
+    fn solver_session_ids_are_stable_and_source_scoped() {
+        let first = SmartClient::solver_route_key(Some("source-a"), "https://sub.example.com/a");
+        let same = SmartClient::solver_route_key(Some("source-a"), "https://example.com/b");
+        let other = SmartClient::solver_route_key(Some("source-b"), "https://example.com/a");
+
+        assert_eq!(
+            SmartClient::solver_session_id(&first),
+            SmartClient::solver_session_id(&same)
+        );
+        assert_ne!(
+            SmartClient::solver_session_id(&first),
+            SmartClient::solver_session_id(&other)
+        );
+        assert_eq!(SmartClient::solver_session_id(&first).len(), 69);
+    }
+
+    #[tokio::test]
+    async fn solver_capture_owns_and_destroys_a_source_session() {
+        let server = MockServer::start().await;
+        let key = SmartClient::solver_route_key(Some("source-a"), "https://sub.example.com/a");
+        let session = SmartClient::solver_session_id(&key);
+        Mock::given(method("POST"))
+            .and(body_partial_json(serde_json::json!({
+                "cmd": "kani.capture",
+                "session": session,
+                "session_ttl_minutes": SOLVER_SESSION_TTL_MINUTES,
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok",
+                "solution": {"payload": "captured"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(serde_json::json!({
+                "cmd": "sessions.destroy",
+                "session": session,
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ok"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = SmartClient::new(Some(server.uri())).unwrap();
+
+        let payload = client
+            .solver_capture(
+                "https://sub.example.com/a",
+                "passPayload('captured')",
+                1000,
+                Some("source-a"),
+                false,
+            )
+            .await
+            .expect("capture");
+        assert_eq!(payload, "captured");
+        assert!(client.solver_sessions.contains_key(&key));
+
+        assert_eq!(client.destroy_solver_sessions("source-a").await, 1);
+        assert!(!client.solver_sessions.contains_key(&key));
     }
 
     #[tokio::test]

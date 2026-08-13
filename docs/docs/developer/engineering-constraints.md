@@ -55,6 +55,30 @@ requires an explicit profile to select the browser-enabled target.
 
 **Revalidate when.** Chromium, puppeteer, the browser source set, or the image base changes.
 
+### Managed-challenge capture stays in the solving browser
+
+**Constraint.** The challenge solve, host-page token generation, extension script, and payload
+capture must run in one solver browser session. Clearance cookies are not transferred to Kani's
+Chromium as the primary path.
+
+**Evidence.** Cloudflare documents clearance as bound to the visitor and device. Against live
+Comix on 2026-08-12, the Kani solver captured the same 70,878-byte payload cold and warm. A fresh
+solver took 12.53 seconds; its cleared session took 2.02 seconds. The earlier two-browser path took
+about 21.4 seconds in one end-to-end run because local Puppeteer first spent about nine seconds on
+a challenge it could not pass.
+
+**Consequence.** Cookie fidelity cannot make cross-browser replay reliable. A solver without
+scripted capture can still solve ordinary HTTP requests, but protected browser sources may fail.
+The solver executes extension-authored JavaScript and must remain private.
+
+**Enforcement.** `kani.capture/2` installs the script before page code, rearms the idle deadline on
+`resetPayloadTimer`, caps payload size, serialises each deterministic per-source/domain session,
+and removes injected scripts after every capture. Kani memoises challenged routes, reaps sessions
+with source browser state, and keeps runtime browser-disable controls as hard gates.
+
+**Revalidate when.** Cloudflare clearance behavior, the solver protocol, browser-source security
+controls, session lifecycle, or the browser source set changes.
+
 ## HTTP routing
 
 ### Static source capabilities must coexist with the parameterized route
