@@ -1124,7 +1124,15 @@ async function _fetch(gridEl, paginEl, isSearch) {
     errorMessage: t('source.error.load_manga'),
     onRetry: () => _fetch(gridEl, paginEl, isSearch),
     onError: (e, gridEl) => {
-      if (/** @type {any} */ (e)?.code !== 'source_disabled') return false;
+      const err = /** @type {any} */ (e);
+      if (err?.code === 'flaresolverr_required') {
+        gridEl.appendChild(createErrorState({
+          message: err?.hint ?? t('source.error.solver_required'),
+          onRetry: () => _fetch(gridEl, paginEl, isSearch),
+        }));
+        return true;
+      }
+      if (err?.code !== 'source_disabled') return false;
       const panel = /** @type {HTMLElement | null} */ (gridEl.closest('[data-panel]'));
       if (panel) _showDisabledPanel(panel);
       else gridEl.appendChild(createErrorState({ message: t('source.disabled.title') }));

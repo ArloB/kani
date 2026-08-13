@@ -882,6 +882,7 @@ export default {
   'source.search.placeholder': 'Search manga…',
   'source.search.aria': 'Search manga in this source',
   'source.filters.open': 'Open filters',
+  'source.error.solver_required': 'This source needs a solver that can run capture scripts.',
   'source.disabled.title': 'This extension is disabled',
   'source.disabled.hint': 'Enable it in the Settings tab to browse manga.',
   'source.library.empty': 'No library manga from this source.',
