@@ -221,6 +221,48 @@ impl SolverCapability {
     }
 }
 
+/// Suffixes that name a machine on the local network rather than a routable
+/// host, so plain HTTP to them is not a warning-worthy exposure.
+const LOCAL_SUFFIXES: &[&str] = &[".local", ".lan", ".home", ".internal", ".localdomain"];
+
+/// True when solver traffic would cross a routable network in the clear.
+///
+/// Deliberately narrow: warning on every non-HTTPS solver would fire on
+/// `http://flaresolverr:8191`, which is the documented compose setup, and a
+/// warning that fires on the recommended configuration teaches people to
+/// ignore warnings.
+pub fn solver_transport_is_exposed(url: &str) -> bool {
+    let Ok(parsed) = url.parse::<url::Url>() else {
+        return false;
+    };
+    if parsed.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => {
+                !(v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified())
+            }
+            std::net::IpAddr::V6(v6) => {
+                let unique_local = v6.octets()[0] & 0xfe == 0xfc;
+                let link_local = v6.segments()[0] & 0xffc0 == 0xfe80;
+                !(v6.is_loopback() || v6.is_unspecified() || unique_local || link_local)
+            }
+        };
+    }
+
+    if host == "localhost" || LOCAL_SUFFIXES.iter().any(|s| host.ends_with(s)) {
+        return false;
+    }
+
+    host.contains('.')
+}
+
 /// Absent means the solver is unauthenticated; a key is never invented.
 fn solver_secret() -> Option<&'static str> {
     static SECRET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
@@ -1848,6 +1890,20 @@ impl SmartClient {
         }
     }
 
+    /// Warns when the solver secret and the captured payload would cross a
+    /// routable network in the clear. The payload matters more than the key:
+    /// signing would protect the credential but leaves the extension script
+    /// and the captured data readable, which only TLS fixes.
+    pub fn solver_transport_warning(&self) -> Option<&'static str> {
+        let guard = self.solver_url.load();
+        let url = guard.as_deref()?;
+        solver_transport_is_exposed(url).then_some(
+            "the solver URL uses plain HTTP to a routable host, so the key and captured \
+             payloads cross the network in the clear; put it behind HTTPS or keep it on a \
+             private network",
+        )
+    }
+
     pub async fn update_solver_url(&self, url: Option<String>) {
         let keys = self
             .solver_sessions
@@ -1856,6 +1912,9 @@ impl SmartClient {
             .collect();
         self.destroy_solver_session_keys(keys).await;
         self.solver_url.store(Arc::new(url));
+        if let Some(warning) = self.solver_transport_warning() {
+            tracing::warn!("{warning}");
+        }
         self.solver_capture_support
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
@@ -2322,6 +2381,41 @@ mod tests {
             SmartClient::solver_index_url("http://solver:8191/v1").as_deref(),
             Some("http://solver:8191/")
         );
+    }
+
+    #[test]
+    fn a_private_or_local_solver_is_not_flagged() {
+        for url in [
+            "http://127.0.0.1:8191/v1",
+            "http://localhost:8191/v1",
+            "http://flaresolverr:8191/v1",
+            "http://192.168.1.50:8191/v1",
+            "http://10.0.0.4:8191/v1",
+            "http://172.16.5.9:8191/v1",
+            "http://nas.local:8191/v1",
+            "http://solver.lan:8191/v1",
+            "http://[::1]:8191/v1",
+            "https://solver.example.com/v1",
+        ] {
+            assert!(
+                !solver_transport_is_exposed(url),
+                "{url} should not warn: it is private, local, or encrypted"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_http_to_a_routable_host_is_flagged() {
+        for url in [
+            "http://solver.example.com/v1",
+            "http://solver.example.com:8191/v1",
+            "http://203.0.113.10:8191/v1",
+        ] {
+            assert!(
+                solver_transport_is_exposed(url),
+                "{url} should warn: key and payload cross a routable network in the clear"
+            );
+        }
     }
 
     #[test]
