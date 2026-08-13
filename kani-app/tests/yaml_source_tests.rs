@@ -966,7 +966,7 @@ endpoints:
     let message = error.to_string();
 
     assert!(
-        message.contains("browser capture"),
+        message.contains("capture scripts"),
         "the refusal names what is missing, got: {message}"
     );
     assert!(

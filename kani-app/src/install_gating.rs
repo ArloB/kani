@@ -24,22 +24,27 @@ pub fn check_min_kani_version(min_version: Option<&str>, host_version: &str) -> 
 }
 
 fn browser_payload_refusal(solver: SolverCapability) -> Option<String> {
-    let detail = match solver {
+    let message = match solver {
         SolverCapability::Capture => return None,
         SolverCapability::Basic => {
-            "Your solver is reachable and solves HTTP challenges, but does not provide it — \
-             switch to the ghcr.io/kani-app/flaresolverr image in Settings > Advanced."
+            "This source needs a solver that can run capture scripts. Yours solves HTTP \
+             challenges but cannot run scripts — switch it to the \
+             ghcr.io/kani-app/flaresolverr image in Settings > Advanced."
         }
         SolverCapability::Unauthorized => {
-            "The solver rejected Kani's key — check KANI_SOLVER_SECRET matches the solver's \
-             API_KEY."
+            "This source needs a solver that can run capture scripts, but the solver rejected \
+             Kani's key. Check that KANI_SOLVER_SECRET matches the solver's API_KEY."
         }
         SolverCapability::Unreachable => {
-            "No solver is reachable at the configured URL — check Settings > Advanced."
+            "This source needs a solver that can run capture scripts, but no solver answered at \
+             the configured URL. Check the solver URL in Settings > Advanced."
         }
-        SolverCapability::NotConfigured => "Set a solver URL in Settings > Advanced.",
+        SolverCapability::NotConfigured => {
+            "This source needs a solver that can run capture scripts. Set a solver URL in \
+             Settings > Advanced."
+        }
     };
-    Some(format!("This source needs browser capture. {detail}"))
+    Some(message.to_string())
 }
 
 pub fn check_required_capabilities(
@@ -147,7 +152,7 @@ mod tests {
             let err = check_required_capabilities(&caps(&[BROWSER_PAYLOAD]), state)
                 .expect_err("browser capture is unavailable in this state");
             assert!(
-                err.contains("browser capture"),
+                err.contains("capture scripts"),
                 "the refusal names what is missing, got: {err}"
             );
             assert!(
