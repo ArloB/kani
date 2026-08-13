@@ -24,8 +24,12 @@ fn write_cbz(path: &Path, shades: &[u8]) {
     }
     let file = std::fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
+    // The default options stamp the current time into every entry, so two
+    // archives with identical pages differ in bytes — and `archive_hash` is
+    // deliberately a hash of the file as it sits on disk.
     let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default());
     for (i, shade) in shades.iter().enumerate() {
         zip.start_file(format!("{:04}.png", i + 1), opts).unwrap();
         zip.write_all(&png_bytes(*shade)).unwrap();
