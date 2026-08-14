@@ -300,12 +300,16 @@ impl AppService {
         Ok(missing)
     }
 
-    /// Byte-identical chapters, grouped. Report-only: this complements the
-    /// title-similarity dedup in `service::dedup`, which answers a different
-    /// question and stays as it is.
+    /// Chapters holding the same pages, grouped. Report-only: this complements
+    /// the title-similarity dedup in `service::dedup`, which answers a
+    /// different question and stays as it is.
+    ///
+    /// Keyed on page identity rather than `content_hash`, so the same pages
+    /// re-zipped still group. Chapters without a manifest fall back to
+    /// `content_hash`, which only matches a byte-identical archive.
     async fn exact_duplicate_groups(&self) -> Result<Vec<Vec<i64>>> {
         let rows = sqlx::query!(
-            "SELECT content_hash, id FROM chapters \
+            "SELECT content_hash, manifest_json, id FROM chapters \
              WHERE content_hash IS NOT NULL AND download_status = 2 \
              ORDER BY content_hash, id"
         )
@@ -314,9 +318,19 @@ impl AppService {
 
         let mut groups: HashMap<String, Vec<i64>> = HashMap::new();
         for row in rows {
-            if let Some(h) = row.content_hash {
-                groups.entry(h).or_default().push(row.id);
-            }
+            let pages_key = row
+                .manifest_json
+                .as_deref()
+                .and_then(|json| {
+                    serde_json::from_str::<kani_core::manifest::ChapterManifest>(json).ok()
+                })
+                .map(|manifest| kani_core::manifest::content_identity(&manifest.pages));
+            let key = match (pages_key, row.content_hash) {
+                (Some(pages), _) => pages,
+                (None, Some(archive)) => archive,
+                (None, None) => continue,
+            };
+            groups.entry(key).or_default().push(row.id);
         }
         let mut out: Vec<Vec<i64>> = groups.into_values().filter(|g| g.len() > 1).collect();
         out.sort();

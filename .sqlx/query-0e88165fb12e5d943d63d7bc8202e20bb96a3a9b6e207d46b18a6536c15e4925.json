@@ -16,7 +16,7 @@
       {
         "name": "tags!: String",
         "ordinal": 2,
-        "type_info": "Null"
+        "type_info": "Integer"
       },
       {
         "name": "local_authors: String",

@@ -108,6 +108,22 @@ pub fn archive_hash(path: &Path) -> Result<String, ManifestError> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+/// Identity of the pages themselves, independent of how they were packed.
+///
+/// `archive_hash` changes whenever the archive is rebuilt, so it cannot answer
+/// "same content, different zip". This folds the per-page hashes — taken over
+/// decoded entries — in order, so re-zipping or recompressing the container
+/// leaves it unchanged while any change to a page, or to page order, does not.
+pub fn content_identity(pages: &[PageDigest]) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&(pages.len() as u64).to_le_bytes());
+    for page in pages {
+        hasher.update(page.content_hash.as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
 pub fn verify_archive_hash(path: &Path, expected: &str) -> Result<bool, ManifestError> {
     Ok(archive_hash(path)? == expected)
 }
@@ -404,6 +420,59 @@ mod tests {
         assert_eq!(m.pages[0].width, None);
         assert_eq!(m.pages[0].perceptual_hash, 0);
         assert_eq!(m.pages[0].content_hash.len(), 64);
+    }
+
+    fn digest(name: &str, content_hash: &str) -> PageDigest {
+        PageDigest {
+            name: name.into(),
+            bytes: 10,
+            content_hash: content_hash.into(),
+            perceptual_hash: 0,
+            width: None,
+            height: None,
+            colour: None,
+            encoder_quality: None,
+        }
+    }
+
+    #[test]
+    fn content_identity_ignores_page_names() {
+        let a = [digest("0001.png", "aa"), digest("0002.png", "bb")];
+        let b = [digest("page-1.jpg", "aa"), digest("page-2.jpg", "bb")];
+        assert_eq!(
+            content_identity(&a),
+            content_identity(&b),
+            "a repack may rename entries without changing the pages"
+        );
+    }
+
+    #[test]
+    fn content_identity_tracks_page_order() {
+        let forward = [digest("1", "aa"), digest("2", "bb")];
+        let reversed = [digest("1", "bb"), digest("2", "aa")];
+        assert_ne!(
+            content_identity(&forward),
+            content_identity(&reversed),
+            "page order is part of the chapter's identity"
+        );
+    }
+
+    #[test]
+    fn content_identity_tracks_page_count() {
+        let two = [digest("1", "aa"), digest("2", "bb")];
+        let three = [digest("1", "aa"), digest("2", "bb"), digest("3", "cc")];
+        assert_ne!(content_identity(&two), content_identity(&three));
+    }
+
+    #[test]
+    fn content_identity_separates_pages_that_would_otherwise_concatenate() {
+        let split = [digest("1", "ab"), digest("2", "c")];
+        let joined = [digest("1", "a"), digest("2", "bc")];
+        assert_ne!(
+            content_identity(&split),
+            content_identity(&joined),
+            "hashes must not run together into the same byte sequence"
+        );
     }
 
     #[test]
