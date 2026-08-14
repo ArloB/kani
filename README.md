@@ -122,9 +122,8 @@ Set these in `docker-compose.yml` or pass as `-e` flags:
 | `KANI_CORS_ORIGIN` | *(mirrors request)* | Restrict CORS to a specific origin in production |
 | `KANI_SECRET_KEY` | *(none)* | 32-byte hex key for credential encryption at rest (`openssl rand -hex 32`) |
 | `KANI_SECRET_KEY_FILE` | *(none)* | Load the encryption key from a file (for Docker secrets) |
+| `KANI_SOLVER_SECRET` | *(none)* | Shared key sent to the solver; must match its `API_KEY` |
 | `RUST_LOG` | `error` | Log level: `error`, `warn`, `info`, `debug`, `trace` |
-| `KANI_BROWSER_ENABLED` | `true` | Set `false` to disable browser-based extensions at runtime |
-| `BROWSER_IDLE_TIMEOUT_MS` | `300000` | How long to keep Chromium alive after pages close |
 
 ---
 

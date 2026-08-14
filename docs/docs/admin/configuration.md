@@ -59,10 +59,8 @@ primarily for initial provisioning and managed deployments.
 | `KANI_SOURCE_INSTALL_ALLOWED` | Disable all new upload, URL, and repository installs |
 | `KANI_OFFICIAL_REPO_URL` | Bootstrap an operator-selected signed repository |
 | `KANI_OFFICIAL_REPO_KEY` | Override its compiled or configured Ed25519 public key |
-| `KANI_BROWSER_ENABLED` | Disable browser-based source features at runtime |
-| `CHROMIUM_PATH` | Select a nonstandard Chromium executable |
-| `BROWSER_IDLE_TIMEOUT_MS` | Browser-process idle lifetime |
-| `KANI_BROWSER_PROFILES_DIR` | Override persisted browser profiles |
+| `KANI_BROWSER_PROFILES_DIR` | Location of legacy browser profiles, removed when a source is deleted |
+| `KANI_SOLVER_SECRET` | Shared key sent to the solver; must match its `API_KEY` |
 | `KANI_RHAI_MAX_OPS` | Rhai operation budget |
 | `KANI_RHAI_MAX_STRING` | Rhai string-size budget |
 | `KANI_RHAI_MAX_ARRAY` | Rhai array-size budget |
@@ -76,8 +74,7 @@ For browser-backed sources behind a managed challenge, run
 browser, then reuses one cleared session per source and domain. Keep this solver private:
 extension-authored JavaScript is sent to it for execution. A stock FlareSolverr remains supported
 for ordinary HTTP challenge solving and best-effort cookie replay, but cannot reliably capture
-device-bound pages. `KANI_BROWSER_ENABLED=false` and each source's browser toggle disable both the
-local and solver-backed browser paths.
+device-bound pages. Each source's browser toggle disables its browser endpoints.
 
 ## Capacity and diagnostics
 

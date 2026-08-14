@@ -51,10 +51,6 @@ static V8_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static V8_RESTARTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static V8_GRACEFUL_SHUTDOWNS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static V8_FORCED_TERMINATIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
-static BROWSER_REUSES_TOTAL: AtomicU64 = AtomicU64::new(0);
-static BROWSER_RECOVERY_LAUNCHES_TOTAL: AtomicU64 = AtomicU64::new(0);
-static BROWSER_CHALLENGES_TOTAL: AtomicU64 = AtomicU64::new(0);
-static BROWSER_PAGE_CLOSE_TIMEOUTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static BROWSER_SOLVER_ATTEMPTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static BROWSER_SOLVER_SUCCESSES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static BROWSER_SOLVER_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -68,10 +64,6 @@ pub fn browser_stats() -> kani_shared::types::BrowserStats {
         restarts: V8_RESTARTS_TOTAL.load(Ordering::Relaxed),
         graceful_shutdowns: V8_GRACEFUL_SHUTDOWNS_TOTAL.load(Ordering::Relaxed),
         forced_terminations: V8_FORCED_TERMINATIONS_TOTAL.load(Ordering::Relaxed),
-        browser_reuses: BROWSER_REUSES_TOTAL.load(Ordering::Relaxed),
-        recovery_launches: BROWSER_RECOVERY_LAUNCHES_TOTAL.load(Ordering::Relaxed),
-        challenges: BROWSER_CHALLENGES_TOTAL.load(Ordering::Relaxed),
-        page_close_timeouts: BROWSER_PAGE_CLOSE_TIMEOUTS_TOTAL.load(Ordering::Relaxed),
         solver_attempts: BROWSER_SOLVER_ATTEMPTS_TOTAL.load(Ordering::Relaxed),
         solver_successes: BROWSER_SOLVER_SUCCESSES_TOTAL.load(Ordering::Relaxed),
         solver_failures: BROWSER_SOLVER_FAILURES_TOTAL.load(Ordering::Relaxed),
@@ -151,11 +143,6 @@ impl V8Process {
         command
             .arg(format!("--max-old-space-size={}", cfg.max_memory_mb))
             .arg(shim_path)
-            .env(
-                "BROWSER_IDLE_TIMEOUT_MS",
-                (cfg.idle_timeout_s * 1000).to_string(),
-            )
-            .env("BROWSER_MAX_INSTANCES", cfg.max_instances.to_string())
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -232,34 +219,6 @@ impl V8Process {
         }
 
         if let Some(metrics) = val.get("metrics") {
-            BROWSER_REUSES_TOTAL.fetch_add(
-                metrics
-                    .get("browserReuses")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                Ordering::Relaxed,
-            );
-            BROWSER_RECOVERY_LAUNCHES_TOTAL.fetch_add(
-                metrics
-                    .get("recoveryLaunches")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                Ordering::Relaxed,
-            );
-            BROWSER_CHALLENGES_TOTAL.fetch_add(
-                metrics
-                    .get("challenges")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                Ordering::Relaxed,
-            );
-            BROWSER_PAGE_CLOSE_TIMEOUTS_TOTAL.fetch_add(
-                metrics
-                    .get("pageCloseTimeouts")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                Ordering::Relaxed,
-            );
             V8_GRACEFUL_SHUTDOWNS_TOTAL.fetch_add(
                 metrics
                     .get("gracefulShutdowns")

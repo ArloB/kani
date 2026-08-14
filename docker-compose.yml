@@ -48,17 +48,9 @@ services:
       # Prometheus metrics disclose extension names, upstream hosts, and error
       # counts. Scrape /metrics with an API token scoped to metrics:read.
 
-      # Set to "false" to disable browser-based extension features at runtime,
-      # even if Chromium is installed (e.g. to reclaim memory on idle servers).
-      # KANI_BROWSER_ENABLED: "false"
-
-      # Override the Chromium binary path if not at the default /usr/bin/chromium.
-      # CHROMIUM_PATH: "/usr/bin/chromium-browser"
-
-      # How long (ms) to keep the Chromium process alive after all pages close. Defaults to
-      # 300000 (5 min). Set to 0 to keep it alive indefinitely. Lower values save RAM on idle
-      # servers at the cost of process-start latency. BROWSER_IDLE_TIMEOUT_MS: "120000"
-
+      # Shared key sent to the solver on every request. Must match the solver's
+      # API_KEY. Leave unset only when the solver is unreachable from elsewhere.
+      # KANI_SOLVER_SECRET: "change-me"
 
       # Signs cover-image proxy URLs. Auto-provisioned to /data/proxy.key on
       # first boot — no action needed unless you want a fixed key across restarts.

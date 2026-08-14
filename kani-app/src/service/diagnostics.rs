@@ -37,15 +37,13 @@ pub fn uptime_secs() -> u64 {
 
 #[derive(Debug, serde::Serialize)]
 pub struct BrowserDiagnostics {
-    pub enabled: bool,
+    /// Solver capability as last established, or "unknown" before the first
+    /// probe. Never triggers one: diagnostics is a read-only surface.
+    pub solver: String,
     pub calls_total: u64,
     pub restarts: u64,
     pub graceful_shutdowns: u64,
     pub forced_terminations: u64,
-    pub browser_reuses: u64,
-    pub recovery_launches: u64,
-    pub challenges: u64,
-    pub page_close_timeouts: u64,
     pub solver_attempts: u64,
     pub solver_successes: u64,
     pub solver_failures: u64,
@@ -147,17 +145,15 @@ impl AppService {
 
         let stats = kani_core::v8_process::browser_stats();
         let browser = BrowserDiagnostics {
-            enabled: std::env::var("KANI_BROWSER_ENABLED")
-                .map(|v| v != "false" && v != "0")
-                .unwrap_or(true),
+            solver: self
+                .smart_client
+                .cached_solver_capability()
+                .map_or("unknown", kani_core::http::SolverCapability::as_str)
+                .to_string(),
             calls_total: stats.calls_total,
             restarts: stats.restarts,
             graceful_shutdowns: stats.graceful_shutdowns,
             forced_terminations: stats.forced_terminations,
-            browser_reuses: stats.browser_reuses,
-            recovery_launches: stats.recovery_launches,
-            challenges: stats.challenges,
-            page_close_timeouts: stats.page_close_timeouts,
             solver_attempts: stats.solver_attempts,
             solver_successes: stats.solver_successes,
             solver_failures: stats.solver_failures,

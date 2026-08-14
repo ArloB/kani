@@ -271,10 +271,10 @@ async fn diagnostics_returns_payload_for_admin() {
         body["browser"]["calls_total"].is_number(),
         "browser section (plan 02 stats) missing: {body}"
     );
-    assert!(body["browser"]["browser_reuses"].is_number());
-    assert!(body["browser"]["recovery_launches"].is_number());
-    assert!(body["browser"]["challenges"].is_number());
-    assert!(body["browser"]["page_close_timeouts"].is_number());
+    assert!(
+        body["browser"]["solver"].is_string(),
+        "the browser section reports solver capability, not a local browser: {body}"
+    );
     assert!(body["browser"]["solver_attempts"].is_number());
     assert!(body["browser"]["solver_successes"].is_number());
     assert!(body["browser"]["solver_failures"].is_number());

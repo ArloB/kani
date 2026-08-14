@@ -170,10 +170,6 @@ pub fn sync_runtime_counters() {
     metrics::counter!("kani_v8_process_restarts_total").absolute(stats.restarts);
     metrics::counter!("kani_v8_graceful_shutdowns_total").absolute(stats.graceful_shutdowns);
     metrics::counter!("kani_v8_forced_terminations_total").absolute(stats.forced_terminations);
-    metrics::counter!("kani_browser_reuses_total").absolute(stats.browser_reuses);
-    metrics::counter!("kani_browser_recovery_launches_total").absolute(stats.recovery_launches);
-    metrics::counter!("kani_browser_challenges_total").absolute(stats.challenges);
-    metrics::counter!("kani_browser_page_close_timeouts_total").absolute(stats.page_close_timeouts);
     metrics::counter!("kani_browser_solver_attempts_total").absolute(stats.solver_attempts);
     metrics::counter!("kani_browser_solver_successes_total").absolute(stats.solver_successes);
     metrics::counter!("kani_browser_solver_failures_total").absolute(stats.solver_failures);

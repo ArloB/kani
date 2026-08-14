@@ -1457,6 +1457,22 @@ impl SmartClient {
         }
     }
 
+    /// What the last probe established, without issuing one. Diagnostics is a
+    /// read-only surface and should not make a network call to render.
+    pub fn cached_solver_capability(&self) -> Option<SolverCapability> {
+        if !self.solver_configured() {
+            return Some(SolverCapability::NotConfigured);
+        }
+        match self
+            .solver_capture_support
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            1 | 3 => Some(SolverCapability::Capture),
+            2 => Some(SolverCapability::Basic),
+            _ => None,
+        }
+    }
+
     pub async fn solver_capability(&self) -> SolverCapability {
         let guard = self.solver_url.load();
         match guard.as_deref() {

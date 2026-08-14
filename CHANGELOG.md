@@ -6,6 +6,15 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- Kani no longer runs its own browser. Browser capture happens in the configured solver, so the
+  `KANI_BROWSER_ENABLED`, `CHROMIUM_PATH`, and `BROWSER_IDLE_TIMEOUT_MS` environment variables are
+  gone, along with the `kani_browser_reuses_total`, `kani_browser_recovery_launches_total`,
+  `kani_browser_challenges_total`, and `kani_browser_page_close_timeouts_total` metrics. Dashboards
+  referencing those series need updating; `kani_browser_solver_*` remains and now covers every
+  capture.
+
 ### Changed
 
 - `kani-cli rollback` is renamed `kani-cli backup-verify`. Its behaviour is unchanged: it checks

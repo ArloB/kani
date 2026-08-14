@@ -15,15 +15,11 @@ function BrowserCard({ refreshToken }) {
       ${b &&
       html`
         <${StatRow}
-          label=${t('diag.browser.enabled')}
-          value=${b.enabled ? t('common.yes') : t('common.no')}
+          label=${t('diag.browser.solver')}
+          value=${t(`diag.browser.solver_${b.solver}`)}
         />
         <${StatRow} label=${t('diag.browser.calls')} value=${b.calls_total} />
         <${StatRow} label=${t('diag.browser.restarts')} value=${b.restarts} />
-        <${StatRow} label=${t('diag.browser.reuses')} value=${b.browser_reuses} />
-        <${StatRow} label=${t('diag.browser.recoveries')} value=${b.recovery_launches} />
-        <${StatRow} label=${t('diag.browser.challenges')} value=${b.challenges} />
-        <${StatRow} label=${t('diag.browser.page_close_timeouts')} value=${b.page_close_timeouts} />
         <${StatRow} label=${t('diag.browser.solver_attempts')} value=${b.solver_attempts} />
         <${StatRow} label=${t('diag.browser.solver_successes')} value=${b.solver_successes} />
         <${StatRow} label=${t('diag.browser.solver_failures')} value=${b.solver_failures} />
