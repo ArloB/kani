@@ -134,6 +134,7 @@ impl Modify for StabilityAddon {
         crate::rest::settings::start_refresh_all_rest,
         crate::rest::settings::get_refresh_status,
         crate::rest::settings::update_settings,
+        crate::rest::settings::test_solver,
         // library
         crate::rest::library::get_library_filtered,
         crate::rest::library::get_library,
@@ -453,6 +454,7 @@ impl Modify for StabilityAddon {
             crate::models::PasswordResetRequestBody,
             crate::models::PasswordResetConfirmBody,
             crate::models::SendTestEmailBody,
+        crate::models::SolverTestBody,
             crate::rest::TotpCodeRequest,
             crate::rest::RegisterRequest,
         )

@@ -16,6 +16,66 @@ import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
+/**
+ * Probes the URL in the box rather than the saved one, so a change can be
+ * checked before it is committed. A solver without scripted capture is warned
+ * about, not failed: it still solves ordinary HTTP challenges.
+ */
+function SolverTest({ url }) {
+  const [result, setResult] = useState(
+    /** @type {{ tone: string, text: string, insecure: boolean } | null} */ (null),
+  );
+  const { busy, run } = useBusy();
+
+  const check = () =>
+    run(async () => {
+      setResult(null);
+      const trimmed = (url ?? '').trim();
+      if (!trimmed) {
+        setResult({
+          tone: 'text-text-muted',
+          text: t('settings.advanced.flaresolverr.result_not_configured'),
+          insecure: false,
+        });
+        return;
+      }
+      try {
+        const res = await api.testSolver(trimmed);
+        const tone =
+          res.status === 'capture'
+            ? 'text-success'
+            : res.status === 'unreachable'
+              ? 'text-danger'
+              : 'text-warn';
+        setResult({
+          tone,
+          text: t(`settings.advanced.flaresolverr.result_${res.status}`),
+          insecure: !!res.insecure_transport,
+        });
+      } catch (e) {
+        setResult({
+          tone: 'text-danger',
+          text: /** @type {any} */ (e)?.message ?? t('settings.advanced.flaresolverr.result_unreachable'),
+          insecure: false,
+        });
+      }
+    });
+
+  return html`
+    <div class="flex flex-col items-end gap-1">
+      <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${check}>
+        ${busy ? t('settings.advanced.flaresolverr.testing') : t('settings.advanced.flaresolverr.test_btn')}
+      </button>
+      ${result &&
+      html`<span class=${`text-xs text-right max-w-64 ${result.tone}`}>${result.text}</span>`}
+      ${result?.insecure &&
+      html`<span class="text-xs text-right max-w-64 text-warn"
+        >${t('settings.advanced.flaresolverr.insecure')}</span
+      >`}
+    </div>
+  `;
+}
+
 function EncryptionGroup() {
   const [status, setStatus] = useState(/** @type {any} */ (null));
   const [failed, setFailed] = useState(false);
@@ -234,13 +294,16 @@ export function AdvancedSection({ settings, bootId }) {
         label=${t('settings.advanced.flaresolverr.label')}
         description=${t('settings.advanced.flaresolverr.desc')}
       >
-        <input
-          type="url"
-          class="input w-56 text-sm"
-          placeholder="http://localhost:8191"
-          value=${form.flaresolverr_url}
-          onInput=${(e) => set('flaresolverr_url', e.target.value)}
-        />
+        <div class="flex items-center gap-2">
+          <input
+            type="url"
+            class="input w-56 text-sm"
+            placeholder="http://localhost:8191"
+            value=${form.flaresolverr_url}
+            onInput=${(e) => set('flaresolverr_url', e.target.value)}
+          />
+          <${SolverTest} url=${form.flaresolverr_url} />
+        </div>
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.library_path.label')}

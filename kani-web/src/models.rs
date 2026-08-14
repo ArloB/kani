@@ -563,6 +563,11 @@ pub struct TokenQuery {
 }
 
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub struct SolverTestBody {
+    pub url: String,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SendTestEmailBody {
     pub to: String,
 }

@@ -1878,9 +1878,17 @@ export default {
   'settings.server.restart_overlay.desc': 'The page will reload automatically.',
 
   'settings.advanced.server.group': 'Server',
+  'settings.advanced.flaresolverr.test_btn': 'Test connection',
+  'settings.advanced.flaresolverr.testing': 'Testing\u2026',
+  'settings.advanced.flaresolverr.result_capture': 'Connected. Browser sources supported.',
+  'settings.advanced.flaresolverr.result_basic': 'Connected. Challenge solving works, but browser sources need the Kani FlareSolverr image.',
+  'settings.advanced.flaresolverr.result_unauthorized': 'Reached the solver, but it rejected the key. Check KANI_SOLVER_SECRET matches the solver\u2019s API_KEY.',
+  'settings.advanced.flaresolverr.result_unreachable': 'Could not reach a solver at this URL.',
+  'settings.advanced.flaresolverr.result_not_configured': 'Enter a solver URL to test.',
+  'settings.advanced.flaresolverr.insecure': 'This URL is plain HTTP to a routable host, so the key and captured pages cross the network in the clear.',
   'settings.advanced.flaresolverr.label': 'FlareSolverr URL',
   'settings.advanced.flaresolverr.desc':
-    'Optional. Used for managed Cloudflare challenges; FlareSolverr must share Kani’s public egress IP.',
+    'Solver URL for Cloudflare challenges. The Kani FlareSolverr image additionally enables browser sources.',
   'settings.advanced.library_path.label': 'Library path',
   'settings.advanced.library_path.desc': 'Filesystem path where downloaded chapters and covers are stored.',
   'settings.advanced.wasm_path.label': 'WASM storage path',

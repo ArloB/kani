@@ -7,6 +7,7 @@ pub fn router() -> Router<AppState> {
         .route("/settings", get(get_settings).patch(update_settings))
         .route("/refresh/start", post(start_refresh_all_rest))
         .route("/refresh/status", get(get_refresh_status))
+        .route("/settings/solver/test", post(test_solver))
 }
 
 #[utoipa::path(
@@ -144,4 +145,38 @@ pub(crate) async fn get_refresh_status(
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(json!({ "is_refreshing": svc.is_refreshing().await })))
+}
+
+#[utoipa::path(
+    post, path = "/rest/settings/solver/test",
+    responses(
+        (status = 200, description = "Solver probe result"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn test_solver(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+    Json(body): Json<SolverTestBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let url = body.url.trim().to_string();
+    if url.is_empty() {
+        return Err(AppError::ValidationError(
+            "A solver URL is required.".into(),
+        ));
+    }
+
+    // Probing through a throwaway client keeps the live one's cached capability
+    // tied to the solver that is actually configured, not to whatever an admin
+    // typed into the box.
+    let probe = kani_core::http::SmartClient::new(Some(url.clone()))
+        .map_err(|e| AppError::ValidationError(format!("Invalid solver URL: {e}")))?;
+    let capability = probe.solver_capability().await;
+
+    Ok(Json(json!({
+        "status": capability.as_str(),
+        "insecure_transport": kani_core::http::solver_transport_is_exposed(&url),
+    })))
 }

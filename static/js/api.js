@@ -31,6 +31,8 @@ function _onUnauthenticatedPage() {
  * @param {string} path
  * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
  */
+const SOLVER_TEST_TIMEOUT_MS = 70000;
+
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
 
@@ -979,6 +981,14 @@ export async function getSettings() {
  */
 export async function updateSettings(payload) {
   return _req('PATCH', '/settings', { body: payload });
+}
+
+/**
+ * Probes a solver URL before it is saved, so an admin can check a change first.
+ * @param {string} url
+ */
+export async function testSolver(url) {
+  return _req('POST', '/settings/solver/test', { body: { url }, timeoutMs: SOLVER_TEST_TIMEOUT_MS });
 }
 
 export async function startRefreshAll() {

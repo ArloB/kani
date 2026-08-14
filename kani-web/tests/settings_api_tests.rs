@@ -3,8 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, create_regular_user,
-    get_req, login, test_state,
+    authed_get, authed_patch, authed_post, body_json, build_test_app, create_admin,
+    create_regular_user, get_req, login, post_json, test_state,
 };
 use tower::ServiceExt;
 
@@ -518,4 +518,88 @@ async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
             res.status()
         );
     }
+}
+
+#[tokio::test]
+async fn solver_test_requires_authentication() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(post_json(
+            "/rest/settings/solver/test",
+            serde_json::json!({ "url": "http://127.0.0.1:1/v1" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn solver_test_rejects_an_empty_url() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "   " }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn solver_test_reports_an_unreachable_solver_without_failing_the_request() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "http://127.0.0.1:1/v1" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a failed probe is a result, not an HTTP error"
+    );
+    let body = body_json(res).await;
+    assert_eq!(body["status"], "unreachable");
+    assert_eq!(body["insecure_transport"], false);
+}
+
+#[tokio::test]
+async fn solver_test_flags_plain_http_to_a_routable_host() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "http://solver.example.com/v1" }),
+        ))
+        .await
+        .unwrap();
+
+    let body = body_json(res).await;
+    assert_eq!(
+        body["insecure_transport"], true,
+        "the key and captured pages would cross the network in the clear"
+    );
 }

@@ -15,7 +15,7 @@ use crate::{
         ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterNoteRequest,
         SetChapterProgressRequest, SetMangaCategoriesRequest, SetMangaTrackingRequest,
         SetPreferenceRequest, SetReadStatusRequest, SetScanlatorModeRequest,
-        SetScanlatorPrefRequest, SetTrackerConfigRequest, SetTrackerMappingRequest,
+        SetScanlatorPrefRequest, SetTrackerConfigRequest, SetTrackerMappingRequest, SolverTestBody,
         ToggleAutoDownloadRequest, ToggleEnabledRequest, ToggleFavouritedRequest,
         ToggleSelectRequest, TokenQuery, TrackerAuthUrlQuery, TrackerCallbackQuery,
         TrackerSearchQuery, UpdateDownloadRuleRequest, UpdateFromRepoRequest, UpdateSource,
