@@ -337,20 +337,6 @@ export function AdvancedSection({ settings, bootId }) {
       >
         ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.browser_max_memory.label') })}
       <//>
-      <${SettingsRow}
-        label=${t('settings.advanced.browser_max_instances.label')}
-        description=${t('settings.advanced.browser_max_instances.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
-      >
-        ${numInput('browser_max_instances', { min: 1, max: 16, placeholder: '2', label: t('settings.advanced.browser_max_instances.label') })}
-      <//>
-      <${SettingsRow}
-        label=${t('settings.advanced.browser_idle_timeout.label')}
-        description=${t('settings.advanced.browser_idle_timeout.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
-      >
-        ${numInput('browser_idle_timeout_s', { min: 10, max: 3600, placeholder: '300', label: t('settings.advanced.browser_idle_timeout.label') })}
-      <//>
       <${ToggleRow}
         label=${t('settings.advanced.http_logging.label')}
         description=${t('settings.advanced.http_logging.desc')}

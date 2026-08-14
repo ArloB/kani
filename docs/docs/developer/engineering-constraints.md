@@ -91,12 +91,14 @@ limit.
 `idle_timeout_s` beyond reporting them. Session lifetime is now the solver's, set per capture by
 `session_ttl_minutes`.
 
-**Consequence.** Settings → Advanced still presents both controls, and their descriptions name
-Chromium profiles that no longer exist, so an operator can adjust them and observe no effect.
+**Consequence.** The columns and the settings DTO still carry both values, so a restore or an API
+client can set them and observe no effect.
 
-**Enforcement.** None yet. Removal needs a migration to drop the columns, matching changes to the
-settings DTO and UI, and `cargo sqlx prepare`, so it is batched with other pre-1.0 schema cleanup
-rather than taken as its own migration.
+**Enforcement.** Both controls are removed from Settings → Advanced, so the UI no longer offers a
+knob that does nothing. The advanced form still round-trips the stored values, so saving other
+settings does not blank the columns. Dropping them needs a migration, DTO changes, and
+`cargo sqlx prepare`, so it is batched with other pre-1.0 schema cleanup rather than taken as its
+own migration.
 
 **Revalidate when.** The pre-1.0 schema cleanup lands, or a solver-side equivalent of either
 control is exposed and needs a home.
