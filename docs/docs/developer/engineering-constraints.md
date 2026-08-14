@@ -41,31 +41,36 @@ the production-image workflow builds the same Dockerfile.
 
 **Revalidate when.** The Docker stages, cargo-chef, `.cargo/config.toml`, or linker selection changes.
 
-### Browser-assisted sources materially increase the image size
+### The Kani image ships no browser
 
-**Constraint.** Chromium and `puppeteer-core` are optional runtime dependencies used only by
-sources that capture browser-issued tokens. The standard image omits them.
+**Constraint.** Browser capture runs in the solver container. The Kani image installs neither
+Chromium nor `puppeteer-core`, and has no build argument to add them.
 
-**Evidence.** Including the browser-assisted source dependencies added approximately 250 MB to
-the container image when measured during the Docker image split. Restarting an idle Chromium
-process added approximately two seconds during the same browser-runtime testing.
+**Evidence.** Building the runtime base with and without the browser package set measured 1.44 GB
+against 260 MB on 2026-08-12, so carrying them cost 1.18 GB. The Kani image built without them on
+the same day is 340 MB and contains no `chromium` binary. The solver image is 1.07 GB, but it is
+already required for any source behind a managed challenge, so it is not additional.
 
-**Enforcement.** The standard and browser-enabled Docker targets remain separate, and Compose
-requires an explicit profile to select the browser-enabled target.
+**Consequence.** A deployment that wants browser sources runs two containers. A deployment that
+does not is 1.18 GB smaller than before, and cannot run browser sources at all.
 
-**Revalidate when.** Chromium, puppeteer, the browser source set, or the image base changes.
+**Enforcement.** The runtime stage installs `nodejs` for the sandbox worker and nothing browser
+related. Browser capture reaches the solver over HTTP or fails with a solver-specific error.
+
+**Revalidate when.** The solver protocol changes, a source needs a browser capability the solver
+cannot provide, or the image base changes.
 
 ### Managed-challenge capture stays in the solving browser
 
 **Constraint.** The challenge solve, host-page token generation, extension script, and payload
-capture must run in one solver browser session. Clearance cookies are not transferred to Kani's
-Chromium as the primary path.
+capture must run in one solver browser session. Clearance is never carried to a second browser.
 
 **Evidence.** Cloudflare documents clearance as bound to the visitor and device. Against live
-Comix on 2026-08-12, the Kani solver captured the same 70,878-byte payload cold and warm. A fresh
-solver took 12.53 seconds; its cleared session took 2.02 seconds. The earlier two-browser path took
-about 21.4 seconds in one end-to-end run because local Puppeteer first spent about nine seconds on
-a challenge it could not pass.
+Comix on 2026-08-12, across 20 captures per cell: a fresh solver took 12.57 s at p50, and a cleared
+session 2.07 s, with no correctness failures in 80 captures and no re-challenge in 40. The solve is
+almost all of the cold cost — 10.4 s of it — while the capture itself runs about 300 ms either way.
+On an identical local fixture the solver beat local Puppeteer at every percentile, 246 ms against
+370 ms at p50, so removing the local browser cost no latency.
 
 **Consequence.** Cookie fidelity cannot make cross-browser replay reliable. A solver without
 scripted capture can still solve ordinary HTTP requests, but protected browser sources may fail.

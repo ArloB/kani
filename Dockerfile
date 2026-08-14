@@ -56,23 +56,14 @@ FROM debian:bookworm-slim AS runtime
 # KCC enables MOBI/AZW3 export via the /rest/chapters/{id}/export/kcc endpoint.
 ARG INSTALL_KCC=false
 
-# INSTALL_BROWSER enables Chromium for extensions that capture browser-issued tokens.
-ARG INSTALL_BROWSER=false
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     ca-certificates \
     curl \
     nodejs \
-    && if [ "$INSTALL_BROWSER" = "true" ]; then \
-        apt-get install -y --no-install-recommends npm chromium; \
-    fi \
     && if [ "$INSTALL_KCC" = "true" ]; then \
         apt-get install -y --no-install-recommends python3 python3-pip p7zip-full \
         && pip3 install --no-cache-dir --break-system-packages KindleComicConverter; \
-    fi \
-    && if [ "$INSTALL_BROWSER" = "true" ]; then \
-        npm install -g puppeteer-core && rm -rf /root/.npm; \
     fi \
     && rm -rf /var/lib/apt/lists/*
 

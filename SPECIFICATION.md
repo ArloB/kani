@@ -1821,9 +1821,10 @@ factory:
 
 ### 3.8 Browser Payload Endpoints
 
-Set `via: browser_payload` to load an endpoint in a headless browser instead of using direct HTTP.
+Set `via: browser_payload` to load an endpoint in the solver's browser instead of using direct HTTP.
 Code generation emits `capture_page_payload` with the configured script and timeout. The browser
-runtime manages Chromium, `passPayload` injection, `AllowedHost` checks, and resource limits.
+runtime manages the solver session, `passPayload` injection, `AllowedHost` checks, and resource
+limits.
 
 **Compiled-tier limitation:** Code generation emits `capture_page_payload` but does not extract its
 result; `kani-cli/src/codegen/endpoints.rs::try_emit_browser_fetch` remains unimplemented. The
@@ -1832,7 +1833,7 @@ interpreted backend (§5.1) extracts the captured payload as a standard JSON end
 ```yaml
 browser_scripts:
   fetch_manga: |
-    // Script injected into the headless browser page.
+    // Script injected into the solver's browser page.
     // Must call passPayload(jsonString) with the data to extract.
     fetch('/api/manga')
       .then(r => r.json())

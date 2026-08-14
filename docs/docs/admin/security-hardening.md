@@ -84,8 +84,10 @@ place makes previously encrypted values unreadable. Never improvise a rotation b
 
 WASM prevents direct host filesystem access, but extensions intentionally receive networking,
 parsing, cache, preference, extraction, and optional scripting capabilities. An extension with
-`unrestricted_http` is not restricted to its declared base host. Browser-based sources also add a
-Chromium process and persistent profiles to the threat model.
+`unrestricted_http` is not restricted to its declared base host. Browser-based sources send
+extension-authored JavaScript to the solver, which executes it in a browser holding a per-source
+profile — so the solver must stay private, and `KANI_SOLVER_SECRET` should be set whenever anything
+else can route to it.
 
 Use signed repositories, verify TOFU fingerprints out of band, block untrusted repository URLs,
 and set `KANI_SOURCE_INSTALL_ALLOWED=false` for a fixed-source deployment.

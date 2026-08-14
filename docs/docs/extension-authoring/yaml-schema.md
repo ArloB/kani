@@ -84,7 +84,7 @@ Validate examples rather than treating this page as a substitute for the parser.
 | `cache` | no | Named cache namespaces |
 | `chapter_sort` | no | Source-supported chapter ordering |
 | `factory` | no | Expand one template into several sources |
-| `browser_scripts` | no | JavaScript payload capture in Chromium |
+| `browser_scripts` | no | JavaScript payload capture in the solver's browser |
 | `scripts`, `pre_request`, `on_status` | no | Sandboxed Rhai logic |
 
 ## Metadata and rate limits
@@ -189,7 +189,7 @@ validates each expansion and emits one extension per source.
 
 ## Browser endpoints
 
-`via: browser_payload` loads `page_url` in Chromium and runs a named `browser_scripts` entry in that
+`via: browser_payload` loads `page_url` in the solver's browser and runs a named `browser_scripts` entry in that
 page before its own scripts. The entry must call `passPayload`; long-running captures can call
 `resetPayloadTimer` after each unit of progress. When a Kani-compatible FlareSolverr is configured,
 managed challenges are solved and captured in its browser without transferring clearance to a

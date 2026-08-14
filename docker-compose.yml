@@ -7,9 +7,6 @@ services:
         # build cannot derive it. Export GIT_SHA=$(git rev-parse --short HEAD).
         GIT_SHA: "${GIT_SHA:-}"
 
-        # Enables browser-based extensions; see the engineering constraints register.
-        #   INSTALL_BROWSER: "true"
-
         #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
         #   INSTALL_KCC: "true"
     image: kani:latest
@@ -77,4 +74,16 @@ services:
       # Where kani stores its database and auto-provisioned key files. Defaults to the process
       # working directory (/data inside Docker). Only needed for non-Docker deployments where the
       # working directory differs. KANI_DATA_DIR: "/data"
+    restart: unless-stopped
+
+  # Runs capture scripts for browser sources. Bound to localhost because /v1
+  # executes caller-supplied JavaScript against named browser profiles; set
+  # API_KEY plus the matching KANI_SOLVER_SECRET if anything else can reach it.
+  solver:
+    image: ghcr.io/kani-app/flaresolverr:latest
+    ports:
+      - "127.0.0.1:8191:8191"
+    environment:
+      LOG_LEVEL: info
+      # API_KEY: "change-me"
     restart: unless-stopped

@@ -91,7 +91,6 @@ Data is persisted in two directories created alongside `docker-compose.yml`:
 ```yaml
 build:
   args:
-    INSTALL_BROWSER: "true"   # Chromium + puppeteer (~250 MB) — required for extensions that need to evaluate JS
     INSTALL_KCC: "true"       # Kindle Comic Converter — required for MOBI/AZW3 export
 ```
 

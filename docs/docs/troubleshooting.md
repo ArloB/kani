@@ -56,7 +56,8 @@ restarts can hide the process or job that holds the transaction.
 1. Open **Settings → Source health** and identify load, circuit-breaker, browser, or network state.
 2. Check whether the upstream site is reachable from the server.
 3. Refresh the trusted repository and review an available update.
-4. Verify required capabilities and Chromium installation for browser-based sources.
+4. For browser-based sources, use **Test connection** in Settings → Advanced to confirm the solver
+   supports capture scripts.
 5. Test search, manga details, chapters, and pages independently.
 
 An upstream layout change generally requires an extension update. Preserve the failing URL and a
