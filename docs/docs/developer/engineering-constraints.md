@@ -79,6 +79,28 @@ with source browser state, and keeps runtime browser-disable controls as hard ga
 **Revalidate when.** Cloudflare clearance behavior, the solver protocol, browser-source security
 controls, session lifecycle, or the browser source set changes.
 
+### Two browser settings no longer govern anything
+
+**Constraint.** `browser_max_instances` and `browser_idle_timeout_s` configured the local
+Puppeteer browser pool. That pool was removed when browser capture moved into the solver, so both
+settings are inert. `browser_max_memory_mb` is unaffected and still sets the Node worker's heap
+limit.
+
+**Evidence.** The Node worker no longer reads `BROWSER_MAX_INSTANCES` or
+`BROWSER_IDLE_TIMEOUT_MS`; nothing else consumes `V8Config::max_instances` or
+`idle_timeout_s` beyond reporting them. Session lifetime is now the solver's, set per capture by
+`session_ttl_minutes`.
+
+**Consequence.** Settings → Advanced still presents both controls, and their descriptions name
+Chromium profiles that no longer exist, so an operator can adjust them and observe no effect.
+
+**Enforcement.** None yet. Removal needs a migration to drop the columns, matching changes to the
+settings DTO and UI, and `cargo sqlx prepare`, so it is batched with other pre-1.0 schema cleanup
+rather than taken as its own migration.
+
+**Revalidate when.** The pre-1.0 schema cleanup lands, or a solver-side equivalent of either
+control is exposed and needs a home.
+
 ## HTTP routing
 
 ### Static source capabilities must coexist with the parameterized route
