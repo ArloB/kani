@@ -525,6 +525,7 @@ pub struct SmartClient {
     solver_url: Arc<ArcSwap<Option<String>>>,
     solver_sessions: Arc<dashmap::DashMap<String, std::time::Instant>>,
     solver_capture_support: Arc<std::sync::atomic::AtomicU8>,
+    solver_client: Arc<std::sync::OnceLock<rquest::Client>>,
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
     pub rate_states: Arc<dashmap::DashMap<String, Arc<RateState>>>,
@@ -594,6 +595,7 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            solver_client: Arc::new(std::sync::OnceLock::new()),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
@@ -628,6 +630,7 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            solver_client: Arc::new(std::sync::OnceLock::new()),
             solving,
             host_circuits,
             rate_states: Arc::new(dashmap::DashMap::new()),
@@ -1275,9 +1278,7 @@ impl SmartClient {
             .as_deref()
             .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
-        let client = rquest::Client::builder()
-            .timeout(self.timings.solver_timeout)
-            .build()?;
+        let client = self.solver_http()?;
 
         let mut body = json!({
           "cmd": "request.get",
@@ -1299,7 +1300,7 @@ impl SmartClient {
             }
         }
 
-        let response = Self::solver_request(&client, solver_url)
+        let response = Self::solver_request(client, solver_url)
             .body(body.to_string())
             .send()
             .await?;
@@ -1384,6 +1385,33 @@ impl SmartClient {
             .is_some_and(|url| !url.trim().is_empty())
     }
 
+    /// One pooled client for every solver call. Building one per request threw
+    /// away the connection, so each capture paid a fresh handshake.
+    fn solver_http(&self) -> Result<&rquest::Client> {
+        if let Some(client) = self.solver_client.get() {
+            return Ok(client);
+        }
+        let built = rquest::Client::builder()
+            .timeout(self.timings.solver_timeout)
+            .build()?;
+        let _ = self.solver_client.set(built);
+        self.solver_client
+            .get()
+            .ok_or_else(|| crate::error::Error::Other("solver client unavailable".into()))
+    }
+
+    fn solver_request_with(
+        client: &rquest::Client,
+        solver_url: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> rquest::RequestBuilder {
+        let builder = Self::solver_request(client, solver_url);
+        match timeout {
+            Some(timeout) => builder.timeout(timeout),
+            None => builder,
+        }
+    }
+
     fn solver_request(client: &rquest::Client, solver_url: &str) -> rquest::RequestBuilder {
         let builder = client
             .post(solver_url)
@@ -1404,10 +1432,7 @@ impl SmartClient {
     /// Establishes what the configured solver can do, and caches it. The index
     /// is unauthenticated while the commands are not, so both are checked.
     pub async fn probe_solver_capability(&self, url: &str) -> SolverCapability {
-        let Ok(client) = rquest::Client::builder()
-            .timeout(self.timings.solver_timeout)
-            .build()
-        else {
+        let Ok(client) = self.solver_http() else {
             return SolverCapability::Unreachable;
         };
 
@@ -1431,7 +1456,7 @@ impl SmartClient {
         let sessions = capabilities.contains(&"kani.capture/2");
         let capture = sessions || capabilities.contains(&"kani.capture/1");
 
-        let probe = Self::solver_request(&client, url)
+        let probe = Self::solver_request(client, url)
             .body(json!({ "cmd": "sessions.list" }).to_string())
             .send()
             .await;
@@ -1575,9 +1600,8 @@ impl SmartClient {
             .max(std::time::Duration::from_millis(
                 solver_max_timeout.saturating_add(SOLVER_CAPTURE_TRANSPORT_BUFFER_MS),
             ));
-        let client = rquest::Client::builder()
-            .timeout(transport_timeout)
-            .build()
+        let client = self
+            .solver_http()
             .map_err(|error| SolverCaptureError::Failed(error.to_string()))?;
 
         let session_key = source_key.map(|_| Self::solver_route_key(source_key, url));
@@ -1613,7 +1637,7 @@ impl SmartClient {
             body["profileKey"] = json!(session_id.as_deref());
         }
 
-        let response = Self::solver_request(&client, solver_url)
+        let response = Self::solver_request_with(client, solver_url, Some(transport_timeout))
             .body(body.to_string())
             .send()
             .await
@@ -1657,12 +1681,8 @@ impl SmartClient {
         let Some(solver_url) = solver_url.as_ref() else {
             return 0;
         };
-        let client = match rquest::Client::builder()
-            .timeout(std::time::Duration::from_secs(
-                SOLVER_SESSION_CONTROL_TIMEOUT_SECS,
-            ))
-            .build()
-        {
+        let control_timeout = std::time::Duration::from_secs(SOLVER_SESSION_CONTROL_TIMEOUT_SECS);
+        let client = match self.solver_http() {
             Ok(client) => client,
             Err(error) => {
                 tracing::warn!(%error, "failed to build solver session control client");
@@ -1672,7 +1692,7 @@ impl SmartClient {
         let mut destroyed = 0;
         for key in keys {
             let session = Self::solver_session_id(&key);
-            let result = Self::solver_request(&client, solver_url)
+            let result = Self::solver_request_with(client, solver_url, Some(control_timeout))
                 .body(
                     json!({
                         "cmd": "sessions.destroy",
@@ -1731,9 +1751,7 @@ impl SmartClient {
             .as_deref()
             .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
-        let client = rquest::Client::builder()
-            .timeout(self.timings.solver_timeout)
-            .build()?;
+        let client = self.solver_http()?;
 
         let body = json!({
           "cmd": "request.get",
@@ -1741,7 +1759,7 @@ impl SmartClient {
           "maxTimeout": 60000
         });
 
-        let response = Self::solver_request(&client, solver_url)
+        let response = Self::solver_request(client, solver_url)
             .body(body.to_string())
             .send()
             .await?;
@@ -2004,6 +2022,7 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(None)),
             solver_sessions: Arc::new(dashmap::DashMap::new()),
             solver_capture_support: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            solver_client: Arc::new(std::sync::OnceLock::new()),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
