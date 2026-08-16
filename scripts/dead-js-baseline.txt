@@ -1,5 +1,5 @@
-# Frontend modules and exports nothing reaches, captured 2026-08-16 as the
-# Phase 0 baseline. The sweep drains this file; check-dead-js.mjs fails if an
+# Frontend modules and exports nothing reaches, captured 2026-08-17 as the
+# sweep baseline. The sweep drains this file; check-dead-js.mjs fails if an
 # entry stops being dead, so it cannot go stale.
 
 export static/js/components/category-selector.js CategorySelector
@@ -9,7 +9,6 @@ export static/js/components/degraded-banner.js DegradedBanner
 export static/js/components/detail-card.js DetailCard
 export static/js/components/download-overlay.js mountOverlay
 export static/js/components/editable-row.js mkAddRow
-export static/js/components/manga-details/manga-header.js buildSourceMetaUrl
 export static/js/components/manga-details/suppressed-banner.js SuppressedBanner
 export static/js/components/migration-dialogue.js MigrationDialogue
 export static/js/components/perm-row.js PermRow
@@ -34,7 +33,6 @@ export static/js/pages/reader/spread-detect.js luma
 export static/js/pages/settings/diagnostics-cards.js fetchDiagnostics
 export static/js/pages/settings/form-bus.js clearForm
 export static/js/router.js getCurrentParams
-export static/js/session.js clearRememberedPermissions
 export static/js/url-params.js buildUrl
 export static/js/url-params.js getParams
 export static/js/utils.js addSwipeHandler

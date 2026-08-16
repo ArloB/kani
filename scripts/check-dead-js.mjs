@@ -97,6 +97,19 @@ for (const file of allFiles) {
     const target = resolveSpec(file, m[1]);
     if (target) namespaceImported.add(target);
   }
+  // A dynamic import hands the module to a callback, which either destructures
+  // the export or reaches it as a property. Both are real uses.
+  for (const m of src.matchAll(/\.then\(\s*\(?\s*\{([^}]+)\}\s*\)?\s*=>/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(':').pop()?.trim();
+      if (name) importedNames.add(name);
+    }
+  }
+  for (const m of src.matchAll(
+    /\bimport\s*\([^)]*\)\s*\.then\(\s*\(?\s*(\w+)\s*\)?\s*=>\s*\1\.(\w+)/g,
+  )) {
+    importedNames.add(m[2]);
+  }
 }
 
 /** @type {string[]} */
