@@ -5,8 +5,8 @@ license.workspace = true
 repository.workspace = true
 edition = "2024"
 
-[lints.clippy]
-unwrap_used = { level = "deny", priority = 1 }
+[lints]
+workspace = true
 
 [lib]
 name = "kani_cli"

@@ -241,7 +241,7 @@ impl AppService {
             // (b) A sibling at the same chapter number from a better-ranked
             // scanlator.
             let held_rank = rank(&held.scanlator);
-            for other in rows.iter() {
+            for other in &rows {
                 if other.id == held.id
                     || (other.chapter_number - held.chapter_number).abs() > f64::EPSILON
                 {

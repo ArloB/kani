@@ -12,7 +12,7 @@ pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError
         CliError::Other("DSL parsing failed (see above)".to_string())
     })?;
 
-    let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.clone().try_into();
+    let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.try_into();
 
     if let Err(item) = ast_raw {
         for error in item {

@@ -2284,7 +2284,7 @@ export default {
 
   'library.categories.group': 'Categories',
   'library.scan_all.group': 'Scan',
-  'library.scan_all': 'Scan whole library',
+  'library.scan_all.label': 'Scan whole library',
   'library.scan_all.desc':
     'Checks every series for new chapters now, instead of waiting for the next scheduled scan.',
   'library.scan_all.action': 'Scan all',

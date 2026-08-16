@@ -24,10 +24,10 @@ pub fn run(file: &str, force: bool, embedded_bytes: bool) -> Result<PathBuf, Cli
 
     let workspace_root = path
         .parent()
-        .unwrap_or(Path::new("."))
+        .unwrap_or_else(|| Path::new("."))
         .ancestors()
         .find(|p| p.join("Cargo.toml").exists())
-        .unwrap_or(Path::new("."));
+        .unwrap_or_else(|| Path::new("."));
 
     let out_dir = workspace_root
         .join("kani-extensions")

@@ -656,7 +656,7 @@ impl SmartClient {
             limiter,
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
         });
-        self.rate_states.insert(domain.to_string(), state);
+        self.rate_states.insert(domain.clone(), state);
     }
 
     /// Removes the rate limit state for a domain. Called when a source is removed or reloaded.
@@ -1288,7 +1288,7 @@ impl SmartClient {
 
         if let Some(h) = headers {
             let mut header_map = serde_json::Map::new();
-            for (k, v) in h.iter() {
+            for (k, v) in h {
                 if let Ok(v_str) = v.to_str() {
                     header_map.insert(k.as_str().to_string(), json!(v_str));
                 }

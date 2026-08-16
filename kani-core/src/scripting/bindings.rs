@@ -99,7 +99,7 @@ fn ctx_pref(ctx: &mut ScriptableCtx, key: String) -> Dynamic {
     ctx.prefs
         .get(&key)
         .map(|v| Dynamic::from(v.clone()))
-        .unwrap_or(Dynamic::from(()))
+        .unwrap_or_else(|| Dynamic::from(()))
 }
 
 fn ctx_cache_get(ctx: &mut ScriptableCtx, namespace: String, key: String) -> Dynamic {

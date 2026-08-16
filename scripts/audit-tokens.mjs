@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -66,6 +66,70 @@ function scanFile(path, out) {
       out.push({ file: path, line: i + 1, literal });
     }
   });
+}
+
+if (argv.includes('--unused-css')) {
+  auditUnusedSelectors();
+}
+
+/**
+ * Reports bespoke class selectors in app.css that no markup or script names.
+ * Shares this file with the colour audit because both parse the same stylesheet.
+ */
+function auditUnusedSelectors() {
+  const cssPath = 'static/css/app.css';
+  const css = readFileSync(cssPath, 'utf8');
+  const sources = [];
+  walkAll('static/js', sources);
+  walkAll('static', sources, '.html');
+  const haystack = sources.map((f) => readFileSync(f, 'utf8')).join('\n');
+
+  const declared = [...new Set([...css.matchAll(/^\s*\.([a-z][a-z0-9-]*)\s*[,{]/gim)].map((m) => m[1]))];
+  const unused = declared.filter((name) => !haystack.includes(name));
+
+  const baselineFile = 'scripts/unused-css-baseline.txt';
+  const baseline = new Set(
+    existsSync(baselineFile)
+      ? readFileSync(baselineFile, 'utf8')
+        .split('\n')
+        .map((l) => l.replace(/#.*$/, '').trim())
+        .filter(Boolean)
+      : [],
+  );
+
+  if (argv.includes('--write-baseline')) {
+    console.log(unused.sort().join('\n'));
+    process.exit(0);
+  }
+
+  const added = unused.filter((n) => !baseline.has(n)).sort();
+  const stale = [...baseline].filter((n) => !unused.includes(n)).sort();
+
+  if (added.length > 0) {
+    console.error(`error: ${added.length} unreferenced class selector(s) in ${cssPath}:`);
+    for (const n of added) console.error(`  .${n}`);
+  }
+  if (stale.length > 0) {
+    console.error(`error: ${stale.length} baseline entr(y/ies) now referenced — remove from ${baselineFile}:`);
+    for (const n of stale) console.error(`  .${n}`);
+  }
+  if (added.length > 0 || stale.length > 0) process.exit(1);
+
+  console.log(`No new unreferenced selectors in ${cssPath}.`);
+  console.log(`  ${declared.length} bespoke classes, ${baseline.size} known unused.`);
+  process.exit(0);
+}
+
+function walkAll(dir, out, ext = '.js') {
+  for (const entry of readdirSync(dir)) {
+    const full = `${dir}/${entry}`;
+    if (statSync(full).isDirectory()) {
+      if (SKIP_DIRS.has(entry)) continue;
+      walkAll(full, out, ext);
+    } else if (full.endsWith(ext)) {
+      out.push(full);
+    }
+  }
 }
 
 const violations = [];

@@ -557,7 +557,7 @@ pub(crate) async fn search_manga(
     let json_str = state
         .search_manga(
             id,
-            &payload.query.unwrap_or("".to_string()),
+            &payload.query.unwrap_or_default(),
             page,
             page_size,
             payload.filters,

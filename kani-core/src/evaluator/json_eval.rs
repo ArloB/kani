@@ -711,7 +711,7 @@ pub async fn extract_json_paginated(
                 .map(str::to_owned);
             let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
             if remaining == 0 {
-                has_next_page = scalar_hnp.unwrap_or(next.is_some());
+                has_next_page = scalar_hnp.unwrap_or_else(|| next.is_some());
                 break;
             }
             if chunk_len == 0 || next.is_none() || scalar_hnp == Some(false) {

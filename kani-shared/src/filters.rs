@@ -180,7 +180,7 @@ impl<'a> FilterGroups<'a> {
     /// Returns `None` if no checkbox in this group is checked.
     pub fn checkbox_value(&self, group: &str) -> Option<&'a str> {
         self.get(group).iter().find_map(|f| {
-            if let FilterState::Checkbox(true) = &f.state {
+            if matches!(&f.state, FilterState::Checkbox(true)) {
                 let action = f.filter_name.split_once(':').map_or("", |(_, a)| a);
                 Some(if action.is_empty() { "true" } else { action })
             } else {

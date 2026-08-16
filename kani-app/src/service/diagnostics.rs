@@ -21,7 +21,7 @@ pub fn init(version: &str, git_sha: &str) {
 }
 
 fn build_info() -> BuildInfo {
-    BUILD_INFO.get().cloned().unwrap_or(BuildInfo {
+    BUILD_INFO.get().cloned().unwrap_or_else(|| BuildInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         git_sha: String::new(),
     })

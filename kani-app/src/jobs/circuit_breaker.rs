@@ -48,8 +48,7 @@ impl CircuitBreaker {
     }
 
     pub fn maybe_transition_to_half_open(&mut self, now: i64) {
-        if let CircuitState::Open = &self.state
-            && self.next_retry_at.is_some_and(|t| now >= t)
+        if matches!(&self.state, CircuitState::Open) && self.next_retry_at.is_some_and(|t| now >= t)
         {
             self.state = CircuitState::HalfOpen;
         }

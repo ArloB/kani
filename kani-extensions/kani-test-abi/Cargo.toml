@@ -4,8 +4,8 @@ version = "0.1.0"
 license.workspace = true
 edition = "2024"
 
-[lints.clippy]
-unwrap_used = { level = "deny", priority = 1 }
+[lints]
+workspace = true
 
 [package.metadata]
 id = "test-abi"

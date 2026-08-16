@@ -70,7 +70,34 @@ governor    = { version = "0.10", default-features = false, features = ["std", "
 arc-swap    = "1"
 ordered-float = "5"
 
+[workspace.lints.rust]
+# kani-lease is model-checked under `--cfg loom`; the cfg is declared here
+# because a crate opting into workspace lints cannot also carry its own table.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
 [workspace.lints.clippy]
 unwrap_used = { level = "deny", priority = 1 }
-pedantic = "warn"
-nursery = "warn"
+
+# Lints that detect dead or redundant code rather than style. Whole-group
+# `pedantic` and `nursery` are deliberately not enabled: they produce 3295
+# warnings here, of which roughly nine in ten are documentation and naming
+# preferences that identify no waste, and CI runs `-D warnings`.
+#
+# A lint sits at `allow` only while existing violations are being drained, with
+# the count recorded so the ratchet is visible. Raise it to `warn` in the same
+# change that clears the last one.
+derivable_impls = "warn"
+equatable_if_let = "warn"
+explicit_iter_loop = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+or_fun_call = "warn"
+redundant_clone = "warn"
+
+needless_collect = "allow"                   # 1 remaining
+redundant_else = "allow"                     # 2 remaining, both in the solver retry ladder
+unnecessary_wraps = "allow"                  # 2 remaining, both change a signature
+useless_let_if_seq = "allow"                 # 3 remaining
+manual_let_else = "allow"                    # 20 remaining
+redundant_closure_for_method_calls = "allow" # 54 remaining
+redundant_pub_crate = "allow"                # 303 remaining, drained by the pub-surface sweep
