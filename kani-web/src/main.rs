@@ -739,6 +739,12 @@ async fn main() {
             kani_web::session_touch::session_touch_middleware,
         ))
         .layer(auth_layer)
+        // Outside the session layer, so the response it inspects already carries
+        // any rotated session cookie.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            kani_web::csrf::csrf_middleware,
+        ))
         .layer(CompressionLayer::new())
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,

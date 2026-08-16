@@ -234,7 +234,8 @@ async fn a_revoked_session_cookie_stops_working() {
             axum::http::Request::builder()
                 .method("DELETE")
                 .uri("/rest/auth/sessions")
-                .header(axum::http::header::COOKIE, &survivor)
+                .header(axum::http::header::COOKIE, common::csrf_cookie(&survivor))
+                .header("X-CSRF-Token", common::csrf_token(&survivor))
                 .body(axum::body::Body::empty())
                 .unwrap(),
         )

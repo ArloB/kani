@@ -28,7 +28,8 @@ fn put(uri: &str, cookie: &str) -> Request<Body> {
     Request::builder()
         .method("PUT")
         .uri(uri)
-        .header("Cookie", cookie)
+        .header("Cookie", common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .body(Body::empty())
         .unwrap()
 }
@@ -37,7 +38,8 @@ fn del(uri: &str, cookie: &str) -> Request<Body> {
     Request::builder()
         .method("DELETE")
         .uri(uri)
-        .header("Cookie", cookie)
+        .header("Cookie", common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .body(Body::empty())
         .unwrap()
 }

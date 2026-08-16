@@ -16,7 +16,9 @@ fn post(
         .uri(path)
         .header(axum::http::header::CONTENT_TYPE, "application/json");
     if let Some(c) = cookie {
-        b = b.header(axum::http::header::COOKIE, c);
+        b = b
+            .header(axum::http::header::COOKIE, common::csrf_cookie(c))
+            .header("X-CSRF-Token", common::csrf_token(c));
     }
     b.body(axum::body::Body::from(body.to_string())).unwrap()
 }

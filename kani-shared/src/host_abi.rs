@@ -181,12 +181,6 @@ impl HttpRequest {
 
         JsonHandle::parse(&res.body)
     }
-
-    #[cfg(feature = "host")]
-    pub fn send_json<T: serde::de::DeserializeOwned>(self) -> Result<T, ExtensionError> {
-        let resp = self.send()?;
-        serde_json::from_slice(&resp.body).map_err(|e| ExtensionError::parse(e.to_string()))
-    }
 }
 
 impl Default for HttpRequest {

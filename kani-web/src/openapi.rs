@@ -60,7 +60,7 @@ pub struct StabilityAddon;
 
 impl Modify for StabilityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        for (path, item) in openapi.paths.paths.iter_mut() {
+        for (path, item) in &mut openapi.paths.paths {
             let tier = stability_for(path);
             let operations = [
                 &mut item.get,

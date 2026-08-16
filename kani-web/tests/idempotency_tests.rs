@@ -13,7 +13,8 @@ fn post(
     let mut b = axum::http::Request::builder()
         .method("POST")
         .uri("/rest/me/api-tokens")
-        .header(axum::http::header::COOKIE, cookie)
+        .header(axum::http::header::COOKIE, common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .header(axum::http::header::CONTENT_TYPE, "application/json");
     if let Some(k) = key {
         b = b.header("Idempotency-Key", k);

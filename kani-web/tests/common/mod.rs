@@ -28,13 +28,17 @@ pub async fn test_db() -> sqlx::SqlitePool {
     pool
 }
 
+/// Must match the `csrf_secret` [`test_state`] installs, or the tokens the request
+/// helpers build will not validate.
+const TEST_CSRF_SECRET: [u8; 32] = [0u8; 32];
+
 pub async fn test_state() -> AppState {
     let pool = test_db().await;
     let service = Arc::new(AppService::new_for_test(pool.clone()).await);
     let (_, log_handle) = RingBufferLayer::new(100);
     AppState {
         rate_limiter: Arc::new(AuthRateLimiter::new(pool, service.settings.clone())),
-        csrf_secret: Arc::new([0u8; 32]),
+        csrf_secret: Arc::new(TEST_CSRF_SECRET),
         trusted_proxies: Arc::new(Default::default()),
         public_instance: false,
         service,
@@ -132,52 +136,60 @@ pub fn delete_req(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
+/// The CSRF token a browser holding `cookie` would have been given. Pair it with
+/// [`csrf_cookie`] on any hand-built state-changing request, so tests exercise the
+/// CSRF layer rather than bypassing it.
+#[allow(dead_code)]
+pub fn csrf_token(cookie: &str) -> String {
+    let session = cookie
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("id="))
+        .unwrap_or("anonymous");
+    kani_web::csrf::compute_token(session, &TEST_CSRF_SECRET)
+}
+
+/// `cookie` with the matching `kani_csrf` cookie appended, as one `Cookie` header.
+#[allow(dead_code)]
+pub fn csrf_cookie(cookie: &str) -> String {
+    format!("{cookie}; kani_csrf={}", csrf_token(cookie))
+}
+
+fn authed(method: &str, uri: &str, cookie: &str, body: Option<serde_json::Value>) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if matches!(method, "GET" | "HEAD" | "OPTIONS") {
+        builder = builder.header("Cookie", cookie);
+    } else {
+        builder = builder
+            .header("Cookie", csrf_cookie(cookie))
+            .header("X-CSRF-Token", csrf_token(cookie));
+    }
+    match body {
+        Some(value) => builder
+            .header("Content-Type", "application/json")
+            .body(Body::from(serde_json::to_string(&value).unwrap()))
+            .unwrap(),
+        None => builder.body(Body::empty()).unwrap(),
+    }
+}
+
 pub fn authed_get(uri: &str, cookie: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("Cookie", cookie)
-        .body(Body::empty())
-        .unwrap()
+    authed("GET", uri, cookie, None)
 }
 
 pub fn authed_post(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("POST", uri, cookie, Some(body))
 }
 
 pub fn authed_put(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PUT")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PUT", uri, cookie, Some(body))
 }
 
 pub fn authed_patch(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PATCH")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PATCH", uri, cookie, Some(body))
 }
 
 pub fn authed_delete(uri: &str, cookie: &str) -> Request<Body> {
-    Request::builder()
-        .method("DELETE")
-        .uri(uri)
-        .header("Cookie", cookie)
-        .body(Body::empty())
-        .unwrap()
+    authed("DELETE", uri, cookie, None)
 }
 
 pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -190,13 +202,7 @@ pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
 }
 
 pub fn put_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PUT")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PUT", uri, cookie, Some(body))
 }
 
 /// Drain the response body as raw bytes.

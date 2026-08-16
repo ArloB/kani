@@ -11,7 +11,8 @@ fn authed_post_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request
         .method("POST")
         .uri(uri)
         .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
+        .header("Cookie", common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .body(Body::from(serde_json::to_string(&body).unwrap()))
         .unwrap()
 }

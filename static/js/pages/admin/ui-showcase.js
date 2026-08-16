@@ -16,6 +16,7 @@ import { createCallout } from '../../components/form/callout.js';
 import { Select } from '../../components/form/select.js';
 import { DateInput } from '../../components/form/date-input.js';
 import { Combobox } from '../../components/combobox.js';
+import { COMPONENTS } from './showcase-manifest.js';
 import { h, render } from 'preact';
 import htm from 'htm';
 const html = htm.bind(h);
@@ -466,7 +467,55 @@ export function init(container) {
     },
   ]));
 
+  root.appendChild(_renderCoverage());
+
   container.appendChild(root);
+}
+
+/**
+ * Lists every component in the generated manifest and whether this page demos it.
+ * Hand-written demos drift behind the component directory silently; showing the
+ * gap here is what stops that.
+ */
+function _renderCoverage() {
+  const demoed = new Set(
+    [...document.querySelectorAll('code')].map((c) => c.textContent ?? ''),
+  );
+  const rows = COMPONENTS.map((entry) => {
+    const shown = entry.exports.some((name) =>
+      [...demoed].some((usage) => usage.includes(name)),
+    );
+    return { module: entry.module, exports: entry.exports, shown };
+  });
+  const missing = rows.filter((r) => !r.shown);
+
+  const section = document.createElement('section');
+  section.className = 'flex flex-col gap-2';
+  const head = document.createElement('div');
+  head.innerHTML = `
+    <h2 class="text-lg font-semibold text-text">Coverage</h2>
+    <p class="text-sm text-text-muted mt-1">
+      ${rows.length - missing.length} of ${rows.length} components appear above.
+      The list is generated from <code class="font-mono text-xs">static/js/components/</code>,
+      so a new component shows up here whether or not anyone demos it.
+    </p>
+  `;
+  section.appendChild(head);
+
+  const list = document.createElement('ul');
+  list.className = 'grid grid-cols-1 md:grid-cols-2 gap-x-6 text-sm';
+  for (const row of rows) {
+    const item = document.createElement('li');
+    item.className = 'flex items-baseline gap-2 py-1 border-b border-border-subtle';
+    item.innerHTML = `
+      <span class="${row.shown ? 'text-text-muted' : 'text-accent'}">${row.shown ? '✓' : '—'}</span>
+      <code class="font-mono text-xs">${row.module.replace('components/', '')}</code>
+      <span class="text-xs text-text-muted ml-auto">${row.exports.join(', ')}</span>
+    `;
+    list.appendChild(item);
+  }
+  section.appendChild(list);
+  return section;
 }
 
 /** @param {HTMLElement} container */

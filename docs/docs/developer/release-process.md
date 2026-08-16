@@ -52,6 +52,10 @@ the release notes only after the publishing job proves them.
   release command.
 - Complete first-run setup, check `/ready`, and exercise login, a source load, a job, and backup
   creation.
+- Run `node scripts/verify-permission-matrix.mjs <base> <admin> <password>` against that instance.
+  It is the only check on which UI surfaces each permission hides; the Rust permission tests cover
+  the API contract, not visibility. It creates `permmatrix-*` accounts, so point it at the
+  disposable instance rather than a real one.
 - Confirm that release notes, supported targets, image coordinates, migration policy, and
   documentation describe the published artifacts.
 

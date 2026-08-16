@@ -262,6 +262,9 @@ jobs:
       - name: Dead module and export check
         run: node scripts/check-dead-js.mjs
 
+      - name: Showcase manifest is current
+        run: node scripts/generate-showcase-manifest.mjs --check
+
       - name: Unreferenced CSS selector check
         run: node scripts/audit-tokens.mjs --unused-css
 

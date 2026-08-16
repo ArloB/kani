@@ -33,6 +33,17 @@ function _onUnauthenticatedPage() {
  */
 const SOLVER_TEST_TIMEOUT_MS = 70000;
 
+/**
+ * Reads the double-submit CSRF cookie the server refreshes on every response.
+ * Deliberately read per request: logging in rotates the session, and with it
+ * the token.
+ * @returns {string}
+ */
+function _csrfToken() {
+  const match = document.cookie.split(';').find((c) => c.trim().startsWith('kani_csrf='));
+  return match ? decodeURIComponent(match.trim().slice('kani_csrf='.length)) : '';
+}
+
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
 
@@ -49,6 +60,11 @@ async function _req(method, path, opts = {}) {
 
   /** @type {RequestInit} */
   const init = { method, credentials: 'include', headers: {} };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const token = _csrfToken();
+    // @ts-ignore: RequestInit.headers is a union but this instance is a plain object.
+    if (token) init.headers['X-CSRF-Token'] = token;
+  }
   if (opts.body != null) {
     // @ts-ignore: RequestInit.headers is a union but this instance is a plain object.
     init.headers['Content-Type'] = 'application/json';
@@ -134,8 +150,20 @@ export async function fetchSWR(key, fetcher, opts = {}) {
   return data;
 }
 
-export function clearSWRCache() {
-  _swrCache.clear();
+/**
+ * Drops cached entries so the next read goes to the server. Without a prefix it
+ * clears everything, which is what sign-out needs; with one it drops a single
+ * family, which is what a server-pushed invalidation needs.
+ * @param {string} [prefix]
+ */
+export function clearSWRCache(prefix) {
+  if (!prefix) {
+    _swrCache.clear();
+    return;
+  }
+  for (const key of _swrCache.keys()) {
+    if (key.startsWith(prefix)) _swrCache.delete(key);
+  }
 }
 
 

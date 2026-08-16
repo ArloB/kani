@@ -184,6 +184,9 @@ fn build_js() {
             "--format=esm",
             "--minify",
             "--platform=browser",
+            // Dev-only routes sit behind this, so the branch and anything it
+            // lazily imports are eliminated rather than shipped as an unreachable chunk.
+            "--define:__KANI_DEV__=false",
             "--outdir=../static/js/dist",
             "--alias:preact=../static/js/vendor/preact.module.js",
             "--alias:preact/hooks=../static/js/vendor/preact-hooks.module.js",

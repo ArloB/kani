@@ -602,7 +602,7 @@ impl Parser {
                     break;
                 }
             } else {
-                self.expect(close.clone(), "a closing delimiter")?;
+                self.expect(close, "a closing delimiter")?;
                 break;
             }
         }

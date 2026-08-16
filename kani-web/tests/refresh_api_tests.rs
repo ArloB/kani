@@ -87,7 +87,8 @@ async fn refresh_with_no_body_bypasses_validation_and_reaches_service() {
     let req = axum::http::Request::builder()
         .method("POST")
         .uri("/rest/manga/99999/refresh")
-        .header("Cookie", &cookie)
+        .header("Cookie", common::csrf_cookie(&cookie))
+        .header("X-CSRF-Token", common::csrf_token(&cookie))
         .body(axum::body::Body::empty())
         .unwrap();
 

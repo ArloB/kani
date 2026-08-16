@@ -14,7 +14,13 @@ fn req(
 ) -> axum::http::Request<axum::body::Body> {
     let mut b = axum::http::Request::builder().method(method).uri(path);
     if let Some(c) = cookie {
-        b = b.header(axum::http::header::COOKIE, c);
+        if matches!(method, "GET" | "HEAD" | "OPTIONS") {
+            b = b.header(axum::http::header::COOKIE, c);
+        } else {
+            b = b
+                .header(axum::http::header::COOKIE, common::csrf_cookie(c))
+                .header("X-CSRF-Token", common::csrf_token(c));
+        }
     }
     match body {
         Some(v) => {
