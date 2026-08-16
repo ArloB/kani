@@ -3,8 +3,7 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_post, body_json, build_test_app, create_admin, get_req, login, post_json,
-    test_state,
+    authed_get, authed_post, body_json, build_test_app, create_admin, get_req, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -37,20 +36,6 @@ async fn system_info_reports_first_run_true_on_fresh_db() {
     let res = app.oneshot(get_req("/rest/system/info")).await.unwrap();
     let body = body_json(res).await;
     assert!(body["first_run"].as_bool().unwrap());
-}
-
-#[tokio::test]
-async fn complete_first_run_requires_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/system/first-run-complete",
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[cfg(debug_assertions)]
@@ -101,17 +86,6 @@ async fn complete_first_run_flips_flag() {
     let res2 = app.oneshot(get_req("/rest/system/info")).await.unwrap();
     let body = body_json(res2).await;
     assert!(!body["first_run"].as_bool().unwrap());
-}
-
-#[tokio::test]
-async fn system_changelog_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(get_req("/rest/system/changelog"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

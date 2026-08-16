@@ -6,21 +6,6 @@ use common::{authed_post, build_test_app, create_admin, login, test_state};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn refresh_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/rest/manga/1/refresh")
-        .body(axum::body::Body::empty())
-        .unwrap();
-
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn refresh_returns_400_for_unknown_field_name() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;

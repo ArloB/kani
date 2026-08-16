@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, post_json, test_state,
+    create_regular_user, test_state,
 };
 use serde_json::json;
 use tower::ServiceExt;
@@ -26,19 +26,6 @@ async fn admin_storage_stats_returns_200_for_admin() {
     assert!(body.get("library_used_bytes").is_some());
     assert!(body.get("total_manga").is_some());
     assert!(body.get("total_downloads").is_some());
-}
-
-#[tokio::test]
-async fn admin_storage_stats_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/storage/stats"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -70,19 +57,6 @@ async fn admin_storage_stats_history_returns_200_for_admin() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let _body = body_array(res).await;
-}
-
-#[tokio::test]
-async fn admin_storage_stats_history_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/storage/stats/history"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -122,19 +96,6 @@ async fn admin_scrub_returns_202_for_admin() {
         body.get("job_id").is_some(),
         "the caller needs the id to follow progress over SSE"
     );
-}
-
-#[tokio::test]
-async fn admin_scrub_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json("/rest/admin/library/scrub", json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

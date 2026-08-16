@@ -33,3 +33,4 @@ tools/
 docs/site/
 .wasm_cache/
 .codex/
+/mutants.out/

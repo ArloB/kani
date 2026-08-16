@@ -3,8 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_post, body_array, body_json, build_test_app, create_admin, get_req,
-    insert_manga, insert_source, login, post_json, test_state,
+    authed_get, authed_post, body_array, body_json, build_test_app, create_admin, insert_manga,
+    insert_source, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -30,19 +30,6 @@ async fn list_metadata_providers_returns_200_for_authed_user() {
         providers.iter().any(|p| p["id"] == "stub"),
         "stub provider must be listed"
     );
-}
-
-#[tokio::test]
-async fn list_metadata_providers_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/sources/metadata-providers"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -93,22 +80,6 @@ async fn enrich_manga_metadata_returns_404_for_missing_manga() {
 }
 
 #[tokio::test]
-async fn enrich_manga_metadata_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/manga/1/enrich-metadata",
-            serde_json::json!({ "provider": "stub" }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -125,19 +96,6 @@ async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn get_source_capabilities_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/sources/1/capabilities"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

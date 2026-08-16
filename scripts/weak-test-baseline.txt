@@ -4,12 +4,8 @@
 # The sweep drains this file; the check fails when an entry is strengthened,
 # so it cannot go stale.
 
-kani-web/tests/admin_api_tests.rs admin_delete_second_admin_succeeds
-kani-web/tests/admin_api_tests.rs admin_revoke_admin_role_succeeds_with_multiple_admins
 kani-web/tests/admin_api_tests.rs reset_source_circuit_returns_204_for_admin
 kani-web/tests/api_token_auth_tests.rs a_scoped_api_token_reaches_a_permitted_route
-kani-web/tests/backup_schedule_api_tests.rs admin_put_backup_schedule_returns_200_for_admin
-kani-web/tests/bookmarks_notes_api_tests.rs set_chapter_note_returns_204_authed
 kani-web/tests/chapters_api_tests.rs set_chapter_progress_returns_error_for_missing_chapter
 kani-web/tests/chapters_api_tests.rs set_read_status_returns_204_for_empty_chapter_list
 kani-web/tests/client_ip_api_tests.rs a_forged_header_cannot_lock_out_a_bystander

@@ -32,19 +32,6 @@ async fn scan_all_library_returns_job_id() {
 }
 
 #[tokio::test]
-async fn scan_all_library_returns_401_without_auth() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state).await;
-
-    let res = app
-        .oneshot(common::post_json("/rest/library/scan-all", json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn refresh_manga_returns_job_id() {
     let state = common::test_state().await;
     let source_id = insert_source(&state.db, "src").await;
@@ -72,21 +59,6 @@ async fn refresh_manga_returns_job_id() {
 }
 
 #[tokio::test]
-async fn refresh_manga_returns_401_without_auth() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state).await;
-
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/rest/manga/1/refresh")
-        .body(axum::body::Body::empty())
-        .unwrap();
-
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn refresh_manga_returns_404_for_missing_manga() {
     let state = common::test_state().await;
     let app = common::build_test_app(state.clone()).await;
@@ -104,22 +76,6 @@ async fn refresh_manga_returns_404_for_missing_manga() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn untrash_by_token_returns_401_without_auth() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state).await;
-
-    let res = app
-        .oneshot(common::post_json(
-            "/rest/manga/untrash",
-            json!({ "token": uuid::Uuid::new_v4() }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

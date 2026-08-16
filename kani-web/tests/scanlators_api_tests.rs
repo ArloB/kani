@@ -3,8 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, insert_manga,
-    insert_source, login, test_state,
+    authed_get, authed_patch, body_json, build_test_app, create_admin, insert_manga, insert_source,
+    login, test_state,
 };
 use tower::ServiceExt;
 
@@ -93,19 +93,6 @@ async fn set_scanlator_mode_returns_400_for_invalid_mode() {
 }
 
 #[tokio::test]
-async fn set_scanlator_mode_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlator_mode"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn set_scanlator_mode_persists_change() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -157,19 +144,6 @@ async fn get_chapter_scanlators_returns_200_for_existing_manga() {
 }
 
 #[tokio::test]
-async fn get_chapter_scanlators_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlators"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn get_scanlator_prefs_returns_empty_list_for_fresh_manga() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -189,17 +163,4 @@ async fn get_scanlator_prefs_returns_empty_list_for_fresh_manga() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body, serde_json::json!([]));
-}
-
-#[tokio::test]
-async fn get_scanlator_prefs_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlator_preferences"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

@@ -2,21 +2,12 @@
 
 mod common;
 use axum::http::StatusCode;
-use axum::{body::Body, http::Request};
 use common::{
-    authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, get_req,
-    login, test_state,
+    authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, login,
+    test_state,
 };
 use serde_json::json;
 use tower::ServiceExt;
-
-fn post_req(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
-}
 
 #[tokio::test]
 async fn db_stats_returns_200_for_admin() {
@@ -34,16 +25,6 @@ async fn db_stats_returns_200_for_admin() {
     let body = body_json(res).await;
     assert!(body["db_size_bytes"].as_i64().unwrap_or(-1) > 0);
     assert!(body["page_size"].as_i64().unwrap_or(-1) > 0);
-}
-
-#[tokio::test]
-async fn db_stats_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/admin/db/stats")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -79,19 +60,6 @@ async fn db_analyze_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn db_analyze_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_req("/rest/admin/db/analyze"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn db_vacuum_returns_200_for_admin() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -106,19 +74,6 @@ async fn db_vacuum_returns_200_for_admin() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert!(body["job_id"].as_str().is_some());
-}
-
-#[tokio::test]
-async fn db_vacuum_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_req("/rest/admin/db/vacuum"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -137,19 +92,6 @@ async fn run_maintenance_returns_200_for_admin() {
     let body = body_json(res).await;
     assert!(body["analyze_job_id"].as_str().is_some());
     assert!(body["vacuum_job_id"].as_str().is_some());
-}
-
-#[tokio::test]
-async fn run_maintenance_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_req("/rest/admin/maintenance"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -190,17 +132,4 @@ async fn trigger_recurring_unknown_kind_returns_404() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn trigger_recurring_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_req("/rest/admin/recurring/db_maintenance/run"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

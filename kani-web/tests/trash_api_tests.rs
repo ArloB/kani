@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin,
-    create_regular_user, delete_req, get_req, post_json, test_state,
+    create_regular_user, test_state,
 };
 use common::{insert_manga, insert_source};
 use serde_json::json;
@@ -26,16 +26,6 @@ async fn list_trash_returns_200_for_authed_user() {
 }
 
 #[tokio::test]
-async fn list_trash_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/trash")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn delete_manga_returns_404_for_missing_id() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -48,16 +38,6 @@ async fn delete_manga_returns_404_for_missing_id() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn delete_manga_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/manga/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -77,19 +57,6 @@ async fn untrash_manga_returns_404_for_missing_id() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn untrash_manga_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json("/rest/manga/1/untrash", json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -129,16 +96,6 @@ async fn purge_trash_all_returns_200_for_authed_user() {
 }
 
 #[tokio::test]
-async fn purge_trash_all_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/trash")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn purge_trash_all_returns_200_for_regular_user() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "bob").await;
@@ -168,16 +125,6 @@ async fn purge_trash_one_returns_404_for_missing_id() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn purge_trash_one_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/trash/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -221,22 +168,6 @@ async fn delete_manga_returns_undo_token() {
         uuid::Uuid::parse_str(token).is_ok(),
         "undo_token must be a UUID"
     );
-}
-
-#[tokio::test]
-async fn untrash_by_token_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/manga/untrash",
-            json!({ "token": "00000000-0000-0000-0000-000000000001" }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

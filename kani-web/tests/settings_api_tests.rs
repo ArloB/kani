@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_get, authed_patch, authed_post, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, login, post_json, test_state,
+    create_regular_user, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -107,16 +107,6 @@ async fn a_plain_user_cannot_read_the_infrastructure_settings() {
 }
 
 #[tokio::test]
-async fn get_settings_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/settings")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn patch_settings_scan_updates_interval() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -151,23 +141,6 @@ async fn patch_settings_scan_updates_interval() {
     assert_eq!(get_res.status(), StatusCode::OK);
     let body = body_json(get_res).await;
     assert_eq!(body["scan_interval_minutes"], serde_json::json!(120));
-}
-
-#[tokio::test]
-async fn patch_settings_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_patch(
-            "/rest/settings",
-            "",
-            serde_json::json!({"Scan": {"auto_scan": false, "scan_interval_minutes": 60, "scan_exclude_completed": false}}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -299,29 +272,6 @@ async fn patch_settings_security_updates() {
     assert_eq!(body["max_ip_attempts"], serde_json::json!(40));
     assert_eq!(body["login_lockout_seconds"], serde_json::json!(600));
     assert_eq!(body["session_timeout_secs"], serde_json::json!(86400));
-}
-
-#[tokio::test]
-async fn patch_settings_security_unauthed_returns_401() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_patch(
-            "/rest/settings",
-            "",
-            serde_json::json!({
-                "Security": {
-                    "max_login_attempts": 8,
-                    "max_ip_attempts": 40,
-                    "login_lockout_seconds": 600,
-                    "session_timeout_secs": 86400
-                }
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -518,22 +468,6 @@ async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
             res.status()
         );
     }
-}
-
-#[tokio::test]
-async fn solver_test_requires_authentication() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/settings/solver/test",
-            serde_json::json!({ "url": "http://127.0.0.1:1/v1" }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

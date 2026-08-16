@@ -2,9 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_get, body_json, build_test_app, create_admin, get_req, login, put_json, test_state,
-};
+use common::{authed_get, body_json, build_test_app, create_admin, login, put_json, test_state};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -31,19 +29,6 @@ async fn set_chapter_progress_returns_error_for_missing_chapter() {
 }
 
 #[tokio::test]
-async fn set_chapter_progress_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/chapter/1/progress"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn set_read_status_returns_204_for_empty_chapter_list() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -60,19 +45,6 @@ async fn set_read_status_returns_204_for_empty_chapter_list() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-}
-
-#[tokio::test]
-async fn set_read_status_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/chapters/read_status"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -111,17 +83,4 @@ async fn get_manga_chapters_invalid_page_returns_400() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn get_manga_chapters_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/chapters"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

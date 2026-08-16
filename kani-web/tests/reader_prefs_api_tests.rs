@@ -79,24 +79,6 @@ async fn put_reader_prefs_is_returned_by_get_tracking() {
 }
 
 #[tokio::test]
-async fn put_reader_prefs_returns_401_without_auth() {
-    let state = test_state().await;
-    let manga_id = insert_test_manga(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(put_json(
-            &format!("/rest/manga/{manga_id}/tracking"),
-            "",
-            serde_json::json!({ "reader_prefs": r#"{"mode":"webtoon"}"# }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn put_reader_prefs_rejects_non_object_json() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;

@@ -67,21 +67,6 @@ async fn get_bookmarks_returns_200_authed() {
 }
 
 #[tokio::test]
-async fn get_bookmarks_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_get(
-            &format!("/rest/chapter/{chapter_id}/bookmarks"),
-            "",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-#[tokio::test]
 async fn toggle_bookmark_adds_and_returns_state() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -124,20 +109,7 @@ async fn get_chapter_note_returns_200_authed() {
 }
 
 #[tokio::test]
-async fn get_chapter_note_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_get(&format!("/rest/chapter/{chapter_id}/note"), ""))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn set_chapter_note_returns_204_authed() {
+async fn a_chapter_note_is_stored_and_read_back() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
     let (_, chapter_id) = insert_test_chapter(&state).await;
@@ -145,6 +117,7 @@ async fn set_chapter_note_returns_204_authed() {
     let cookie = login(&app, username, password).await;
 
     let res = app
+        .clone()
         .oneshot(put_json(
             &format!("/rest/chapter/{chapter_id}/note"),
             &cookie,
@@ -153,23 +126,21 @@ async fn set_chapter_note_returns_204_authed() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-}
 
-#[tokio::test]
-async fn set_chapter_note_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(put_json(
+    let fetched = app
+        .oneshot(common::authed_get(
             &format!("/rest/chapter/{chapter_id}/note"),
-            "",
-            serde_json::json!({ "note": "test" }),
+            &cookie,
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(fetched.status(), StatusCode::OK);
+
+    let body = common::body_json(fetched).await;
+    assert_eq!(
+        body["note"], "interesting chapter",
+        "the stored note must come back, got {body}"
+    );
 }
 
 #[tokio::test]
@@ -202,20 +173,4 @@ async fn get_manga_chapter_notes_returns_notes_object() {
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["chapter_id"], serde_json::json!(chapter_id));
     assert_eq!(notes[0]["note"], serde_json::json!("chapter note text"));
-}
-
-#[tokio::test]
-async fn get_manga_chapter_notes_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let (manga_id, _) = insert_test_chapter(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_get(
-            &format!("/rest/manga/{manga_id}/chapter-notes"),
-            "",
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

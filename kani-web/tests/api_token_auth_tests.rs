@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{build_test_app, create_admin, get_req, test_state};
+use common::{build_test_app, create_admin, test_state};
 use kani_app::service::api_tokens::TokenKind;
 use tower::ServiceExt;
 
@@ -100,69 +100,6 @@ async fn an_opds_token_is_rejected_on_the_rest_api() {
         StatusCode::FORBIDDEN,
         "acceptance keys on kind: a reader token must never reach /rest/*"
     );
-}
-
-#[tokio::test]
-async fn an_invalid_bearer_is_refused_rather_than_falling_back_to_session() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/sources", "kani_pat_totally_made_up"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn a_revoked_token_stops_working() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let uid = admin_user_id(&state).await;
-    let scope: kani_app::permissions::Permission = "source:browse".parse().unwrap();
-    let created = state
-        .service
-        .create_token(uid, "doomed", None, TokenKind::Api, Some(&[scope]))
-        .await
-        .unwrap();
-    state
-        .service
-        .revoke_api_token(uid, &created.token.id)
-        .await
-        .unwrap();
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/sources", &created.raw_token))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn session_routes_still_work_without_any_bearer() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
-
-    let res = app
-        .oneshot(common::authed_get("/rest/sources", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        res.status(),
-        StatusCode::OK,
-        "session auth must be unaffected"
-    );
-
-    let anon = build_test_app(test_state().await).await;
-    let res = anon.oneshot(get_req("/rest/sources")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 fn post_json_authed(

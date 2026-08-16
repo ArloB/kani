@@ -6,14 +6,6 @@ use kani_shared_test::{insert_manga, insert_source};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn list_jobs_401_unauthenticated() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state).await;
-    let res = app.oneshot(common::get_req("/rest/jobs")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn list_jobs_403_regular_user() {
     let state = common::test_state().await;
     let app = common::build_test_app(state.clone()).await;
@@ -85,18 +77,6 @@ async fn get_job_404_nonexistent() {
 }
 
 #[tokio::test]
-async fn cancel_job_401_unauthenticated() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state).await;
-    let fake_id = uuid::Uuid::new_v4();
-    let res = app
-        .oneshot(common::delete_req(&format!("/rest/jobs/{fake_id}")))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn cancel_job_404_nonexistent() {
     let state = common::test_state().await;
     let app = common::build_test_app(state.clone()).await;
@@ -112,22 +92,6 @@ async fn cancel_job_404_nonexistent() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn download_all_401_unauthenticated() {
-    let state = common::test_state().await;
-    let source_id = insert_source(&state.db, "src").await;
-    let manga_id = insert_manga(&state.db, source_id, "m1", "Manga").await;
-    let app = common::build_test_app(state).await;
-    let res = app
-        .oneshot(common::post_json(
-            &format!("/rest/manga/{}/download_all", manga_id),
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

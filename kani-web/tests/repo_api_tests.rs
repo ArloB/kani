@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, login, post_json, test_state,
+    create_regular_user, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -31,14 +31,6 @@ async fn seed_repo(state: &kani_web::state::AppState, url: &str, name: &str, pk:
     .fetch_one(&state.db)
     .await
     .unwrap()
-}
-
-#[tokio::test]
-async fn list_repos_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app.oneshot(get_req("/rest/sources/repos")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -70,20 +62,6 @@ async fn list_repos_returns_empty_for_admin() {
 }
 
 #[tokio::test]
-async fn add_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/sources/repos",
-            serde_json::json!({"url": "https://example.com"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn add_repo_returns_403_for_regular_user() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "charlie_repos").await;
@@ -101,14 +79,6 @@ async fn add_repo_returns_403_for_regular_user() {
 }
 
 #[tokio::test]
-async fn get_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app.oneshot(get_req("/rest/sources/repos/1")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn get_repo_returns_404_for_missing_id() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -119,59 +89,6 @@ async fn get_repo_returns_404_for_missing_id() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn delete_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(
-            axum::http::Request::builder()
-                .method("DELETE")
-                .uri("/rest/sources/repos/1")
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn refresh_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/sources/repos/1/refresh",
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn list_repo_extensions_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(get_req("/rest/sources/repos/1/extensions"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn list_blocked_repos_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(get_req("/rest/admin/sources/blocked-repos"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -201,20 +118,6 @@ async fn list_blocked_repos_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn block_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/admin/sources/blocked-repos",
-            serde_json::json!({"url": "https://bad.example.com", "reason": "test"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn block_repo_returns_403_for_regular_user() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "eve_repos").await;
@@ -229,20 +132,6 @@ async fn block_repo_returns_403_for_regular_user() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn install_from_repo_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/sources/install",
-            serde_json::json!({"repo_id": 1, "extension_id": "x"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

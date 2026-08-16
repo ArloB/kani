@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, body_json, build_test_app, create_admin, get_req, login, test_state};
+use common::{authed_get, body_json, build_test_app, create_admin, login, test_state};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -31,19 +31,6 @@ async fn system_capabilities_returns_200_with_auth() {
 }
 
 #[tokio::test]
-async fn system_capabilities_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/system/capabilities"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn export_epub_returns_404_for_missing_chapter() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -59,32 +46,6 @@ async fn export_epub_returns_404_for_missing_chapter() {
         !res.status().is_success(),
         "Expected error for missing chapter"
     );
-}
-
-#[tokio::test]
-async fn export_epub_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/chapters/1/export/epub"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn export_kcc_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/chapters/1/export/kcc"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

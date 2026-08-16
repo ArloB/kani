@@ -7,21 +7,6 @@ use kani_shared_test::{insert_manga, insert_source};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn dismiss_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/rest/manga/1/dismiss-suppressed")
-        .body(axum::body::Body::empty())
-        .unwrap();
-
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn dismiss_is_a_noop_for_an_unknown_manga() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;

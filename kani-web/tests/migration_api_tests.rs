@@ -148,24 +148,6 @@ async fn an_in_flight_migration_does_not_block_a_different_series() {
 }
 
 #[tokio::test]
-async fn migrating_unauthenticated_is_401() {
-    let state = test_state().await;
-    let db = state.service.db.clone();
-    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post(
-            &format!("/rest/manga/{manga_id}/migrate"),
-            None,
-            migrate_body(1),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn migrating_without_library_manage_is_403() {
     let state = test_state().await;
     let db = state.service.db.clone();

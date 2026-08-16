@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, dead_code)]
 
+pub mod routes;
+
 use axum::{Router, body::Body, http::Request};
 use axum_login::{
     AuthManagerLayerBuilder,

@@ -68,23 +68,6 @@ async fn list_themes_returns_200_for_an_authed_user() {
 }
 
 #[tokio::test]
-async fn list_themes_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/rest/ui/themes")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn an_unknown_token_is_rejected() {
     let state = test_state().await;
     let (u, p) = create_admin(&state).await;

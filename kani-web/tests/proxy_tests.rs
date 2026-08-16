@@ -2,7 +2,6 @@
 
 mod common;
 use axum::http::StatusCode;
-use axum::{body::Body, http::Request};
 use common::{authed_get, build_test_app, create_admin, login, test_state};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -111,25 +110,6 @@ async fn proxy_stats_returns_200_for_admin() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn proxy_stats_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/rest/admin/proxy/stats")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

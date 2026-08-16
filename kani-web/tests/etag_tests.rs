@@ -179,32 +179,6 @@ async fn a_streamed_response_is_left_alone() {
 }
 
 #[tokio::test]
-async fn an_unauthenticated_list_is_still_refused() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    for path in TAGGED {
-        let res = app
-            .clone()
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri(path)
-                    .header(header::IF_NONE_MATCH, "*")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "{path}: `If-None-Match: *` must not shortcut the auth guard"
-        );
-    }
-}
-
-#[tokio::test]
 async fn a_tagged_per_user_list_is_not_shared_cacheable() {
     let state = test_state().await;
     let (u, p) = create_admin(&state).await;

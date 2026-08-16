@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_delete, authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, login, post_json, test_state,
+    create_regular_user, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -43,16 +43,6 @@ async fn admin_list_users_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let body = body_json(res).await;
     assert_eq!(body["code"], serde_json::json!("forbidden"));
-}
-
-#[tokio::test]
-async fn admin_list_users_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/admin/users")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -143,37 +133,6 @@ async fn admin_audit_log_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn admin_create_user_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/admin/users",
-            serde_json::json!({
-                "username": "ghost",
-                "email": "ghost@test.local",
-                "password": "Password1234!",
-                "roles": []
-            }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn admin_audit_log_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/admin/audit-log")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn admin_revoke_last_admin_role_returns_400() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -230,6 +189,15 @@ async fn admin_revoke_admin_role_succeeds_with_multiple_admins() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let still_admin: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role_slug = 'admin'",
+    )
+    .bind(second.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap();
+    assert_eq!(still_admin, 0, "the admin role must be revoked");
 }
 
 #[tokio::test]
@@ -301,6 +269,13 @@ async fn admin_delete_second_admin_succeeds() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE id = ?")
+        .bind(second.id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0, "the deleted admin must be gone from users");
 }
 
 #[tokio::test]
@@ -318,19 +293,6 @@ async fn list_source_circuits_returns_200_for_admin() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_array(res).await;
     assert!(body.is_empty(), "fresh instance has no circuit state");
-}
-
-#[tokio::test]
-async fn list_source_circuits_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/sources/circuits"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -365,22 +327,6 @@ async fn reset_source_circuit_returns_204_for_admin() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-}
-
-#[tokio::test]
-async fn reset_source_circuit_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/admin/sources/circuits/example.com/reset",
-            serde_json::json!(null),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

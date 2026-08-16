@@ -794,6 +794,39 @@ impl scripting::Host for HostState {
     }
 }
 
+impl cache::Host for HostState {
+    async fn get(&mut self, key: String) -> Option<Vec<u8>> {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        backend.get(&ns, &key).await
+    }
+
+    async fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u32) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        backend
+            .put(
+                &ns,
+                &key,
+                value,
+                std::time::Duration::from_secs(u64::from(ttl_secs)),
+            )
+            .await;
+    }
+
+    async fn delete(&mut self, key: String) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        backend.delete(&ns, &key).await;
+    }
+
+    async fn clear(&mut self) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        backend.clear_namespace(&ns).await;
+    }
+}
+
 #[cfg(test)]
 mod blueprint_decode_tests {
     #![allow(clippy::unwrap_used)]
@@ -831,38 +864,5 @@ mod blueprint_decode_tests {
             .build();
         let error = decode_blueprint(&blueprint.to_bytes()).unwrap_err();
         assert!(error.contains("non-topological"));
-    }
-}
-
-impl cache::Host for HostState {
-    async fn get(&mut self, key: String) -> Option<Vec<u8>> {
-        let ns = self.ext_cache_namespace.clone();
-        let backend = std::sync::Arc::clone(&self.ext_cache);
-        backend.get(&ns, &key).await
-    }
-
-    async fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u32) {
-        let ns = self.ext_cache_namespace.clone();
-        let backend = std::sync::Arc::clone(&self.ext_cache);
-        backend
-            .put(
-                &ns,
-                &key,
-                value,
-                std::time::Duration::from_secs(u64::from(ttl_secs)),
-            )
-            .await;
-    }
-
-    async fn delete(&mut self, key: String) {
-        let ns = self.ext_cache_namespace.clone();
-        let backend = std::sync::Arc::clone(&self.ext_cache);
-        backend.delete(&ns, &key).await;
-    }
-
-    async fn clear(&mut self) {
-        let ns = self.ext_cache_namespace.clone();
-        let backend = std::sync::Arc::clone(&self.ext_cache);
-        backend.clear_namespace(&ns).await;
     }
 }

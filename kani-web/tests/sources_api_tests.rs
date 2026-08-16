@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, login, post_json, put_json, test_state,
+    create_regular_user, login, put_json, test_state,
 };
 use tower::ServiceExt;
 
@@ -38,16 +38,6 @@ async fn list_sources_returns_empty_list_on_fresh_db() {
     assert_eq!(res.status(), StatusCode::OK);
     let sources = body_array(res).await;
     assert!(sources.is_empty(), "fresh DB should have no sources");
-}
-
-#[tokio::test]
-async fn list_sources_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/sources")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -141,32 +131,6 @@ async fn add_source_returns_400_for_empty_name() {
 }
 
 #[tokio::test]
-async fn get_source_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/sources/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn add_source_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/sources",
-            serde_json::json!({"name": "test-source"}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn get_source_returns_200_for_authed_user() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -222,22 +186,6 @@ async fn set_browser_enabled_returns_200_and_persists_for_admin() {
         .unwrap();
     let body = body_json(get_res).await;
     assert_eq!(body["browser_enabled"], serde_json::json!(false));
-}
-
-#[tokio::test]
-async fn set_browser_enabled_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let req = axum::http::Request::builder()
-        .method("PUT")
-        .uri("/rest/sources/1/browser-enabled")
-        .header("Content-Type", "application/json")
-        .body(axum::body::Body::from(r#"{"enabled":false}"#))
-        .unwrap();
-    let res = app.oneshot(req).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -312,17 +260,6 @@ async fn bulk_capabilities_returns_200_with_auth() {
             "capability flags are flattened, not nested"
         );
     }
-}
-
-#[tokio::test]
-async fn bulk_capabilities_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(get_req("/rest/sources/capabilities"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

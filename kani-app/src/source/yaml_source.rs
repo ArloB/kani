@@ -838,6 +838,28 @@ fn unpack_chapter(result: &serde_json::Value) -> Chapter {
 }
 
 #[cfg(test)]
+impl YamlSource {
+    pub(crate) fn for_test() -> Self {
+        let cache = Arc::new(kani_core::cache::InMemoryCache::new());
+        Self {
+            config: Arc::new(kani_yaml::ValidatedExtension::default()),
+            http: kani_core::http::SmartClient::new(None).expect("SmartClient::new"),
+            cache,
+            cache_namespace: String::new(),
+            v8_process: kani_core::v8_process::new_handle(),
+            prefs: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            hook_registry: None,
+            pure_fn_registry: None,
+            browser_scripts: Arc::new(kani_core::scripting::BrowserScriptRegistry::default()),
+            browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            max_hook_requests: 3,
+            eval_limits: kani_core::evaluator::EvalLimits::default(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod page_url_tests {
     use super::append_query_params;
 
@@ -885,27 +907,5 @@ mod page_url_tests {
             append_query_params("https://x.test/browse#top", &params(&[("page", "2")])),
             "https://x.test/browse?page=2#top"
         );
-    }
-}
-
-#[cfg(test)]
-impl YamlSource {
-    pub(crate) fn for_test() -> Self {
-        let cache = Arc::new(kani_core::cache::InMemoryCache::new());
-        Self {
-            config: Arc::new(kani_yaml::ValidatedExtension::default()),
-            http: kani_core::http::SmartClient::new(None).expect("SmartClient::new"),
-            cache,
-            cache_namespace: String::new(),
-            v8_process: kani_core::v8_process::new_handle(),
-            prefs: Arc::new(std::sync::RwLock::new(HashMap::new())),
-            semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            hook_registry: None,
-            pure_fn_registry: None,
-            browser_scripts: Arc::new(kani_core::scripting::BrowserScriptRegistry::default()),
-            browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            max_hook_requests: 3,
-            eval_limits: kani_core::evaluator::EvalLimits::default(),
-        }
     }
 }

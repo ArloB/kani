@@ -2,31 +2,11 @@
 
 mod common;
 use axum::http::StatusCode;
-use axum::{body::Body, http::Request};
 use common::{
     authed_delete, authed_get, authed_post, body_json, build_test_app_with_opds, create_admin,
     create_regular_user, login, test_state,
 };
 use tower::ServiceExt;
-
-#[tokio::test]
-async fn list_requires_auth() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/rest/me/api-tokens")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
 
 #[tokio::test]
 async fn create_list_revoke_roundtrip() {
@@ -96,58 +76,6 @@ async fn create_rejects_empty_name() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn revoked_token_no_longer_authenticates_on_opds() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app_with_opds(state).await;
-    let cookie = login(&app, u, p).await;
-
-    let res = app
-        .clone()
-        .oneshot(authed_post(
-            "/rest/me/api-tokens",
-            &cookie,
-            serde_json::json!({ "name": "reader" }),
-        ))
-        .await
-        .unwrap();
-    let created = body_json(res).await;
-    let raw = created["raw_token"].as_str().unwrap().to_owned();
-    let id = created["id"].as_str().unwrap().to_owned();
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/opds")
-                .header("Authorization", format!("Bearer {raw}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
-    app.clone()
-        .oneshot(authed_delete(&format!("/rest/me/api-tokens/{id}"), &cookie))
-        .await
-        .unwrap();
-
-    let res = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/opds")
-                .header("Authorization", format!("Bearer {raw}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

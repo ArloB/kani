@@ -111,21 +111,6 @@ async fn a_library_wide_upgrade_names_its_series_and_chapter() {
 }
 
 #[tokio::test]
-async fn upgrades_require_authentication() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    for path in ["/rest/me/upgrades", "/rest/manga/1/upgrades"] {
-        let res = app
-            .clone()
-            .oneshot(req("GET", path, None, None))
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{path}");
-    }
-}
-
-#[tokio::test]
 async fn applying_an_upgrade_is_a_library_manage_action() {
     let state = test_state().await;
     let (u, p) = create_regular_user(&state, "hank").await;

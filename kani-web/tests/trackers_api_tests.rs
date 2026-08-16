@@ -2,9 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_get, body_array, body_json, build_test_app, create_admin, get_req, login, test_state,
-};
+use common::{authed_get, body_array, body_json, build_test_app, create_admin, login, test_state};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -55,16 +53,6 @@ async fn list_trackers_all_unconfigured_on_fresh_db() {
 }
 
 #[tokio::test]
-async fn list_trackers_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/trackers")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn get_tracker_config_returns_200_for_admin() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -94,17 +82,4 @@ async fn get_tracker_config_returns_200_for_admin() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["secret_configured"], serde_json::json!(false));
-}
-
-#[tokio::test]
-async fn get_tracker_config_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/trackers/1/config"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
