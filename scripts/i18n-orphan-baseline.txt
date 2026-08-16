@@ -1,10 +1,12 @@
-# Catalog keys nothing references yet, captured 2026-08-16 as the Phase 0 baseline.
+# Catalog keys nothing references yet, captured 2026-08-17 as the sweep baseline.
 # The sweep drains this file; check-i18n-keys.js fails if an entry stops being
 # orphaned, so it cannot go stale. Do not add to it without removing a key.
 
 clients.api.usage.label
 common.error
+common.no
 common.save_changes
+common.yes
 confirm.dont_ask_again
 filter.panel.label
 library.categories.error.add
