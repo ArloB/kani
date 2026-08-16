@@ -20,6 +20,12 @@ and never commit `.snap.new` files.
 - Test DB-backed service methods through the shared test service.
 - Give a new REST endpoint authenticated success, unauthenticated failure, and invalid-input
   coverage, plus permission denial where authentication alone is insufficient.
+- Assert what the success case produced, not only its status code. A status assertion establishes
+  that the route is mounted and the guard admitted the caller; it holds just as well when the
+  handler returns an empty list, the wrong records, or another user's rows. Check a field of the
+  response body or the row the request should have written. Refusal cases are the exception —
+  for a 401 or 404 the status is the behaviour under test. `scripts/check-test-assertions.mjs`
+  enforces this and carries a baseline of tests that predate it.
 - Test what a shared-path change displaces: rename, delete, restore, retry, migration, re-download,
   and rollback paths are common hidden consumers.
 - Use deterministic local HTTP origins or recorded fixtures instead of making unit tests depend on

@@ -9,13 +9,25 @@ use common::{
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn set_scanlator_mode_returns_200_for_priority() {
+async fn set_scanlator_mode_stores_priority() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
     let src = insert_source(&state.db, "src").await;
     let manga_id = insert_manga(&state.db, src, "m1", "Test Manga").await;
+    let db = state.db.clone();
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
+
+    // 'whitelist' first, so passing 'priority' cannot be confused with the
+    // column's default.
+    app.clone()
+        .oneshot(authed_patch(
+            &format!("/rest/manga/{manga_id}/scanlator_mode"),
+            &cookie,
+            serde_json::json!({"mode": "whitelist"}),
+        ))
+        .await
+        .unwrap();
 
     let res = app
         .oneshot(authed_patch(
@@ -27,6 +39,13 @@ async fn set_scanlator_mode_returns_200_for_priority() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
+
+    let stored: String = sqlx::query_scalar("SELECT scanlator_mode FROM manga WHERE id = ?")
+        .bind(manga_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(stored, "priority", "the mode must reach the manga row");
 }
 
 #[tokio::test]

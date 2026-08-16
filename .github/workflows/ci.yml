@@ -90,6 +90,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
+      # Reads test sources only, so it belongs with the Rust checks but needs no build.
+      - name: Endpoint tests assert more than a status code
+        run: node scripts/check-test-assertions.mjs
+
       # Reports only until the 12 dependencies it currently finds are removed
       # and each crate is confirmed to still build; then drop continue-on-error.
       - name: Unused dependencies

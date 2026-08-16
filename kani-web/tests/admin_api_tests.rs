@@ -126,6 +126,20 @@ async fn admin_audit_log_returns_200_for_admin() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
+
+    // Creating the admin and logging in are themselves auditable, so the log
+    // must already hold entries; an empty array would mean nothing is recorded.
+    let body = common::body_json(res).await;
+    let entries = body
+        .get("entries")
+        .or_else(|| body.get("logs"))
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array())
+        .expect("the audit log must come back as an array");
+    assert!(
+        !entries.is_empty(),
+        "logging in must leave an audit entry, got {body}"
+    );
 }
 
 #[tokio::test]

@@ -8,6 +8,7 @@ pub struct Volume {
     pub manga_id: i64,
     pub name: Option<String>,
     pub volume_num: Option<f64>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
 }
 
