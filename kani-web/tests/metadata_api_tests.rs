@@ -10,10 +10,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn list_metadata_providers_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/sources/metadata-providers", &cookie))
@@ -62,10 +59,7 @@ async fn enrich_manga_metadata_returns_200_with_stub_provider() {
 
 #[tokio::test]
 async fn enrich_manga_metadata_returns_404_for_missing_manga() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -81,10 +75,7 @@ async fn enrich_manga_metadata_returns_404_for_missing_manga() {
 
 #[tokio::test]
 async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -100,10 +91,7 @@ async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
 
 #[tokio::test]
 async fn get_source_capabilities_returns_404_for_missing_source() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/sources/999999/capabilities", &cookie))

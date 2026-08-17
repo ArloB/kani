@@ -4,8 +4,8 @@ mod common;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use common::{
-    authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, get_req,
-    login, post_json, test_state,
+    authed_get, authed_post, body_json, build_test_app, create_regular_user, get_req, login,
+    post_json, test_state,
 };
 use kani_app::ServiceError;
 use kani_web::error::AppError;
@@ -31,10 +31,7 @@ fn service_not_found_maps_to_404() {
 
 #[tokio::test]
 async fn missing_manga_returns_404_with_json_code() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/manga/999999", &cookie))
@@ -49,10 +46,7 @@ async fn missing_manga_returns_404_with_json_code() {
 
 #[tokio::test]
 async fn missing_source_returns_404_with_json_code() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/sources/999999", &cookie))
@@ -137,10 +131,7 @@ async fn malformed_login_body_returns_400() {
 
 #[tokio::test]
 async fn admin_create_user_with_short_password_returns_400() {
-    let state = test_state().await;
-    let (admin_username, admin_password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, admin_username, admin_password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

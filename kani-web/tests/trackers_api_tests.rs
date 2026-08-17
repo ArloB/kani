@@ -2,15 +2,12 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, body_array, body_json, build_test_app, create_admin, login, test_state};
+use common::{authed_get, body_array, body_json};
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn list_trackers_returns_anilist_and_mal() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/trackers", &cookie))
@@ -31,10 +28,7 @@ async fn list_trackers_returns_anilist_and_mal() {
 
 #[tokio::test]
 async fn list_trackers_all_unconfigured_on_fresh_db() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/trackers", &cookie))
@@ -54,10 +48,7 @@ async fn list_trackers_all_unconfigured_on_fresh_db() {
 
 #[tokio::test]
 async fn get_tracker_config_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let list_res = app
         .clone()

@@ -20,6 +20,18 @@ and never commit `.snap.new` files.
 - Test DB-backed service methods through the shared test service.
 - Give a new REST endpoint authenticated success, unauthenticated failure, and invalid-input
   coverage, plus permission denial where authentication alone is insufficient.
+- Prefer one harness over many near-identical tests. If a test differs from its neighbours only in
+  a route, an id, or an expected status, it belongs in a table or a contract test driven from the
+  app's own definitions rather than in a function of its own. Per-route copies cost a test each to
+  assert one fact and still only cover the routes somebody remembered to write; deriving the list
+  from the router covers every route and makes a new one covered the moment it is mounted.
+  `auth_guard_contract_tests` and `permission_guard_contract_tests` replace 124 such tests between
+  them. The trade is legibility of failure, so a harness must name the offending route in its
+  assertion message.
+- Seed through `common`, not a local copy. `insert_source` / `insert_manga` / `insert_chapter` and
+  `seed_manga_with_chapter` already exist; four test files had grown their own near-identical
+  version. Likewise `admin_app()` replaces the four-line `test_state` → `create_admin` →
+  `build_test_app` → `login` preamble.
 - Assert what the success case produced, not only its status code. A status assertion establishes
   that the route is mounted and the guard admitted the caller; it holds just as well when the
   handler returns an empty list, the wrong records, or another user's rows. Check a field of the

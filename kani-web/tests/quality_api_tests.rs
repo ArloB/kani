@@ -137,10 +137,7 @@ async fn applying_an_upgrade_is_a_library_manage_action() {
 
 #[tokio::test]
 async fn applying_an_upgrade_to_a_missing_chapter_is_a_404() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(req(
@@ -156,10 +153,7 @@ async fn applying_an_upgrade_to_a_missing_chapter_is_a_404() {
 
 #[tokio::test]
 async fn dismiss_reports_a_missing_chapter_rather_than_succeeding() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let anon = app
         .clone()

@@ -12,10 +12,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn list_trash_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/trash", &cookie))
@@ -27,10 +24,7 @@ async fn list_trash_returns_200_for_authed_user() {
 
 #[tokio::test]
 async fn delete_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/manga/999999", &cookie))
@@ -42,10 +36,7 @@ async fn delete_manga_returns_404_for_missing_id() {
 
 #[tokio::test]
 async fn untrash_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -80,10 +71,7 @@ async fn untrash_manga_returns_404_for_regular_user_missing_id() {
 
 #[tokio::test]
 async fn purge_trash_all_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/trash", &cookie))
@@ -114,10 +102,7 @@ async fn purge_trash_all_returns_200_for_regular_user() {
 
 #[tokio::test]
 async fn purge_trash_one_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/trash/999999", &cookie))
@@ -172,10 +157,7 @@ async fn delete_manga_returns_undo_token() {
 
 #[tokio::test]
 async fn untrash_by_token_returns_422_for_missing_token_field() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post("/rest/manga/untrash", &cookie, json!({})))
@@ -191,10 +173,7 @@ async fn untrash_by_token_returns_422_for_missing_token_field() {
 
 #[tokio::test]
 async fn untrash_by_token_returns_404_for_unknown_token() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

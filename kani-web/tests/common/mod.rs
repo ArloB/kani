@@ -63,15 +63,58 @@ pub async fn build_test_app(state: AppState) -> Router {
     kani_web::app::build_app(state).await
 }
 
+/// A running app with an administrator already signed in, returning the router
+/// and that session's cookie. Four lines of identical preamble opened almost
+/// every REST test; seeding fixtures first needs [`admin_app_with_state`].
+pub async fn admin_app() -> (Router, String) {
+    let (app, cookie, _) = admin_app_with_state().await;
+    (app, cookie)
+}
+
+/// As [`admin_app`], but also hands back the state so a test can read or seed
+/// the database around the request it is making.
+pub async fn admin_app_with_state() -> (Router, String, AppState) {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state.clone()).await;
+    let cookie = login(&app, username, password).await;
+    (app, cookie, state)
+}
+
+pub const ADMIN_USERNAME: &str = "admin";
+pub const ADMIN_PASSWORD: &str = "Password1234!";
+
+/// A second signed-in session for the same administrator, for tests about one
+/// session affecting another.
+pub async fn second_admin_session(app: &Router) -> String {
+    login(app, ADMIN_USERNAME, ADMIN_PASSWORD).await
+}
+
 /// Create an admin user in the given state's DB and return (username, password).
 pub async fn create_admin(state: &AppState) -> (&'static str, &'static str) {
     let backend = AuthBackend::new(state.db.clone());
     let user = backend
-        .create_user("admin", "admin@test.local", "Password1234!")
+        .create_user(ADMIN_USERNAME, "admin@test.local", ADMIN_PASSWORD)
         .await
         .unwrap();
     backend.grant_role(user.id, "admin", None).await.unwrap();
-    ("admin", "Password1234!")
+    (ADMIN_USERNAME, ADMIN_PASSWORD)
+}
+
+/// A user holding no roles at all, so every permission check must refuse them.
+/// `create_user` grants the default `user` role, which carries real permissions;
+/// stripping it is what makes an authorisation test about authorisation.
+pub async fn create_permissionless_user(
+    state: &AppState,
+    username: &'static str,
+) -> (&'static str, &'static str) {
+    let credentials = create_regular_user(state, username).await;
+    sqlx::query("DELETE FROM user_roles WHERE user_id = (SELECT id FROM users WHERE username = ?)")
+        .bind(username)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    credentials
 }
 
 /// Create a standard (non-admin) user and return (username, password).
@@ -274,6 +317,18 @@ pub async fn build_test_app_with_proxy(state: AppState) -> Router {
 // DB row inserters are shared via kani-shared-test (identical across crates).
 #[allow(unused_imports)]
 pub use kani_shared_test::{insert_chapter, insert_manga, insert_source, insert_user};
+
+/// A source, a manga under it, and one chapter, returning `(manga_id, chapter_id)`.
+///
+/// Names are unique per call because `sources.name` is unique, so a test can seed
+/// twice to prove one manga's rows do not leak into another's.
+pub async fn seed_manga_with_chapter(state: &AppState) -> (i64, i64) {
+    let unique = uuid::Uuid::new_v4().to_string();
+    let source_id = insert_source(&state.db, &format!("src-{unique}")).await;
+    let manga_id = insert_manga(&state.db, source_id, &unique, "Manga").await;
+    let chapter_id = insert_chapter(&state.db, manga_id, &format!("c-{unique}"), 1.0).await;
+    (manga_id.into(), chapter_id.into())
+}
 
 /// Build a Basic-auth `Authorization` header value for the given credentials.
 pub fn basic_auth(username: &str, password: &str) -> String {

@@ -2,15 +2,12 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, body_json, build_test_app, create_admin, login, put_json, test_state};
+use common::{authed_get, body_json, put_json};
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn set_chapter_progress_returns_error_for_missing_chapter() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(put_json(
@@ -30,10 +27,7 @@ async fn set_chapter_progress_returns_error_for_missing_chapter() {
 
 #[tokio::test]
 async fn set_read_status_returns_204_for_empty_chapter_list() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(put_json(
@@ -49,10 +43,7 @@ async fn set_read_status_returns_204_for_empty_chapter_list() {
 
 #[tokio::test]
 async fn get_manga_chapters_returns_empty_for_fresh_db() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/manga/999999/chapters?page=1", &cookie))
@@ -72,10 +63,7 @@ async fn get_manga_chapters_returns_empty_for_fresh_db() {
 
 #[tokio::test]
 async fn get_manga_chapters_invalid_page_returns_400() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/manga/1/chapters?page=0", &cookie))

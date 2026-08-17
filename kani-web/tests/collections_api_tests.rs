@@ -2,16 +2,13 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_post, body_json, build_test_app, create_admin, test_state};
+use common::{authed_get, authed_post, body_json};
 use serde_json::json;
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn a_created_collection_is_listed_back() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let empty = app
         .clone()
@@ -50,10 +47,7 @@ async fn a_created_collection_is_listed_back() {
 
 #[tokio::test]
 async fn create_collection_returns_201_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -75,10 +69,7 @@ async fn create_collection_returns_201_for_admin() {
 
 #[tokio::test]
 async fn get_collection_manga_returns_404_for_missing_collection() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/collections/999999/manga", &cookie))

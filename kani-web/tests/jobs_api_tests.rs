@@ -6,20 +6,6 @@ use kani_shared_test::{insert_manga, insert_source};
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn list_jobs_403_regular_user() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state.clone()).await;
-    common::create_regular_user(&state, "bob").await;
-    let cookie = common::login(&app, "bob", "Password1234!").await;
-    let app = common::build_test_app(state).await;
-    let res = app
-        .oneshot(common::authed_get("/rest/jobs", &cookie))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn list_jobs_200_admin() {
     let state = common::test_state().await;
     let app = common::build_test_app(state.clone()).await;

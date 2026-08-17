@@ -194,21 +194,6 @@ async fn diagnostics_returns_payload_for_admin() {
 }
 
 #[tokio::test]
-async fn diagnostics_is_forbidden_for_regular_users() {
-    let state = test_state().await;
-    let (username, password) = common::create_regular_user(&state, "plain").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(common::authed_get("/rest/admin/diagnostics", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), axum::http::StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn support_bundle_returns_a_zip_with_expected_entries() {
     let state = test_state().await;
     let (username, password) = common::create_admin(&state).await;

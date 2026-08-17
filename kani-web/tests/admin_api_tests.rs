@@ -10,10 +10,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn admin_list_users_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/users", &cookie))
@@ -47,10 +44,7 @@ async fn admin_list_users_returns_403_for_regular_user() {
 
 #[tokio::test]
 async fn admin_create_user_returns_201_for_admin() {
-    let state = test_state().await;
-    let (admin_username, admin_password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, admin_username, admin_password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -81,10 +75,7 @@ async fn admin_create_user_returns_201_for_admin() {
 
 #[tokio::test]
 async fn admin_create_user_returns_400_for_short_password() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -105,10 +96,7 @@ async fn admin_create_user_returns_400_for_short_password() {
 
 #[tokio::test]
 async fn admin_audit_log_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/audit-log", &cookie))
@@ -134,10 +122,7 @@ async fn admin_audit_log_returns_200_for_admin() {
 
 #[tokio::test]
 async fn admin_revoke_last_admin_role_returns_400() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state.clone()).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie, _state) = common::admin_app_with_state().await;
 
     let users_res = app
         .clone()
@@ -147,7 +132,7 @@ async fn admin_revoke_last_admin_role_returns_400() {
     let users = body_array(users_res).await;
     let admin_id = users
         .iter()
-        .find(|u| u["username"] == username)
+        .find(|u| u["username"] == common::ADMIN_USERNAME)
         .expect("admin user in list")["id"]
         .as_i64()
         .unwrap();
@@ -228,7 +213,10 @@ async fn admin_revoke_own_admin_role_blocked_after_second_admin_demoted() {
         .await
         .unwrap();
     let users = body_array(users_res).await;
-    let admin_id = users.iter().find(|u| u["username"] == username).unwrap()["id"]
+    let admin_id = users
+        .iter()
+        .find(|u| u["username"] == common::ADMIN_USERNAME)
+        .unwrap()["id"]
         .as_i64()
         .unwrap();
 
@@ -280,10 +268,7 @@ async fn admin_delete_second_admin_succeeds() {
 
 #[tokio::test]
 async fn list_source_circuits_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/sources/circuits", &cookie))
@@ -296,26 +281,8 @@ async fn list_source_circuits_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn list_source_circuits_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "bob").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/admin/sources/circuits", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn reset_source_circuit_returns_204_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -327,25 +294,6 @@ async fn reset_source_circuit_returns_204_for_admin() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-}
-
-#[tokio::test]
-async fn reset_source_circuit_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "carol").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/admin/sources/circuits/example.com/reset",
-            &cookie,
-            serde_json::json!(null),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

@@ -3,8 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin,
-    create_regular_user, login, test_state,
+    authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin, login,
+    test_state,
 };
 use tower::ServiceExt;
 
@@ -34,24 +34,8 @@ async fn seed_repo(state: &kani_web::state::AppState, url: &str, name: &str, pk:
 }
 
 #[tokio::test]
-async fn list_repos_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "bob_repos").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-    let res = app
-        .oneshot(authed_get("/rest/sources/repos", &cookie))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn list_repos_returns_empty_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
     let res = app
         .oneshot(authed_get("/rest/sources/repos", &cookie))
         .await
@@ -62,28 +46,8 @@ async fn list_repos_returns_empty_for_admin() {
 }
 
 #[tokio::test]
-async fn add_repo_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "charlie_repos").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-    let res = app
-        .oneshot(authed_post(
-            "/rest/sources/repos",
-            &cookie,
-            serde_json::json!({"url": "https://example.com"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn get_repo_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
     let res = app
         .oneshot(authed_get("/rest/sources/repos/99999", &cookie))
         .await
@@ -92,24 +56,8 @@ async fn get_repo_returns_404_for_missing_id() {
 }
 
 #[tokio::test]
-async fn list_blocked_repos_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "dave_repos").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-    let res = app
-        .oneshot(authed_get("/rest/admin/sources/blocked-repos", &cookie))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn list_blocked_repos_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
     let res = app
         .oneshot(authed_get("/rest/admin/sources/blocked-repos", &cookie))
         .await
@@ -118,70 +66,8 @@ async fn list_blocked_repos_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn block_repo_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "eve_repos").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-    let res = app
-        .oneshot(authed_post(
-            "/rest/admin/sources/blocked-repos",
-            &cookie,
-            serde_json::json!({"url": "https://bad.example.com", "reason": "test"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn install_from_repo_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "frank_repos").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-    let res = app
-        .oneshot(authed_post(
-            "/rest/sources/install",
-            &cookie,
-            serde_json::json!({"repo_id": 1, "extension_id": "x"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn add_blocked_repo_returns_403() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state.clone()).await;
-    let cookie = login(&app, username, password).await;
-
-    state
-        .service
-        .block_repo("https://evil-repo.example.com", "blocked in test", None)
-        .await
-        .unwrap();
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/sources/repos",
-            &cookie,
-            serde_json::json!({"url": "https://evil-repo.example.com"}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn add_repo_with_non_https_url_returns_400() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -274,10 +160,7 @@ async fn list_repo_extensions_returns_empty_for_seeded_repo() {
 
 #[tokio::test]
 async fn admin_block_and_delete_blocked_repo() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let block_res = app
         .clone()

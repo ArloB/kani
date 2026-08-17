@@ -25,10 +25,7 @@ fn post(
 
 #[tokio::test]
 async fn last_scrub_is_null_before_any_run() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/library/scrub/last", &cookie))
@@ -186,10 +183,7 @@ async fn orphan_delete_removes_only_what_it_is_given() {
 
 #[tokio::test]
 async fn archive_export_returns_202_for_admin() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(post(
@@ -230,10 +224,7 @@ async fn archive_export_requires_admin() {
 
 #[tokio::test]
 async fn archive_download_rejects_an_unknown_job() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get(

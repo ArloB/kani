@@ -8,10 +8,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn dismiss_is_a_noop_for_an_unknown_manga() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

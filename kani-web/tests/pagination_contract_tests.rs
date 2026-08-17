@@ -9,7 +9,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, build_test_app, create_admin, login, test_state};
+use common::authed_get;
 use tower::ServiceExt;
 
 /// Endpoints whose `page`/`page_size` parameters are documented optional.
@@ -22,10 +22,7 @@ const PAGINATED: &[&str] = &[
 
 #[tokio::test]
 async fn paginated_endpoints_accept_a_request_with_no_paging_params() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     for path in PAGINATED {
         let res = app
@@ -48,10 +45,7 @@ async fn paginated_endpoints_accept_a_request_with_no_paging_params() {
 
 #[tokio::test]
 async fn global_search_accepts_only_its_required_query_param() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/global_search?query=whatever", &cookie))
@@ -66,10 +60,7 @@ async fn global_search_accepts_only_its_required_query_param() {
 
 #[tokio::test]
 async fn chapter_listing_defaults_its_page_when_omitted() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/manga/1/chapters", &cookie))
@@ -84,10 +75,7 @@ async fn chapter_listing_defaults_its_page_when_omitted() {
 
 #[tokio::test]
 async fn an_explicitly_invalid_page_is_still_rejected() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     for path in ["/rest/library?page=0", "/rest/library?page_size=99999"] {
         let res = app

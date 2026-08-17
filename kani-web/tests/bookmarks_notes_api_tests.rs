@@ -17,40 +17,11 @@ fn authed_post_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request
         .unwrap()
 }
 
-async fn insert_test_chapter(state: &kani_web::state::AppState) -> (i64, i64) {
-    let src_id: i64 = sqlx::query_scalar(
-        "INSERT INTO sources (name, version) VALUES ('src', '0.1') RETURNING id",
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap();
-
-    let manga_id: i64 = sqlx::query_scalar(
-        "INSERT INTO manga (source_id, source_manga_id, name, status) \
-         VALUES (?, 'mid', 'Manga', 0) RETURNING id",
-    )
-    .bind(src_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap();
-
-    let chapter_id: i64 = sqlx::query_scalar(
-        "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language) \
-         VALUES (?, 'c1', 1.0, 'en') RETURNING id",
-    )
-    .bind(manga_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap();
-
-    (manga_id, chapter_id)
-}
-
 #[tokio::test]
 async fn get_bookmarks_returns_200_authed() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
+    let (_, chapter_id) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
@@ -70,7 +41,7 @@ async fn get_bookmarks_returns_200_authed() {
 async fn toggle_bookmark_adds_and_returns_state() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
+    let (_, chapter_id) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
@@ -92,7 +63,7 @@ async fn toggle_bookmark_adds_and_returns_state() {
 async fn get_chapter_note_returns_200_authed() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
+    let (_, chapter_id) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
@@ -112,7 +83,7 @@ async fn get_chapter_note_returns_200_authed() {
 async fn a_chapter_note_is_stored_and_read_back() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (_, chapter_id) = insert_test_chapter(&state).await;
+    let (_, chapter_id) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
@@ -147,7 +118,7 @@ async fn a_chapter_note_is_stored_and_read_back() {
 async fn get_manga_chapter_notes_returns_notes_object() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (manga_id, chapter_id) = insert_test_chapter(&state).await;
+    let (manga_id, chapter_id) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 

@@ -10,10 +10,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn get_settings_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/settings", &cookie))
@@ -108,10 +105,7 @@ async fn a_plain_user_cannot_read_the_infrastructure_settings() {
 
 #[tokio::test]
 async fn patch_settings_scan_updates_interval() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -145,10 +139,7 @@ async fn patch_settings_scan_updates_interval() {
 
 #[tokio::test]
 async fn patch_settings_invalid_body_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -168,10 +159,7 @@ async fn patch_settings_invalid_body_returns_4xx() {
 
 #[tokio::test]
 async fn get_settings_shows_env_setting_defaults() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/settings", &cookie))
@@ -191,10 +179,7 @@ async fn get_settings_shows_env_setting_defaults() {
 
 #[tokio::test]
 async fn patch_settings_maintenance_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -240,10 +225,7 @@ async fn patch_settings_maintenance_updates() {
 
 #[tokio::test]
 async fn patch_settings_security_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -276,10 +258,7 @@ async fn patch_settings_security_updates() {
 
 #[tokio::test]
 async fn patch_settings_maintenance_invalid_threshold_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -306,10 +285,7 @@ async fn patch_settings_maintenance_invalid_threshold_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_security_invalid_attempts_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -335,10 +311,7 @@ async fn patch_settings_security_invalid_attempts_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_performance_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -373,10 +346,7 @@ async fn patch_settings_performance_updates() {
 
 #[tokio::test]
 async fn patch_settings_performance_invalid_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -403,10 +373,7 @@ async fn patch_settings_performance_invalid_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_rejects_a_zero_scrub_interval() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -437,10 +404,7 @@ async fn patch_settings_rejects_a_zero_scrub_interval() {
 
 #[tokio::test]
 async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     for gain in [0.5, 9.0] {
         let res = app
@@ -472,10 +436,7 @@ async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
 
 #[tokio::test]
 async fn solver_test_rejects_an_empty_url() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -491,10 +452,7 @@ async fn solver_test_rejects_an_empty_url() {
 
 #[tokio::test]
 async fn solver_test_reports_an_unreachable_solver_without_failing_the_request() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -517,10 +475,7 @@ async fn solver_test_reports_an_unreachable_solver_without_failing_the_request()
 
 #[tokio::test]
 async fn solver_test_flags_plain_http_to_a_routable_host() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

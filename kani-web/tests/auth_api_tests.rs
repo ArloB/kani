@@ -62,10 +62,7 @@ async fn login_with_unknown_user_returns_401() {
 
 #[tokio::test]
 async fn auth_me_returns_user_for_authenticated_session() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -75,7 +72,7 @@ async fn auth_me_returns_user_for_authenticated_session() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    assert_eq!(body["username"], serde_json::json!(username));
+    assert_eq!(body["username"], serde_json::json!(common::ADMIN_USERNAME));
 }
 
 #[tokio::test]
@@ -90,10 +87,7 @@ async fn auth_me_returns_401_without_session() {
 
 #[tokio::test]
 async fn logout_invalidates_session() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -116,10 +110,7 @@ async fn logout_invalidates_session() {
 
 #[tokio::test]
 async fn sessions_list_includes_current_session() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let mut sessions = serde_json::json!([]);
     for _ in 0..20 {
@@ -196,12 +187,8 @@ async fn get_current_user_returns_full_user_for_authenticated_session() {
 
 #[tokio::test]
 async fn a_revoked_session_cookie_stops_working() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    let victim = login(&app, username, password).await;
-    let survivor = login(&app, username, password).await;
+    let (app, victim) = common::admin_app().await;
+    let survivor = common::second_admin_session(&app).await;
 
     let ok = app
         .clone()

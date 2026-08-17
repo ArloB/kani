@@ -2,15 +2,12 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, body_json, build_test_app, create_admin, login, test_state};
+use common::{authed_get, body_json};
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn system_capabilities_returns_200_with_auth() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/system/capabilities", &cookie))
@@ -32,10 +29,7 @@ async fn system_capabilities_returns_200_with_auth() {
 
 #[tokio::test]
 async fn export_epub_returns_404_for_missing_chapter() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/chapters/999999/export/epub", &cookie))
@@ -50,10 +44,7 @@ async fn export_epub_returns_404_for_missing_chapter() {
 
 #[tokio::test]
 async fn export_kcc_returns_error_for_missing_chapter() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get(

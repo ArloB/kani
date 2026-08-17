@@ -2,19 +2,13 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin, login,
-    test_state,
-};
+use common::{authed_delete, authed_get, authed_post, body_json};
 use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test]
 async fn get_library_returns_empty_list_for_fresh_db() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/library?page=1&page_size=20", &cookie))
@@ -28,10 +22,7 @@ async fn get_library_returns_empty_list_for_fresh_db() {
 
 #[tokio::test]
 async fn get_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/manga/999999", &cookie))
@@ -45,10 +36,7 @@ async fn get_manga_returns_404_for_missing_id() {
 
 #[tokio::test]
 async fn delete_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/manga/999999", &cookie))
@@ -60,10 +48,7 @@ async fn delete_manga_returns_404_for_missing_id() {
 
 #[tokio::test]
 async fn scan_all_library_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -84,10 +69,7 @@ async fn scan_all_library_returns_200_for_authed_user() {
 
 #[tokio::test]
 async fn get_library_invalid_page_returns_400() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/library?page=0&page_size=20", &cookie))
@@ -99,10 +81,7 @@ async fn get_library_invalid_page_returns_400() {
 
 #[tokio::test]
 async fn scan_manga_all_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -123,10 +102,7 @@ async fn scan_manga_all_returns_200_for_authed_user() {
 
 #[tokio::test]
 async fn scan_manga_ids_empty_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -142,10 +118,7 @@ async fn scan_manga_ids_empty_returns_200_for_authed_user() {
 
 #[tokio::test]
 async fn scan_manga_invalid_body_returns_422() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

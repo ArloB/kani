@@ -6,45 +6,11 @@ use common::{authed_delete, authed_get, build_test_app, create_admin, put_json, 
 use serde_json::json;
 use tower::ServiceExt;
 
-/// Seeds a source, a manga, and one chapter, returning `(manga_id, chapter_id)`.
-async fn seed_manga_with_chapter(state: &kani_web::state::AppState) -> (i64, i64) {
-    // `sources.name` is unique, so a test seeding twice needs distinct names.
-    let unique = uuid::Uuid::new_v4().to_string();
-
-    let source_id: i64 =
-        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id")
-            .bind(format!("src-{unique}"))
-            .fetch_one(&state.db)
-            .await
-            .unwrap();
-
-    let manga_id: i64 = sqlx::query_scalar(
-        "INSERT INTO manga (source_id, source_manga_id, name, status) \
-         VALUES (?, ?, 'Manga', 0) RETURNING id",
-    )
-    .bind(source_id)
-    .bind(&unique)
-    .fetch_one(&state.db)
-    .await
-    .unwrap();
-
-    let chapter_id: i64 = sqlx::query_scalar(
-        "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language) \
-         VALUES (?, 'c1', 1.0, 'en') RETURNING id",
-    )
-    .bind(manga_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap();
-
-    (manga_id, chapter_id)
-}
-
 #[tokio::test]
 async fn a_created_volume_is_listed_back_with_its_name() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (manga_id, _) = seed_manga_with_chapter(&state).await;
+    let (manga_id, _) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = common::login(&app, username, password).await;
 
@@ -97,8 +63,8 @@ async fn a_created_volume_is_listed_back_with_its_name() {
 async fn volumes_of_one_manga_do_not_leak_into_another() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
-    let (mine, _) = seed_manga_with_chapter(&state).await;
-    let (theirs, _) = seed_manga_with_chapter(&state).await;
+    let (mine, _) = common::seed_manga_with_chapter(&state).await;
+    let (theirs, _) = common::seed_manga_with_chapter(&state).await;
     let app = build_test_app(state).await;
     let cookie = common::login(&app, username, password).await;
 
@@ -134,10 +100,7 @@ async fn volumes_of_one_manga_do_not_leak_into_another() {
 
 #[tokio::test]
 async fn delete_volume_returns_404_for_missing_volume() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/manga/1/volumes/999999", &cookie))
@@ -149,10 +112,7 @@ async fn delete_volume_returns_404_for_missing_volume() {
 
 #[tokio::test]
 async fn assign_chapter_volume_returns_404_for_missing_chapter() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(put_json(

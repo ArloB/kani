@@ -3,8 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, login, put_json, test_state,
+    authed_get, authed_post, body_array, body_json, build_test_app, create_regular_user, login,
+    put_json, test_state,
 };
 use tower::ServiceExt;
 
@@ -25,10 +25,7 @@ async fn create_source(app: &axum::Router, cookie: &str, name: &str) -> i64 {
 
 #[tokio::test]
 async fn list_sources_returns_empty_list_on_fresh_db() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/sources", &cookie))
@@ -42,10 +39,7 @@ async fn list_sources_returns_empty_list_on_fresh_db() {
 
 #[tokio::test]
 async fn get_source_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/sources/999999", &cookie))
@@ -80,10 +74,7 @@ async fn add_source_requires_source_install_permission() {
 
 #[tokio::test]
 async fn add_source_returns_201_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -113,10 +104,7 @@ async fn add_source_returns_201_for_admin() {
 
 #[tokio::test]
 async fn add_source_returns_400_for_empty_name() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -132,10 +120,7 @@ async fn add_source_returns_400_for_empty_name() {
 
 #[tokio::test]
 async fn get_source_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let create_res = app
         .clone()
@@ -162,10 +147,7 @@ async fn get_source_returns_200_for_authed_user() {
 
 #[tokio::test]
 async fn set_browser_enabled_returns_200_and_persists_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let id = create_source(&app, &cookie, "browser-src").await;
 
@@ -189,30 +171,8 @@ async fn set_browser_enabled_returns_200_and_persists_for_admin() {
 }
 
 #[tokio::test]
-async fn set_browser_enabled_requires_source_install_permission() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "carol").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-
-    let res = app
-        .oneshot(put_json(
-            "/rest/sources/1/browser-enabled",
-            &cookie,
-            serde_json::json!({ "enabled": false }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn set_browser_enabled_rejects_invalid_body() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(put_json(
@@ -232,10 +192,7 @@ async fn set_browser_enabled_rejects_invalid_body() {
 
 #[tokio::test]
 async fn bulk_capabilities_returns_200_with_auth() {
-    let state = test_state().await;
-    let (user, pass) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, user, pass).await;
+    let (app, cookie) = common::admin_app().await;
 
     create_source(&app, &cookie, "alpha").await;
     create_source(&app, &cookie, "beta").await;
@@ -264,10 +221,7 @@ async fn bulk_capabilities_returns_200_with_auth() {
 
 #[tokio::test]
 async fn bulk_capabilities_is_empty_not_an_error_with_no_sources() {
-    let state = test_state().await;
-    let (user, pass) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, user, pass).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -280,10 +234,7 @@ async fn bulk_capabilities_is_empty_not_an_error_with_no_sources() {
 
 #[tokio::test]
 async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
-    let state = test_state().await;
-    let (user, pass) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, user, pass).await;
+    let (app, cookie) = common::admin_app().await;
     let id = create_source(&app, &cookie, "gamma").await;
 
     let bulk = app
@@ -311,10 +262,7 @@ async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
 
 #[tokio::test]
 async fn bulk_and_per_source_agree() {
-    let state = test_state().await;
-    let (user, pass) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, user, pass).await;
+    let (app, cookie) = common::admin_app().await;
     let id = create_source(&app, &cookie, "delta").await;
 
     let bulk = body_array(

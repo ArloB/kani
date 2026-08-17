@@ -2,19 +2,13 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user,
-    put_json, test_state,
-};
+use common::{authed_get, authed_post, body_json, put_json};
 use serde_json::json;
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn admin_get_backup_schedule_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/backup/schedule", &cookie))
@@ -30,26 +24,8 @@ async fn admin_get_backup_schedule_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn admin_get_backup_schedule_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "alice").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/admin/backup/schedule", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn admin_put_backup_schedule_round_trips() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let config = json!({
         "enabled": true,
@@ -77,10 +53,7 @@ async fn admin_put_backup_schedule_round_trips() {
 
 #[tokio::test]
 async fn admin_backup_run_now_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -94,23 +67,4 @@ async fn admin_backup_run_now_returns_200_for_admin() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert!(body.get("job_id").is_some());
-}
-
-#[tokio::test]
-async fn admin_backup_run_now_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "bob").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/admin/backup/run-now",
-            &cookie,
-            json!({}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }

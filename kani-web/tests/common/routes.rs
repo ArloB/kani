@@ -103,6 +103,100 @@ pub fn mentions_method(chain: &str, method: &str) -> bool {
     false
 }
 
+/// The handler named for `method` in a `.route(...)` chain, e.g. `get(list_volumes)`
+/// yields `list_volumes`. Paths built from closures yield `None`.
+pub fn method_handler(chain: &str, method: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    while let Some(rel) = chain[cursor..].find(method) {
+        let at = cursor + rel;
+        cursor = at + method.len();
+        let before_ok = chain[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        let rest = chain[cursor..].trim_start();
+        if !before_ok || !rest.starts_with('(') {
+            continue;
+        }
+        let inner = &rest[1..];
+        let end = inner.find([')', ',', '.'])?;
+        let name = inner[..end].trim();
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+        {
+            return None;
+        }
+        return Some(name.rsplit("::").next().unwrap_or(name).to_string());
+    }
+    None
+}
+
+/// Maps each handler to the permission guard in its signature. A handler whose
+/// first extractor is `AuthGuard<…::Foo>` requires the `Foo` permission.
+pub fn handler_guards() -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let pattern = regex_lite_find_guards;
+    for file in rest_sources() {
+        let src = std::fs::read_to_string(&file).unwrap();
+        pattern(&src, &mut out);
+    }
+    out
+}
+
+/// Scans `async fn NAME(` … `AuthGuard<…::GUARD>` pairs without a regex crate.
+fn regex_lite_find_guards(src: &str, out: &mut BTreeMap<String, String>) {
+    let mut cursor = 0usize;
+    while let Some(rel) = src[cursor..].find("async fn ") {
+        let at = cursor + rel + "async fn ".len();
+        cursor = at;
+        let Some(paren) = src[at..].find('(') else {
+            break;
+        };
+        let name = src[at..at + paren].trim();
+        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        // The signature ends at the arrow or the opening brace, whichever is first.
+        let tail = &src[at + paren..];
+        let sig_end = tail.find("->").or_else(|| tail.find('{')).unwrap_or(0);
+        let signature = &tail[..sig_end];
+        if let Some(g) = signature.find("AuthGuard<") {
+            let after = &signature[g + "AuthGuard<".len()..];
+            if let Some(close) = after.find('>') {
+                let full = after[..close].trim();
+                let guard = full.rsplit("::").next().unwrap_or(full);
+                out.insert(name.to_string(), guard.to_string());
+            }
+        }
+    }
+}
+
+/// `(path, method)` to the guard protecting it, for every route whose handler
+/// could be resolved.
+pub fn declared_guards() -> BTreeMap<Route, String> {
+    let guards = handler_guards();
+    let mut out = BTreeMap::new();
+    for file in rest_sources() {
+        let src = std::fs::read_to_string(&file).unwrap();
+        for (path, chain) in route_calls(&src) {
+            for method in METHODS {
+                if !mentions_method(&chain, method) {
+                    continue;
+                }
+                let Some(handler) = method_handler(&chain, method) else {
+                    continue;
+                };
+                if let Some(guard) = guards.get(&handler) {
+                    out.insert((format!("/rest{path}"), method.to_string()), guard.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Substitutes a concrete value for every `{param}` so the path can be requested.
 /// The value need not exist: the guard under test runs before the handler looks.
 pub fn concrete_path(path: &str) -> String {
