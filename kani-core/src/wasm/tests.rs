@@ -369,7 +369,7 @@ fn utility_date_parse_rfc3339_known_date() {
     let mut state = HostState::default();
     let ts =
         utility::Host::date_parse_rfc3339(&mut state, "2024-01-01T00:00:00Z".to_string()).unwrap();
-    assert!(ts > 0);
+    assert_eq!(ts, 1_704_067_200);
 }
 
 #[test]

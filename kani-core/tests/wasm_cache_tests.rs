@@ -82,13 +82,12 @@ fn sha256_hex_is_deterministic_and_64_chars() {
 
 #[test]
 fn warm_hit_is_significantly_faster_than_cold() {
-    let Some(bytes) = load_wasm("kani-test-abi") else {
-        eprintln!(
-            "\n[SKIP] wasm_sources/kani-test-abi.wasm not found.\n\
-             Build it with: cargo run -p kani-cli -- build kani-test-abi\n"
-        );
-        return;
-    };
+    // Named `test-abi`, not `kani-test-abi`: the build strips the crate prefix. This
+    // asked for a file that has never existed, so it silently returned and passed.
+    let bytes = load_wasm("test-abi").expect(
+        "wasm_sources/test-abi.wasm is missing — build it with: \
+         cargo run -p kani-cli -- build --dev",
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let rt = WasmRuntime::new_on_demand().unwrap();

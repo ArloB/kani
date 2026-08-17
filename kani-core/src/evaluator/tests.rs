@@ -635,7 +635,7 @@ mod shared_tests {
             target: Box::new(lit("2024-01-15T12:00:00Z")),
         })
         .await;
-        assert!(v.as_i64().unwrap() > 0);
+        assert_eq!(v.as_i64().unwrap(), 1_705_320_000);
     }
 
     #[tokio::test]

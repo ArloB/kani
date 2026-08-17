@@ -232,13 +232,16 @@ mod tests {
             "[year]-[month]-[day] [hour]:[minute]:[second]",
         )
         .unwrap();
-        assert!(ts > 0);
+        assert_eq!(
+            ts, 1_705_314_600,
+            "the time of day must be parsed, not dropped"
+        );
     }
 
     #[test]
     fn parse_date_date_only_format() {
         let ts = parse_date_flexible("2024-06-01", "[year]-[month]-[day]").unwrap();
-        assert!(ts > 0);
+        assert_eq!(ts, 1_717_200_000);
     }
 
     #[test]
