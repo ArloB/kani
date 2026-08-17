@@ -265,13 +265,6 @@ mod tests {
     }
 
     #[test]
-    fn multiselect_empty_skipped() {
-        let filters = vec![active("genre", FilterState::Multiselect(vec![]))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
-        assert!(q.is_empty());
-    }
-
-    #[test]
     fn checkbox_true_default_value() {
         let filters = vec![active("adult", FilterState::Checkbox(true))];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
@@ -286,24 +279,10 @@ mod tests {
     }
 
     #[test]
-    fn checkbox_false_skipped() {
-        let filters = vec![active("adult", FilterState::Checkbox(false))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
-        assert!(q.is_empty());
-    }
-
-    #[test]
     fn text_input_nonempty() {
         let filters = vec![active("q", FilterState::TextInput("hello".into()))];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
         assert_eq!(q, vec![("q".into(), "hello".into())]);
-    }
-
-    #[test]
-    fn text_input_empty_skipped() {
-        let filters = vec![active("q", FilterState::TextInput(String::new()))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
-        assert!(q.is_empty());
     }
 
     #[test]
@@ -317,19 +296,6 @@ mod tests {
         )];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
         assert_eq!(q, vec![("type".into(), "manga".into())]);
-    }
-
-    #[test]
-    fn selection_empty_skipped() {
-        let filters = vec![active(
-            "type",
-            FilterState::Selection {
-                name: "Type".into(),
-                value: String::new(),
-            },
-        )];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
-        assert!(q.is_empty());
     }
 
     #[test]
@@ -422,5 +388,26 @@ mod tests {
         let filters = vec![active("q", FilterState::TextInput(String::new()))];
         let fg = FilterGroups::from(&filters);
         assert_eq!(fg.text_value("q"), None);
+    }
+
+    #[test]
+    fn a_filter_in_its_empty_state_contributes_no_query_parameter() {
+        let empty = [
+            ("multiselect", FilterState::Multiselect(vec![])),
+            ("checkbox", FilterState::Checkbox(false)),
+            ("text input", FilterState::TextInput(String::new())),
+            (
+                "selection",
+                FilterState::Selection {
+                    name: "Type".into(),
+                    value: String::new(),
+                },
+            ),
+        ];
+        for (label, state) in empty {
+            let filters = vec![active("f", state)];
+            let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
+            assert!(q.is_empty(), "an empty {label} must not be sent, got {q:?}");
+        }
     }
 }
