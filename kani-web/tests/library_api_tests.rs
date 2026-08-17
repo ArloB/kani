@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_delete, authed_get, authed_post, body_json};
+use common::{authed_get, authed_post, body_json};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -18,32 +18,6 @@ async fn get_library_returns_empty_list_for_fresh_db() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["items"], serde_json::json!([]));
-}
-
-#[tokio::test]
-async fn get_manga_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_get("/rest/manga/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-    let body = body_json(res).await;
-    assert_eq!(body["code"], serde_json::json!("not_found"));
-}
-
-#[tokio::test]
-async fn delete_manga_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/manga/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

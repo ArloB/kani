@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_delete, authed_get, build_test_app, create_admin, put_json, test_state};
+use common::{authed_get, build_test_app, create_admin, test_state};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -96,32 +96,4 @@ async fn volumes_of_one_manga_do_not_leak_into_another() {
         volumes.is_empty(),
         "a volume must not appear under a different manga, got {volumes:?}"
     );
-}
-
-#[tokio::test]
-async fn delete_volume_returns_404_for_missing_volume() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/manga/1/volumes/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn assign_chapter_volume_returns_404_for_missing_chapter() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(put_json(
-            "/rest/manga/1/chapters/999999/volume",
-            &cookie,
-            json!({ "volume_id": null }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

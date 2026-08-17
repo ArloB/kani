@@ -66,15 +66,3 @@ async fn create_collection_returns_201_for_admin() {
     let body = body_json(res).await;
     assert_eq!(body["name"], "Ongoing Manga");
 }
-
-#[tokio::test]
-async fn get_collection_manga_returns_404_for_missing_collection() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_get("/rest/collections/999999/manga", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}

@@ -37,25 +37,6 @@ fn opds_basic_auth_req(uri: &str, username: &str, password: &str) -> Request<Bod
 }
 
 #[tokio::test]
-async fn opds_root_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app.oneshot(opds_req("/opds")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    let www_auth = res
-        .headers()
-        .get("www-authenticate")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert!(
-        www_auth.contains("Basic"),
-        "Expected WWW-Authenticate: Basic, got: {www_auth}"
-    );
-}
-
-#[tokio::test]
 async fn opds_root_returns_200_with_session_auth() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -123,16 +104,6 @@ async fn opds_catalogue_returns_200_for_empty_library() {
 }
 
 #[tokio::test]
-async fn opds_catalogue_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app.oneshot(opds_req("/opds/catalogue")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn opds_catalogue_includes_seeded_manga() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -188,16 +159,6 @@ async fn opds_manga_returns_200_for_existing_manga() {
 }
 
 #[tokio::test]
-async fn opds_manga_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app.oneshot(opds_req("/opds/manga/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn opds_search_returns_200_with_auth() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -210,16 +171,6 @@ async fn opds_search_returns_200_with_auth() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn opds_search_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app.oneshot(opds_req("/opds/search?q=test")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -244,16 +195,6 @@ async fn opds_opensearch_returns_200_with_auth() {
         content_type.contains("xml"),
         "Expected XML content-type for OpenSearch, got: {content_type}"
     );
-}
-
-#[tokio::test]
-async fn opds_opensearch_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app_with_opds(state).await;
-
-    let res = app.oneshot(opds_req("/opds/opensearch")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -394,4 +335,38 @@ async fn opds_reflects_what_the_source_actually_returned() {
         xml.contains("The Wasteland") && xml.contains("Nightfall"),
         "the feed must list the chapters the source served, got: {xml}"
     );
+}
+
+/// Every OPDS entry point challenges an anonymous reader. OPDS is exempt from
+/// the session guard because clients authenticate by HTTP Basic, so this is the
+/// only thing asserting the feed is not open, and the challenge header is part
+/// of the contract — a reader cannot log in without it.
+#[tokio::test]
+async fn every_opds_entry_point_challenges_an_anonymous_reader() {
+    let state = test_state().await;
+    let app = build_test_app_with_opds(state).await;
+
+    for path in [
+        "/opds",
+        "/opds/catalogue",
+        "/opds/manga/1",
+        "/opds/search?q=test",
+        "/opds/opensearch",
+    ] {
+        let res = app.clone().oneshot(opds_req(path)).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path} must not serve an anonymous reader"
+        );
+        let www_auth = res
+            .headers()
+            .get("www-authenticate")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            www_auth.contains("Basic"),
+            "{path} must challenge with Basic, got: {www_auth}"
+        );
+    }
 }

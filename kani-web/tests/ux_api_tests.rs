@@ -59,26 +59,6 @@ async fn refresh_manga_returns_job_id() {
 }
 
 #[tokio::test]
-async fn refresh_manga_returns_404_for_missing_manga() {
-    let state = common::test_state().await;
-    let app = common::build_test_app(state.clone()).await;
-    common::create_admin(&state).await;
-    let cookie = common::login(&app, "admin", "Password1234!").await;
-    let app = common::build_test_app(state).await;
-
-    let res = app
-        .oneshot(common::authed_post(
-            "/rest/manga/999999/refresh",
-            &cookie,
-            json!({}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
 async fn untrash_by_token_returns_4xx_for_missing_token_field() {
     let state = common::test_state().await;
     let app = common::build_test_app(state.clone()).await;

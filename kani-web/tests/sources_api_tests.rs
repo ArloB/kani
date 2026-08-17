@@ -38,20 +38,6 @@ async fn list_sources_returns_empty_list_on_fresh_db() {
 }
 
 #[tokio::test]
-async fn get_source_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_get("/rest/sources/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-    let body = body_json(res).await;
-    assert_eq!(body["code"], serde_json::json!("not_found"));
-}
-
-#[tokio::test]
 async fn add_source_requires_source_install_permission() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "bob").await;

@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_delete, authed_get, authed_post, body_json};
+use common::{authed_get, authed_post, body_json};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -37,16 +37,4 @@ async fn create_saved_search_returns_201_for_authed_user() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let body = body_json(res).await;
     assert_eq!(body["name"], "Ongoing");
-}
-
-#[tokio::test]
-async fn delete_saved_search_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/saved-searches/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

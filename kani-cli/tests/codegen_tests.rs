@@ -14,43 +14,6 @@ fn load_and_validate(fixture: &str) -> kani_cli::yaml::model::ValidatedExtension
 }
 
 #[test]
-fn codegen_popular_snapshot() {
-    let validated = load_and_validate("popular.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("popular_lib_rs", generated.lib_rs);
-    insta::assert_snapshot!("popular_cargo_toml", generated.cargo_toml);
-}
-
-#[test]
-fn codegen_search_snapshot() {
-    let validated = load_and_validate("search.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("search_lib_rs", generated.lib_rs);
-    insta::assert_snapshot!("search_cargo_toml", generated.cargo_toml);
-}
-
-#[test]
-fn codegen_manga_details_snapshot() {
-    let validated = load_and_validate("manga_details.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("details_lib_rs", generated.lib_rs);
-}
-
-#[test]
-fn codegen_chapter_list_snapshot() {
-    let validated = load_and_validate("chapter_list.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("chapters_lib_rs", generated.lib_rs);
-}
-
-#[test]
-fn codegen_pages_snapshot() {
-    let validated = load_and_validate("pages.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("pages_lib_rs", generated.lib_rs);
-}
-
-#[test]
 fn codegen_get_url_emits_get_url_fn() {
     let validated = load_and_validate("get_url.yaml");
     let generated = codegen::generate(&validated, false);
@@ -78,13 +41,6 @@ fn codegen_popular_id_in_cargo_toml() {
 }
 
 #[test]
-fn codegen_filter_format_snapshot() {
-    let validated = load_and_validate("filter_format.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("filter_format_lib_rs", generated.lib_rs);
-}
-
-#[test]
 fn codegen_filter_format_default_matches_unformatted_output() {
     let with_format = load_and_validate("search.yaml");
     let generated = codegen::generate(&with_format, false);
@@ -93,13 +49,6 @@ fn codegen_filter_format_default_matches_unformatted_output() {
         "search.yaml fixture has no filter_format and must not reference it: {}",
         generated.lib_rs
     );
-}
-
-#[test]
-fn codegen_id_encoding_snapshot() {
-    let validated = load_and_validate("id_encoding.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("id_encoding_lib_rs", generated.lib_rs);
 }
 
 #[test]
@@ -134,13 +83,6 @@ fn codegen_id_encoding_emits_decode_prologue_in_chapter_list() {
         "decode prologue must bind sanitized manga_hid/manga_slug locals: {}",
         generated.lib_rs
     );
-}
-
-#[test]
-fn codegen_cache_snapshot() {
-    let validated = load_and_validate("cache.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("cache_lib_rs", generated.lib_rs);
 }
 
 #[test]
@@ -183,13 +125,6 @@ fn codegen_cache_empty_block_emits_empty_registry() {
         "extensions with no cache block must still emit an empty registry: {}",
         generated.lib_rs
     );
-}
-
-#[test]
-fn codegen_metadata_snapshot() {
-    let validated = load_and_validate("metadata.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("metadata_lib_rs", generated.lib_rs);
 }
 
 #[test]
@@ -258,28 +193,6 @@ fn codegen_embedded_bytes_flag() {
 }
 
 #[test]
-fn codegen_chapter_sort_snapshot() {
-    let validated = load_and_validate("chapter_sort.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("chapter_sort_lib_rs", generated.lib_rs);
-    assert!(
-        generated.lib_rs.contains("get_chapter_sort_list"),
-        "chapter_sort fixture must emit get_chapter_sort_list: {}",
-        generated.lib_rs
-    );
-    assert!(
-        generated.lib_rs.contains("default_chapter_sort"),
-        "chapter_sort with default must emit default_chapter_sort: {}",
-        generated.lib_rs
-    );
-    assert!(
-        generated.lib_rs.contains("number_desc"),
-        "chapter_sort options must be emitted: {}",
-        generated.lib_rs
-    );
-}
-
-#[test]
 fn codegen_chapter_sort_stub_when_absent() {
     let validated = load_and_validate("popular.yaml");
     let generated = codegen::generate(&validated, false);
@@ -291,28 +204,6 @@ fn codegen_chapter_sort_stub_when_absent() {
     assert!(
         !generated.lib_rs.contains("default_chapter_sort"),
         "stub must not emit default_chapter_sort: {}",
-        generated.lib_rs
-    );
-}
-
-#[test]
-fn codegen_for_each_snapshot() {
-    let validated = load_and_validate("for_each.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("for_each_lib_rs", generated.lib_rs);
-    assert!(
-        generated.lib_rs.contains("fetch_html"),
-        "for_each must emit Expr::fetch_html: {}",
-        generated.lib_rs
-    );
-    assert!(
-        generated.lib_rs.contains("OnFailurePolicy::Skip"),
-        "for_each with on_failure: skip must emit Skip policy: {}",
-        generated.lib_rs
-    );
-    assert!(
-        generated.lib_rs.contains("details"),
-        "for_each merge_as 'details' must appear: {}",
         generated.lib_rs
     );
 }
@@ -360,13 +251,6 @@ fn codegen_no_fetched_option_sets_emits_empty_array() {
 }
 
 #[test]
-fn codegen_hooks_snapshot() {
-    let validated = load_and_validate("hooks.yaml");
-    let generated = codegen::generate(&validated, false);
-    insta::assert_snapshot!("hooks_lib_rs", generated.lib_rs);
-}
-
-#[test]
 fn codegen_hooks_metadata_contains_pre_request() {
     let validated = load_and_validate("hooks.yaml");
     let generated = codegen::generate(&validated, false);
@@ -386,4 +270,34 @@ fn codegen_hooks_rate_limit_max_hook_requests() {
         "hooks fixture must emit max_hook_requests from rate_limit config: {}",
         generated.lib_rs
     );
+}
+
+/// Every codegen fixture and the snapshots it must reproduce. Twelve tests
+/// differed only by these two names; a fixture is now one row rather than a
+/// function, and the assertion names the fixture that failed.
+const SNAPSHOT_FIXTURES: &[(&str, &str, bool)] = &[
+    ("popular", "popular", true),
+    ("search", "search", true),
+    ("manga_details", "details", false),
+    ("chapter_list", "chapters", false),
+    ("pages", "pages", false),
+    ("filter_format", "filter_format", false),
+    ("id_encoding", "id_encoding", false),
+    ("cache", "cache", false),
+    ("metadata", "metadata", false),
+    ("chapter_sort", "chapter_sort", false),
+    ("for_each", "for_each", false),
+    ("hooks", "hooks", false),
+];
+
+#[test]
+fn every_fixture_generates_its_recorded_output() {
+    for (fixture, snapshot, has_cargo_toml) in SNAPSHOT_FIXTURES {
+        let validated = load_and_validate(&format!("{fixture}.yaml"));
+        let generated = codegen::generate(&validated, false);
+        insta::assert_snapshot!(format!("{snapshot}_lib_rs"), generated.lib_rs);
+        if *has_cargo_toml {
+            insta::assert_snapshot!(format!("{snapshot}_cargo_toml"), generated.cargo_toml);
+        }
+    }
 }

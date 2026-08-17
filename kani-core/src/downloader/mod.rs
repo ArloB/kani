@@ -1157,45 +1157,34 @@ mod tests {
     }
 
     #[test]
-    fn image_extension_from_jpeg_content_type() {
-        let resp = buffered_resp_with_ct("image/jpeg");
-        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "jpg");
-    }
+    fn image_extension_prefers_content_type_then_url_then_jpg() {
+        let by_content_type = [
+            ("image/jpeg", "jpg"),
+            ("image/png", "png"),
+            ("image/webp", "webp"),
+            ("image/gif", "gif"),
+        ];
+        for (content_type, expected) in by_content_type {
+            let resp = buffered_resp_with_ct(content_type);
+            assert_eq!(
+                DownloaderManager::get_image_extension(&resp, "x"),
+                expected,
+                "{content_type} should map to .{expected}"
+            );
+        }
 
-    #[test]
-    fn image_extension_from_png_content_type() {
-        let resp = buffered_resp_with_ct("image/png");
-        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "png");
-    }
-
-    #[test]
-    fn image_extension_from_webp_content_type() {
-        let resp = buffered_resp_with_ct("image/webp");
-        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "webp");
-    }
-
-    #[test]
-    fn image_extension_from_url_when_no_content_type() {
-        let resp = buffered_resp_no_ct();
-        assert_eq!(
-            DownloaderManager::get_image_extension(&resp, "https://cdn.example.com/page.png?v=1"),
-            "png"
-        );
-    }
-
-    #[test]
-    fn image_extension_defaults_to_jpg_when_unknown() {
-        let resp = buffered_resp_no_ct();
-        assert_eq!(
-            DownloaderManager::get_image_extension(&resp, "https://cdn.example.com/page"),
-            "jpg"
-        );
-    }
-
-    #[test]
-    fn image_extension_gif_content_type() {
-        let resp = buffered_resp_with_ct("image/gif");
-        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "gif");
+        let by_url = [
+            ("https://cdn.example.com/page.png?v=1", "png"),
+            ("https://cdn.example.com/page", "jpg"),
+        ];
+        for (url, expected) in by_url {
+            let resp = buffered_resp_no_ct();
+            assert_eq!(
+                DownloaderManager::get_image_extension(&resp, url),
+                expected,
+                "without a content type, {url} should map to .{expected}"
+            );
+        }
     }
 
     #[tokio::test]

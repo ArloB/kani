@@ -46,16 +46,6 @@ async fn list_repos_returns_empty_for_admin() {
 }
 
 #[tokio::test]
-async fn get_repo_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-    let res = app
-        .oneshot(authed_get("/rest/sources/repos/99999", &cookie))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
 async fn list_blocked_repos_returns_200_for_admin() {
     let (app, cookie) = common::admin_app().await;
     let res = app

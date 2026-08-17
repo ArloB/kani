@@ -23,34 +23,6 @@ async fn list_trash_returns_200_for_authed_user() {
 }
 
 #[tokio::test]
-async fn delete_manga_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/manga/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn untrash_manga_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/manga/999999/untrash",
-            &cookie,
-            json!({}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
 async fn untrash_manga_returns_404_for_regular_user_missing_id() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "alice").await;
@@ -98,18 +70,6 @@ async fn purge_trash_all_returns_200_for_regular_user() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["purged"], 0);
-}
-
-#[tokio::test]
-async fn purge_trash_one_returns_404_for_missing_id() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/trash/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

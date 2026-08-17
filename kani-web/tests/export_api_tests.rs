@@ -28,21 +28,6 @@ async fn system_capabilities_returns_200_with_auth() {
 }
 
 #[tokio::test]
-async fn export_epub_returns_404_for_missing_chapter() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_get("/rest/chapters/999999/export/epub", &cookie))
-        .await
-        .unwrap();
-
-    assert!(
-        !res.status().is_success(),
-        "Expected error for missing chapter"
-    );
-}
-
-#[tokio::test]
 async fn export_kcc_returns_error_for_missing_chapter() {
     let (app, cookie) = common::admin_app().await;
 

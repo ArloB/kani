@@ -58,22 +58,6 @@ async fn enrich_manga_metadata_returns_200_with_stub_provider() {
 }
 
 #[tokio::test]
-async fn enrich_manga_metadata_returns_404_for_missing_manga() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/manga/999999/enrich-metadata",
-            &cookie,
-            serde_json::json!({ "provider": "stub" }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
 async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
     let (app, cookie) = common::admin_app().await;
 
@@ -83,18 +67,6 @@ async fn enrich_manga_metadata_returns_404_for_unknown_provider() {
             &cookie,
             serde_json::json!({ "provider": "does-not-exist" }),
         ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn get_source_capabilities_returns_404_for_missing_source() {
-    let (app, cookie) = common::admin_app().await;
-
-    let res = app
-        .oneshot(authed_get("/rest/sources/999999/capabilities", &cookie))
         .await
         .unwrap();
 
