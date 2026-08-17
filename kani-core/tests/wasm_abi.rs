@@ -470,19 +470,6 @@ async fn abi_get_chapter_list_stream_bridge_yields_nothing_for_empty_sync_list()
     );
 }
 
-/// Fails: the bridge delivers page 1 only (2 chapters of 4).
-///
-/// `bridge_chapter_list_stream` (kani-shared/src/extension.rs:301) breaks unless a
-/// single `tx.write` of the whole page reports `Complete`, and a host consumer that
-/// reads one item per poll — `CollectConsumer` here — makes that write partial. The
-/// remainder comes back in the buffer the bridge discards as `_buf`, so paging stops
-/// after the first page and the rest of the chapter list is silently lost.
-///
-/// This test never ran before: it asked for `kani-test-abi.wasm` while the build
-/// emits `test-abi.wasm`, so it reported passing without loading anything. Left
-/// visible rather than deleted, because the defect is in shipped guest-facing code
-/// and fixing it means changing the ABI bridge, not the test.
-#[ignore = "known defect: the stream bridge stops after a partial write, see doc comment"]
 #[tokio::test]
 async fn abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order() {
     let bytes = load_wasm("test-abi");
@@ -491,10 +478,11 @@ async fn abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order() {
     let chapters =
         ok_chapters(drain_chapter_list_stream(&mut store, &instance, "paginated-stream").await);
 
+    let ids: Vec<&str> = chapters.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         chapters.len(),
         4,
-        "default bridge should page through get_chapter_list until has_next_page is false"
+        "default bridge should page through get_chapter_list until has_next_page is false, got {ids:?}"
     );
     assert_eq!(
         chapters.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),

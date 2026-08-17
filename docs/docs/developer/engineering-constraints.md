@@ -284,6 +284,32 @@ explicitly rather than relying on the default-branch checkout.
 **Revalidate when.** The benchmark set changes, the alert threshold proves too noisy for a shared
 runner, or documentation deployment stops using `gh-pages`.
 
+## Component-model streams
+
+### A stream write transfers only what the reader takes
+
+**Constraint.** `StreamWriter::write` transfers as many items as the reader accepts and returns the
+remainder in its buffer; `StreamResult::Complete(n)` reports the count written, not that the whole
+batch went. Guest code writing a batch must use `write_all`, which retries until the buffer drains
+and returns values only once the reader has dropped.
+
+**Evidence.** `bridge_chapter_list_stream` wrote a page per call as `let (result, _buf) =
+tx.write(items)`, matched `Complete(_)` as success, and discarded `_buf`. Against a host consumer
+reading one item per poll, a two-chapter page delivered its first chapter and dropped the second:
+draining `paginated-stream` from `kani-test-abi` yielded `["p1-1", "p2-1"]` instead of
+`["p1-1", "p1-2", "p2-1", "p2-2"]`.
+
+**Consequence.** Any extension relying on the default `get-chapter-list-stream` bridge silently
+lost chapters, at a rate set by how the host drained the stream. Production polls per page and does
+not use the bridge, so no released behaviour depended on it.
+
+**Enforcement.** `kani-core/tests/wasm_abi.rs::abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order`
+asserts the exact ids and their order, so a batch that loses items fails rather than returning
+fewer. The test needs `wasm_sources/test-abi.wasm`, which CI builds in the `test` job.
+
+**Revalidate when.** wit-bindgen changes `write_all`'s contract, or a guest starts writing batches
+through `write` directly.
+
 ## Storage and recovery
 
 ### Lease coordination uses one atomic word for modelability
@@ -337,6 +363,28 @@ verify its retention purge separately.
 
 **Revalidate when.** Upgrade application, library paths, download replacement, trash retention, or
 recovery behavior changes.
+
+## Lints
+
+### Whole-group pedantic and nursery are not worth their volume here
+
+**Constraint.** `[workspace.lints.clippy]` enables named lints that find dead or redundant code,
+not the `pedantic` or `nursery` groups. A lint sits at `allow` only while its recorded violation
+count is being drained.
+
+**Evidence.** Enabling both groups produced 3,295 warnings across the workspace. The largest
+categories were 535 missing `# Errors` doc sections, 517 `Self` repetitions, and 471 `must_use`
+suggestions — none of which identify unused or duplicated code. Restricting to the waste-finding
+subset produced 397, of which 303 were `redundant_pub_crate`.
+
+**Consequence.** CI runs `cargo clippy -- -D warnings`, so a group that mostly reports style would
+have made every build fail on documentation preferences.
+
+**Enforcement.** The block lists lints individually with a count beside each `allow`, so the
+backlog is visible in the manifest rather than tracked elsewhere.
+
+**Revalidate when.** A group's contents change materially, or the `allow` counts reach zero and the
+remaining lints can be promoted.
 
 ## Test execution
 

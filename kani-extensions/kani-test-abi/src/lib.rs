@@ -375,8 +375,7 @@ fn test_native_chapter_list_stream()
             language: "en".into(),
             page_count: Some(19),
         };
-        let (result, _buf) = tx.write(vec![Ok(first)]).await;
-        if !matches!(result, kani_shared::StreamResult::Complete(_)) {
+        if !tx.write_all(vec![Ok(first)]).await.is_empty() {
             return;
         }
 
@@ -399,7 +398,7 @@ fn test_native_chapter_list_stream()
             language: "en".into(),
             page_count: None,
         };
-        let _ = tx.write(vec![Ok(second)]).await;
+        let _ = tx.write_all(vec![Ok(second)]).await;
     });
     rx
 }

@@ -78,14 +78,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 [workspace.lints.clippy]
 unwrap_used = { level = "deny", priority = 1 }
 
-# Lints that detect dead or redundant code rather than style. Whole-group
-# `pedantic` and `nursery` are deliberately not enabled: they produce 3295
-# warnings here, of which roughly nine in ten are documentation and naming
-# preferences that identify no waste, and CI runs `-D warnings`.
-#
-# A lint sits at `allow` only while existing violations are being drained, with
-# the count recorded so the ratchet is visible. Raise it to `warn` in the same
-# change that clears the last one.
+# Lints that find dead or redundant code rather than style; see the
+# engineering-constraints register for why the whole groups stay off. An `allow`
+# holds only while its count is drained; raise it in the change that clears it.
 derivable_impls = "warn"
 equatable_if_let = "warn"
 explicit_iter_loop = "warn"
