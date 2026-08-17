@@ -20,6 +20,13 @@ and never commit `.snap.new` files.
 - Test DB-backed service methods through the shared test service.
 - Give a new REST endpoint authenticated success, unauthenticated failure, and invalid-input
   coverage, plus permission denial where authentication alone is insufficient.
+- A rejection test must assert *why* it was rejected whenever the fixture could trip an earlier
+  check. `assert!(result.is_err())` says only that something objected. If the input is corrupted,
+  truncated, or otherwise malformed, parsing or reading usually objects first, and the check the
+  test is named after never runs — `repo_add_rejects_tampered_artifact` flipped a byte in a signed
+  YAML and passed with signature verification removed entirely, because the corrupted file no
+  longer parsed. Either tamper in a way only the check under test can catch, or assert on the
+  error. Where the function under test has a single plausible failure mode, `is_err()` is enough.
 - Prefer one harness over many near-identical tests. If a test differs from its neighbours only in
   a route, an id, or an expected status, it belongs in a table or a contract test driven from the
   app's own definitions rather than in a function of its own. Per-route copies cost a test each to
