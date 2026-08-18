@@ -26,7 +26,7 @@ const html = htm.bind(h);
  *   onClose: () => void,
  * }} props
  */
-export function MigrationDialogue({
+function MigrationDialogue({
   dbId, currentSourceId, currentSourceName, currentTitle, currentCoverUrl,
   onComplete, onClose,
 }) {

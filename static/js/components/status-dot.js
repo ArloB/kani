@@ -22,16 +22,3 @@ export function StatusDot({ state, label }) {
   ></span>`;
 }
 
-/**
- * Vanilla-DOM equivalent — returns a configured <span> element.
- * @param {'open' | 'half_open' | 'closed'} state
- * @param {string} label
- * @returns {HTMLSpanElement}
- */
-export function createStatusDot(state, label) {
-  const span = document.createElement('span');
-  span.className = `w-2 h-2 rounded-full shrink-0 ${dotClass(state)}`;
-  span.setAttribute('role', 'img');
-  span.setAttribute('aria-label', 'Status: ' + label);
-  return span;
-}

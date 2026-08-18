@@ -34,3 +34,4 @@ docs/site/
 .wasm_cache/
 .codex/
 /mutants.out/
+/mutants.out.old/

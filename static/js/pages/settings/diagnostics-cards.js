@@ -42,7 +42,7 @@ let cached = { token: -1, promise: null };
  * request per refresh rather than one each.
  * @param {number} refreshToken
  */
-export function fetchDiagnostics(refreshToken) {
+function fetchDiagnostics(refreshToken) {
   if (cached.token !== refreshToken || !cached.promise) {
     cached = { token: refreshToken, promise: api.getDiagnostics() };
   }

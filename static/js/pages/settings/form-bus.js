@@ -18,7 +18,7 @@ function registerForm({ dirty, save, reset }) {
 }
 
 /** Clears the active-section registration (called when a section unmounts). */
-export function clearForm() {
+function clearForm() {
   formDirty.value = false;
   _save = null;
   _reset = null;

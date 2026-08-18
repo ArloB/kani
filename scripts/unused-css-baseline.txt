@@ -1,19 +1,4 @@
-# Bespoke selectors in app.css nothing references, captured 2026-08-16 as the
-# Phase 0 baseline. Drained by the sweep; the audit fails if one becomes used.
+# Bespoke selectors in app.css nothing references. Drained to empty by the
+# waste sweep's frontend phase; the audit keeps it that way.
 
-badge-accent
-badge-warn
-btn-lg
-category-tab
-category-tab-active
-dl-btn-active
-dl-btn-done
-dl-btn-failed
-dl-btn-readonly
-input-pills
-list-pane-footer
-max-h-sheet
-row-header
 truncate-crumb
-z-banner
-z-bottom-nav

@@ -119,21 +119,7 @@ export function formatDate(val) {
   }
 }
 
-/**
- * Returns a Promise that resolves after `ms` milliseconds.
- * @param {number} ms
- * @returns {Promise<void>}
- */
-export function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 const _CONFIRM_SKIP_PREFIX = 'kani-confirm-skip-';
-
-/** @param {string} key */
-export function resetConfirmDialog(key) {
-  localStorage.removeItem(_CONFIRM_SKIP_PREFIX + key);
-}
 
 export function resetAllConfirmDialogs() {
   for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -169,16 +155,6 @@ export async function withBusy(target, fn) {
       el.removeAttribute('aria-busy');
     });
   }
-}
-
-/**
- * @param {number} val
- * @param {number} min
- * @param {number} max
- * @returns {number}
- */
-export function clamp(val, min, max) {
-  return Math.min(Math.max(val, min), max);
 }
 
 /**
@@ -283,41 +259,6 @@ export function deferredSkeleton(mountFn, delayMs = 150) {
 export function errorCountAriaLabel(count) {
   if (count >= 3) return `${count} errors — unhealthy`;
   return `${count} ${count === 1 ? 'error' : 'errors'}`;
-}
-
-/**
- * Attaches a horizontal swipe handler to `el`.
- * Does not interfere with vertical scrolling. Safe to use alongside the
- * reader's own pinch/zoom touch handler (different element).
- * @param {HTMLElement} el
- * @param {{ onLeft?: () => void, onRight?: () => void, threshold?: number }} opts
- * @returns {() => void} cleanup
- */
-export function addSwipeHandler(el, { onLeft, onRight, threshold = 50 } = {}) {
-  let startX = 0;
-  let startY = 0;
-
-  function onTouchStart(/** @type {TouchEvent} */ e) {
-    if (e.touches.length !== 1) return;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-  }
-
-  function onTouchEnd(/** @type {TouchEvent} */ e) {
-    if (e.changedTouches.length !== 1) return;
-    const dx = e.changedTouches[0].clientX - startX;
-    const dy = e.changedTouches[0].clientY - startY;
-    if (Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy)) return;
-    if (dx < 0) onLeft?.();
-    else onRight?.();
-  }
-
-  el.addEventListener('touchstart', onTouchStart, { passive: true });
-  el.addEventListener('touchend', onTouchEnd, { passive: true });
-  return () => {
-    el.removeEventListener('touchstart', onTouchStart);
-    el.removeEventListener('touchend', onTouchEnd);
-  };
 }
 
 /**

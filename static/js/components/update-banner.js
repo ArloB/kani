@@ -10,7 +10,7 @@ const html = htm.bind(h);
 const DISMISS_PREFIX = 'kani-update-dismissed:';
 
 /** @param {{ latest: string, url: string, onDismiss: () => void }} props */
-export function UpdateBanner({ latest, url, onDismiss }) {
+function UpdateBanner({ latest, url, onDismiss }) {
   const [hidden, setHidden] = useState(false);
   if (hidden) return null;
 

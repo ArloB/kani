@@ -40,21 +40,9 @@ export const COMPONENTS = [
     ]
   },
   {
-    "module": "components/category-selector.js",
-    "exports": [
-      "CategorySelector"
-    ]
-  },
-  {
     "module": "components/chip-group.js",
     "exports": [
       "renderChipGroup"
-    ]
-  },
-  {
-    "module": "components/collapsible-panel.js",
-    "exports": [
-      "renderCollapsiblePanel"
     ]
   },
   {
@@ -66,7 +54,6 @@ export const COMPONENTS = [
   {
     "module": "components/command-palette.js",
     "exports": [
-      "closeCommandPalette",
       "openCommandPalette"
     ]
   },
@@ -79,26 +66,12 @@ export const COMPONENTS = [
   {
     "module": "components/degraded-banner.js",
     "exports": [
-      "DegradedBanner",
       "maybeShowDegradedBanner"
-    ]
-  },
-  {
-    "module": "components/detail-card.js",
-    "exports": [
-      "DetailCard"
-    ]
-  },
-  {
-    "module": "components/download-overlay.js",
-    "exports": [
-      "mountOverlay"
     ]
   },
   {
     "module": "components/editable-row.js",
     "exports": [
-      "mkAddRow",
       "mkEditableRow"
     ]
   },
@@ -274,7 +247,6 @@ export const COMPONENTS = [
   {
     "module": "components/manga-details/suppressed-banner.js",
     "exports": [
-      "SuppressedBanner",
       "mountSuppressedBanner"
     ]
   },
@@ -312,7 +284,6 @@ export const COMPONENTS = [
   {
     "module": "components/migration-dialogue.js",
     "exports": [
-      "MigrationDialogue",
       "mountMigrationDialogue"
     ]
   },
@@ -376,12 +347,6 @@ export const COMPONENTS = [
     ]
   },
   {
-    "module": "components/perm-row.js",
-    "exports": [
-      "PermRow"
-    ]
-  },
-  {
     "module": "components/pill.js",
     "exports": [
       "Pill"
@@ -435,7 +400,6 @@ export const COMPONENTS = [
     "exports": [
       "ActionBtn",
       "Group",
-      "Section",
       "SegmentedRow",
       "SelectRow",
       "SliderRow",
@@ -467,22 +431,13 @@ export const COMPONENTS = [
     "module": "components/restart-tray.js",
     "exports": [
       "RestartTray",
-      "addPendingFields",
-      "clearPendingFields",
-      "mountRestartTray"
+      "addPendingFields"
     ]
   },
   {
     "module": "components/scrub-report.js",
     "exports": [
       "ScrubReport"
-    ]
-  },
-  {
-    "module": "components/section-header.js",
-    "exports": [
-      "SectionHeader",
-      "mountSectionHeader"
     ]
   },
   {
@@ -494,8 +449,7 @@ export const COMPONENTS = [
   {
     "module": "components/sidebar-nav.js",
     "exports": [
-      "SidebarNav",
-      "SidebarNavItem"
+      "SidebarNav"
     ]
   },
   {
@@ -504,7 +458,6 @@ export const COMPONENTS = [
       "skeletonGrid",
       "skeletonKeyValueRows",
       "skeletonMangaHero",
-      "skeletonSearchResults",
       "skeletonSettingsCards",
       "skeletonSourceList",
       "skeletonUpdateList"
@@ -514,12 +467,6 @@ export const COMPONENTS = [
     "module": "components/sortable-list.js",
     "exports": [
       "mountSortableList"
-    ]
-  },
-  {
-    "module": "components/source-settings-card.js",
-    "exports": [
-      "SourceSettingsCard"
     ]
   },
   {
@@ -545,8 +492,7 @@ export const COMPONENTS = [
   {
     "module": "components/status-dot.js",
     "exports": [
-      "StatusDot",
-      "createStatusDot"
+      "StatusDot"
     ]
   },
   {
@@ -592,14 +538,7 @@ export const COMPONENTS = [
   {
     "module": "components/update-banner.js",
     "exports": [
-      "UpdateBanner",
       "maybeShowUpdateBanner"
-    ]
-  },
-  {
-    "module": "components/update-group.js",
-    "exports": [
-      "createUpdateGroup"
     ]
   },
   {

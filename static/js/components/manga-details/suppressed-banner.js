@@ -10,7 +10,7 @@ import { t } from '../../i18n.js';
 const html = htm.bind(h);
 
 /** @param {{ dbId: number, count: number, onDismiss: () => void }} props */
-export function SuppressedBanner({ dbId, count, onDismiss }) {
+function SuppressedBanner({ dbId, count, onDismiss }) {
   const [busy, setBusy] = useState(false);
 
   const dismiss = async () => {

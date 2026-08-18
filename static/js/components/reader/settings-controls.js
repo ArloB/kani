@@ -8,15 +8,6 @@ const html = htm.bind(h);
 const BTN_ACTIVE   = 'bg-surface-2 text-text';
 const BTN_INACTIVE = 'text-muted hover:bg-surface-2 hover:text-text';
 
-/** @param {{ title?: string, children?: any }} props */
-export function Section({ title, children }) {
-  return html`
-    <div class="flex flex-col gap-3">
-      ${title ? html`<p class="text-xs font-medium text-muted uppercase tracking-wide">${title}</p>` : null}
-      ${children}
-    </div>`;
-}
-
 /** A labelled sub-group within a settings tab; divider above unless `first`. @param {{ title?: string, first?: boolean, children?: any }} props */
 export function Group({ title, first = false, children }) {
   return html`

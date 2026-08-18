@@ -90,22 +90,6 @@ export function skeletonMangaHero() {
 }
 
 /**
- * Search result group skeletons (one per source).
- * @param {number} count
- * @returns {string}
- */
-export function skeletonSearchResults(count = 3) {
-  const group = `
-    <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-3">
-        <div class="skeleton w-10 h-10 rounded-md shrink-0"></div>
-        <div class="skeleton h-4 w-40 rounded"></div>
-      </div>
-    </div>`;
-  return `<div class="flex flex-col gap-6">${group.repeat(count)}</div>`;
-}
-
-/**
  * Recent updates group skeletons.
  * @param {number} count
  * @returns {string}

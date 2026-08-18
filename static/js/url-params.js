@@ -11,20 +11,12 @@ export function getParam(key, defaultValue = null) {
 }
 
 /**
- * @param {string} key
- * @returns {string[]}
- */
-export function getParams(key) {
-  return new URLSearchParams(location.search).getAll(key);
-}
-
-/**
  * Build a URL string for the current pathname with the given params.
  * Keys with null/undefined/'' values are omitted.
  * @param {Record<string, string|number|boolean|string[]|null|undefined>} params
  * @returns {string}
  */
-export function buildUrl(params) {
+function buildUrl(params) {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (Array.isArray(v)) {

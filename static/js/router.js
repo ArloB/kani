@@ -128,11 +128,6 @@ export function consumeIntendedDestination() {
   }
 }
 
-/** @returns {Record<string, string>} A snapshot of the current route parameters. */
-export function getCurrentParams() {
-  return { ..._currentParams };
-}
-
 /** Scrolls the page content container back to the top (instant). */
 export function scrollPageTop() {
   _container?.scrollTo({ top: 0, behavior: 'instant' });
