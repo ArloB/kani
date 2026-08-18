@@ -251,8 +251,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check JS syntax
-        run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check
+      # Bundling parses as ESM and resolves every specifier, neither of which
+      # `node --check` does — it reads these as CommonJS. Vendors are external, so
+      # this needs no asset toolchain.
+      - name: Check JS parses as modules and every import resolves
+        run: |
+          npx --yes esbuild@0.28.1 static/js/app.js static/js/dev-debug.js \
+            --bundle --format=esm --define:__KANI_DEV__=false \
+            --external:preact --external:preact/hooks --external:htm \
+            --external:@preact/signals --external:@preact/signals-core \
+            --external:preact/compat \
+            --outdir="$(mktemp -d)"
 
       - name: Unit tests (pure JS modules)
         run: node --test "static/js/**/*.test.js"
