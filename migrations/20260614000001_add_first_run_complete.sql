@@ -1,1 +1,0 @@
-ALTER TABLE settings ADD COLUMN first_run_complete BOOLEAN NOT NULL DEFAULT 0;

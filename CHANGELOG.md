@@ -17,6 +17,11 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The migration history is consolidated into a single baseline. An existing database that has
+  applied every prior migration is adopted automatically at startup and nothing else changes. One
+  whose history is incomplete — an upgrade interrupted part-way, or a migration recorded as failed
+  — now stops with an error naming the offending version instead of proceeding against a schema it
+  cannot verify. Restore a backup taken before the interrupted upgrade and start again.
 - `kani-cli rollback` is renamed `kani-cli backup-verify`. Its behaviour is unchanged: it checks
   whether a backup archive can be restored onto this build and performs no restore itself. The
   name is freed for a command that actually rolls back, which needs the deferred `kani-cli` async

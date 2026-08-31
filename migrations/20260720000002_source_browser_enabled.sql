@@ -1,1 +1,0 @@
-ALTER TABLE sources ADD COLUMN browser_enabled BOOLEAN NOT NULL DEFAULT 1;

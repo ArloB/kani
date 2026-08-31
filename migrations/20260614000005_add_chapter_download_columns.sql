@@ -1,2 +1,0 @@
-ALTER TABLE chapters ADD COLUMN resume_offset INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE chapters ADD COLUMN download_error TEXT;

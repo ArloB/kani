@@ -314,6 +314,36 @@ through `write` directly.
 
 ## Storage and recovery
 
+### A squashed baseline cannot be stamped onto a partial history
+
+**Constraint.** Baseline adoption replaces a pre-squash `_sqlx_migrations` history with one
+baseline row only when the recorded set is exactly the folded set. Any other state — a missing
+folded version, an unrecognised version, a failed row — is refused with the history left intact.
+
+**Evidence.** Stamping the baseline records that the database is at the baseline's schema. A
+database missing one folded migration is missing that migration's schema change, and no later
+migration would reapply it, so the claim would be silently false and every subsequent query
+against the absent column would fail at runtime rather than at startup.
+
+**Consequence.** The squash cut point is bounded by deployment, not by convenience: every
+installation that must be upgradable has to have applied every migration being folded in. The
+20260818000002 baseline could fold the entire history only because no tagged release existed, so
+no installation was stranded. A later squash must cut at the last released migration.
+
+### Migration checksums record two unrelated kinds of drift
+
+**Constraint.** `TRANSITIONS` maps a legacy checksum to a current one for a migration edited in
+place, and is guarded by a semantic hash proving the edit was comment-only. Baseline adoption is
+checksum-blind and matches on version and success alone.
+
+**Evidence.** The two mechanisms answer different questions. A transition asserts that a file's
+bytes changed while its effect did not, which requires comparing effects. Adoption discards rows
+describing migrations whose files no longer exist, so their checksums have nothing left to
+describe.
+
+**Consequence.** Adoption runs before reconciliation and must not depend on it. Coupling them
+would make a legacy checksum on a folded migration block an upgrade for no reason.
+
 ### Lease coordination uses one atomic word for modelability
 
 **Constraint.** The draining flag and active-lease count share one atomic word, and acquisition

@@ -1,9 +1,0 @@
-ALTER TABLE settings ADD COLUMN trash_retention_days INTEGER NOT NULL DEFAULT 30;
-ALTER TABLE settings ADD COLUMN audit_retention_days INTEGER NOT NULL DEFAULT 365;
-ALTER TABLE settings ADD COLUMN audit_security_retention_days INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE settings ADD COLUMN disk_warn_threshold REAL NOT NULL DEFAULT 0.10;
-ALTER TABLE settings ADD COLUMN thumbnail_formats TEXT NOT NULL DEFAULT 'jpeg';
-ALTER TABLE settings ADD COLUMN max_login_attempts INTEGER NOT NULL DEFAULT 5;
-ALTER TABLE settings ADD COLUMN max_ip_attempts INTEGER NOT NULL DEFAULT 20;
-ALTER TABLE settings ADD COLUMN login_lockout_seconds INTEGER NOT NULL DEFAULT 900;
-ALTER TABLE settings ADD COLUMN session_timeout_secs INTEGER NOT NULL DEFAULT 2592000;

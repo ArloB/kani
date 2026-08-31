@@ -101,6 +101,7 @@ flat English catalogue in `static/locales/en.js` owns visible copy.
 
 ## Persistence
 
-SQLite migrations live under `migrations/`; SQLx offline metadata is committed under `.sqlx`.
+SQLite migrations live under `migrations/`; SQLx offline metadata is committed under `.sqlx`. See
+[Migrations](migrations.md) for the procedures governing changes to either.
 Downloaded files and manifests live under configured storage volumes. Generated encryption keys
 are sidecars to the database and are part of disaster recovery.
