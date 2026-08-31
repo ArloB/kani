@@ -89,6 +89,22 @@ def dump(db_path):
             values = ", ".join(quote(value) for value in row)
             seeds.append(f"INSERT INTO {table} ({names}) VALUES ({values});")
 
+    # A migration that starts seeding a table absent from SEEDED_TABLES would be
+    # dropped from the baseline silently, and no schema diff would show it.
+    lost = []
+    for row in rows:
+        name = row["name"]
+        if row["type"] != "table" or name in SEEDED_TABLES or skip(name):
+            continue
+        if conn.execute(f'SELECT EXISTS(SELECT 1 FROM "{name}")').fetchone()[0]:
+            lost.append(name)
+    if lost:
+        sys.exit(
+            "these tables hold rows the baseline would not reproduce: "
+            + ", ".join(sorted(lost))
+            + "\nAdd them to SEEDED_TABLES if migrations seed them."
+        )
+
     versions = [row[0] for row in conn.execute(
         "SELECT version FROM _sqlx_migrations ORDER BY version")]
     return "\n\n".join(statements) + "\n\n" + "\n".join(seeds) + "\n", versions

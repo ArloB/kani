@@ -12,7 +12,9 @@ Never commit a release directly to either permanent branch.
    manifests.
 5. Run the default-member build, tests, clippy, formatting, docs, frontend checks, and extension
    build required by CI.
-6. Review migration and stability notes and make breaking or rollback behavior explicit.
+6. Review migration and stability notes and make breaking or rollback behavior explicit. A
+   [migration squash](migrations.md#squashing-the-history) may only fold migrations this release's
+   predecessors already shipped; folding an unreleased one strands every existing installation.
 7. Open the release PR from `develop` to `main`.
 
 ## Rehearse artifacts
