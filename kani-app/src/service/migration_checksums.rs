@@ -518,6 +518,15 @@ mod tests {
         pool
     }
 
+    /// Every version a fully migrated database should record: the baseline plus
+    /// each migration added after it. Derived from `MIGRATOR` so a new migration
+    /// does not require editing these tests.
+    fn expected_history() -> Vec<i64> {
+        let mut versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
+        versions.sort_unstable();
+        versions
+    }
+
     async fn history(pool: &SqlitePool) -> Vec<i64> {
         sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
             .fetch_all(pool)
@@ -549,7 +558,7 @@ mod tests {
 
         run(&pool).await.unwrap();
 
-        assert_eq!(history(&pool).await, vec![BASELINE_VERSION]);
+        assert_eq!(history(&pool).await, expected_history());
         let checksum: Vec<u8> =
             sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
                 .bind(BASELINE_VERSION)
@@ -576,7 +585,7 @@ mod tests {
         assert!(!adopt_baseline(&pool).await.unwrap());
         run(&pool).await.unwrap();
 
-        assert_eq!(history(&pool).await, vec![BASELINE_VERSION]);
+        assert_eq!(history(&pool).await, expected_history());
     }
 
     #[tokio::test]
@@ -668,7 +677,7 @@ mod tests {
 
         run(&pool).await.unwrap();
 
-        assert_eq!(history(&pool).await, vec![BASELINE_VERSION]);
+        assert_eq!(history(&pool).await, expected_history());
     }
 
     #[tokio::test]

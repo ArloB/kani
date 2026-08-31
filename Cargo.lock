@@ -3241,7 +3241,6 @@ dependencies = [
  "regex",
  "reqwest",
  "resvg",
- "rhai",
  "semver",
  "serde",
  "serde_json",
@@ -3298,7 +3297,6 @@ dependencies = [
  "urlencoding",
  "wasmtime",
  "wiremock",
- "wit-bindgen 0.58.0",
  "wreq",
  "wreq-util",
  "zip 7.2.0",
@@ -3379,7 +3377,6 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "dashmap",
- "dirs",
  "ed25519-dalek",
  "futures",
  "garde",
@@ -3387,7 +3384,6 @@ dependencies = [
  "hmac",
  "http-body-util",
  "image",
- "indexmap",
  "kani-app",
  "kani-core",
  "kani-shared",
@@ -3396,14 +3392,11 @@ dependencies = [
  "metrics",
  "mime_guess",
  "moka",
- "ordered-float",
- "paste",
  "pulldown-cmark",
  "quick-xml",
  "rand 0.10.0",
  "rust-embed",
  "secrecy",
- "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3426,7 +3419,6 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "wreq",
- "xxhash-rust",
  "zip 7.2.0",
 ]
 
@@ -3440,10 +3432,8 @@ dependencies = [
  "rhai",
  "semver",
  "serde",
- "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
- "urlencoding",
 ]
 
 [[package]]
@@ -8382,12 +8372,6 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yansi"

@@ -16,7 +16,7 @@ pub enum RecurringJobKind {
     PendingDeleteRetry,
     ScheduledBackup,
     TrackerSync,
-    BrowserProcessReap,
+    V8ProcessReap,
     UpdateCheck,
     IntegrityScrubQuick,
     IntegrityScrubDeep,
@@ -34,7 +34,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry => "pending_delete_retry",
             Self::ScheduledBackup => "scheduled_backup",
             Self::TrackerSync => "tracker_sync",
-            Self::BrowserProcessReap => "browser_process_reap",
+            Self::V8ProcessReap => "v8_process_reap",
             Self::UpdateCheck => "update_check",
             Self::IntegrityScrubQuick => "integrity_scrub_quick",
             Self::IntegrityScrubDeep => "integrity_scrub_deep",
@@ -52,7 +52,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry => 60 * 60,
             Self::ScheduledBackup => 60 * 60,
             Self::TrackerSync => 60 * 60,
-            Self::BrowserProcessReap => 5 * 60,
+            Self::V8ProcessReap => 5 * 60,
             Self::UpdateCheck => 24 * 60 * 60,
             Self::IntegrityScrubQuick => 24 * 60 * 60,
             Self::IntegrityScrubDeep => 7 * 24 * 60 * 60,
@@ -70,7 +70,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry,
             Self::ScheduledBackup,
             Self::TrackerSync,
-            Self::BrowserProcessReap,
+            Self::V8ProcessReap,
             Self::UpdateCheck,
             Self::IntegrityScrubQuick,
             Self::IntegrityScrubDeep,
@@ -256,7 +256,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
                     RecurringJobKind::DbVacuum => Some(s.db_vacuum_interval_hours * 60 * 60),
                     RecurringJobKind::AuditPrune => Some(s.audit_prune_interval_hours * 60 * 60),
                     RecurringJobKind::TrashPurge => Some(s.trash_purge_interval_hours * 60 * 60),
-                    RecurringJobKind::BrowserProcessReap => Some(s.v8_idle_timeout_s.max(60)),
+                    RecurringJobKind::V8ProcessReap => Some(s.v8_idle_timeout_s.max(60)),
                     RecurringJobKind::IntegrityScrubQuick => {
                         Some(s.integrity_quick_scrub_interval_hours * 60 * 60)
                     }
@@ -340,9 +340,9 @@ async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<cra
                 .submit(crate::jobs::tracker_sync::TrackerSyncJob::new())
                 .await
         }
-        RecurringJobKind::BrowserProcessReap => {
+        RecurringJobKind::V8ProcessReap => {
             svc.job_manager
-                .submit(crate::jobs::browser_reap::BrowserReapJob::new())
+                .submit(crate::jobs::v8_reap::V8ReapJob::new())
                 .await
         }
         RecurringJobKind::UpdateCheck => {
@@ -399,16 +399,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn browser_process_reap_is_registered() {
-        assert!(RecurringJobKind::all().contains(&RecurringJobKind::BrowserProcessReap));
+    fn v8_process_reap_is_registered() {
+        assert!(RecurringJobKind::all().contains(&RecurringJobKind::V8ProcessReap));
         assert_eq!(
-            RecurringJobKind::parse("browser_process_reap"),
-            Some(RecurringJobKind::BrowserProcessReap)
+            RecurringJobKind::parse("v8_process_reap"),
+            Some(RecurringJobKind::V8ProcessReap)
         );
-        assert_eq!(
-            RecurringJobKind::BrowserProcessReap.as_str(),
-            "browser_process_reap"
-        );
+        assert_eq!(RecurringJobKind::V8ProcessReap.as_str(), "v8_process_reap");
     }
 
     #[test]

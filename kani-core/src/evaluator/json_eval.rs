@@ -766,24 +766,19 @@ fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_js
         }
         (a, b) => Err(format!(
             "json_merge: cannot merge {} with {}",
-            a.type_str(),
-            b.type_str()
+            type_str(&a),
+            type_str(&b)
         )),
     }
 }
 
-trait JsonTypeStr {
-    fn type_str(&self) -> &'static str;
-}
-impl JsonTypeStr for serde_json::Value {
-    fn type_str(&self) -> &'static str {
-        match self {
-            serde_json::Value::Null => "null",
-            serde_json::Value::Bool(_) => "bool",
-            serde_json::Value::Number(_) => "number",
-            serde_json::Value::String(_) => "string",
-            serde_json::Value::Array(_) => "array",
-            serde_json::Value::Object(_) => "object",
-        }
+fn type_str(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
     }
 }

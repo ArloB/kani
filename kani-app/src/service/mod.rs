@@ -836,7 +836,7 @@ impl AppService {
         job_registry.register::<crate::jobs::import_dedup::ImportDedupJob>();
         job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
-        job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        job_registry.register::<crate::jobs::v8_reap::V8ReapJob>();
         job_registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         job_registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
         job_registry.register::<crate::jobs::migration::MigrationJob>();
@@ -1048,7 +1048,7 @@ impl AppService {
         registry.register::<crate::jobs::storage::StorageMonitorJob>();
         registry.register::<crate::jobs::scrub::ScrubJob>();
         registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
-        registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        registry.register::<crate::jobs::v8_reap::V8ReapJob>();
         registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
 

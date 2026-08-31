@@ -17,7 +17,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["formatting", "macros", "parsing"] }
-paste = "1.0.15"
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "fs", "macros", "signal"] }
@@ -34,7 +33,6 @@ tower-http = { version = "0.6", features = [
 sqlx.workspace = true
 rquest = { package = "wreq", version = "6.0.0-rc.29", features = ["json"] }
 url = "2.5.8"
-xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -42,8 +40,6 @@ kani-core = { path = "../kani-core" }
 kani-app  = { path = "../kani-app" }
 bytes.workspace = true
 futures.workspace = true
-indexmap.workspace = true
-ordered-float.workspace = true
 moka.workspace = true
 chacha20poly1305 = "0.10.1"
 sha2.workspace = true
@@ -59,7 +55,6 @@ image           = { version = "0.25", default-features = false, features = ["jpe
 ammonia = "4.1.2"
 axum-login = "0.18"
 argon2 = { version = "0.5.3", features = ["std"] }
-dirs = "6.0.0"
 tower-sessions-sqlx-store = { version = "0.15", default-features = false, features = ["sqlite"] }
 garde = { version = "0.22", features = ["derive"] }
 urlencoding.workspace = true
@@ -67,7 +62,6 @@ tower_governor = "0.6"
 tower = { version = "0.5", features = ["util"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
-semver = "1"
 axum-prometheus = "0.10.0"
 metrics = "0.24"
 # interpolate-folder-path expands $OUT_DIR in the #[folder] attribute, which is

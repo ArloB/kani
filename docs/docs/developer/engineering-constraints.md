@@ -92,7 +92,7 @@ capture used before it moved into the solver, and that pool no longer exists.
 
 **Evidence.** `browser_max_instances` reached `V8Config::max_instances`, which only ever appeared
 in `browser_stats()` and the diagnostics payload; nothing enforced a limit, so it was dropped
-rather than renamed. `browser_idle_timeout_s` was live — `jobs/browser_reap.rs` reads it and
+rather than renamed. `browser_idle_timeout_s` was live — `jobs/v8_reap.rs` reads it and
 `jobs/recurring.rs` sets the reap cadence from it — but it was governing two unrelated lifetimes
 at once: the local V8 worker and the solver's own sessions.
 

@@ -2,11 +2,11 @@ use crate::jobs::error::JobError;
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct BrowserReapJob {
+pub struct V8ReapJob {
     id: JobId,
 }
 
-impl BrowserReapJob {
+impl V8ReapJob {
     pub fn new() -> Self {
         Self {
             id: uuid::Uuid::new_v4(),
@@ -14,15 +14,15 @@ impl BrowserReapJob {
     }
 }
 
-impl Default for BrowserReapJob {
+impl Default for V8ReapJob {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait::async_trait]
-impl BackgroundJob for BrowserReapJob {
-    const JOB_TYPE: &'static str = "browser_process_reap";
+impl BackgroundJob for V8ReapJob {
+    const JOB_TYPE: &'static str = "v8_process_reap";
     type Output = ();
 
     fn id(&self) -> JobId {
@@ -30,7 +30,7 @@ impl BackgroundJob for BrowserReapJob {
     }
 
     fn description(&self) -> String {
-        "Reap idle browser subprocesses".to_string()
+        "Reap idle V8 worker processes".to_string()
     }
 
     fn priority(&self) -> JobPriority {

@@ -28,7 +28,6 @@ governor.workspace = true
 
 # WASM runtime
 wasmtime = { version = "46.0.1", features = ["async", "component-model"] }
-wit-bindgen = "0.58.0"
 
 # Serialization
 serde.workspace = true

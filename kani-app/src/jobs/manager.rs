@@ -811,20 +811,7 @@ impl JobManager {
                 let _ = completion_t.send(job_id);
                 notify_t.notify_one();
 
-                let max = max_history as i64;
-                let _ = sqlx::query!(
-                    "DELETE FROM jobs \
-                     WHERE status IN ('completed','failed','cancelled') \
-                     AND id NOT IN (\
-                         SELECT id FROM jobs \
-                         WHERE status IN ('completed','failed','cancelled') \
-                         ORDER BY completed_at DESC \
-                         LIMIT ?\
-                     )",
-                    max
-                )
-                .execute(&pool_t)
-                .await;
+                let _ = Self::prune_history(&pool_t, max_history).await;
             });
         }
     }
@@ -1159,7 +1146,9 @@ impl JobManager {
         })
     }
 
-    pub async fn prune_history(&self, max_history: usize) -> Result<u64> {
+    /// Trims completed, failed, and cancelled jobs to the newest `max_history`.
+    /// Runs after every job completes, so the `jobs` table cannot grow without bound.
+    pub async fn prune_history(pool: &sqlx::sqlite::SqlitePool, max_history: usize) -> Result<u64> {
         let max = max_history as i64;
         let result = sqlx::query!(
             "DELETE FROM jobs \
@@ -1172,7 +1161,7 @@ impl JobManager {
              )",
             max
         )
-        .execute(&self.pool)
+        .execute(pool)
         .await?;
         Ok(result.rows_affected())
     }
@@ -1182,10 +1171,6 @@ impl JobManager {
     }
 
     pub fn active_count(&self) -> usize {
-        self.active.len()
-    }
-
-    pub fn queue_len(&self) -> usize {
         self.active.len()
     }
 

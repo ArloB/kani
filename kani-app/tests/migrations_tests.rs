@@ -61,7 +61,7 @@ async fn recurring_job_kinds_can_be_persisted() {
         .await
         .unwrap();
 
-    for expected in ["update_check", "browser_process_reap", "db_maintenance"] {
+    for expected in ["update_check", "v8_process_reap", "db_maintenance"] {
         assert!(
             kinds.iter().any(|k| k == expected),
             "{expected} should be seeded, got {kinds:?}"

@@ -23,10 +23,6 @@ impl PureFunctionRegistry {
         Ok(Self { engine, asts })
     }
 
-    pub fn has_fn(&self, name: &str) -> bool {
-        self.asts.contains_key(name)
-    }
-
     pub fn call(&self, name: &str, args: &[Value]) -> Result<Value, String> {
         let Some(ast) = self.asts.get(name) else {
             return Err(format!("Rhai function '{name}' not found in registry"));

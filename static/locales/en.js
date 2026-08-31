@@ -39,6 +39,7 @@ export default {
   'jobs.type.trash_purge': 'Trash purge',
   'jobs.type.storage_monitor': 'Storage monitor',
   'jobs.type.pending_delete_retry': 'Pending delete retry',
+  'jobs.type.v8_process_reap': 'V8 worker reap',
   'jobs.type.thumbnail': 'Thumbnail generation',
   'jobs.type.manga_download_all': 'Download all chapters',
   'jobs.type.source_scan': 'Source scan',
