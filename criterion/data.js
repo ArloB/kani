@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787547429351,
+  "lastUpdate": 1788173326731,
   "repoUrl": "https://github.com/ArloB/kani",
   "entries": {
     "Benchmark": [
@@ -101,6 +101,40 @@ window.BENCHMARK_DATA = {
             "name": "blueprint_eval/json_200_rows",
             "value": 1196519,
             "range": "± 22619",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Arlo Burke",
+            "username": "ArloB",
+            "email": "arlo.burke2@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "d46c8093f1d6415a6485aec566f9d9f93cc4ecae",
+          "message": "Feature/stage 4 tiering (#4)\n\n* feat: publish a compatibility tier for every REST operation and CLI command\n\n* feat: promote OPDS and the recovery commands to the stable tier\n\n* fix: rollback verifies a backup, it does not roll one back\n\n* refactor: rename kani-cli rollback to backup-verify\n\n* docs: add the Stage 4 stability statements and report the schema version\n\n* feat: emit API token timestamps as RFC 3339\n\n* chore: remove EXAMPLE_EXTENSION.yaml and correct the built-in sources claim\n\n* chore: stop naming individual extensions across the repo\n\n* fix: resolve client IP through one trusted-proxy aware path\n\n* feat: accept WASM metadata flags when publishing\n\n* feat: expand source compatibility and image transforms\n\n* style: apply repository formatting\n\n* Changed to a single version docs flow",
+          "timestamp": "2026-08-07T14:18:44Z",
+          "url": "https://github.com/ArloB/kani/commit/d46c8093f1d6415a6485aec566f9d9f93cc4ecae"
+        },
+        "date": 1788173325560,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "blueprint_eval/html_200_rows",
+            "value": 3712425,
+            "range": "± 9733",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "blueprint_eval/json_200_rows",
+            "value": 1209730,
+            "range": "± 36713",
             "unit": "ns/iter"
           }
         ]
