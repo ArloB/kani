@@ -84,29 +84,31 @@ with source browser state, and keeps runtime browser-disable controls as hard ga
 **Revalidate when.** Cloudflare clearance behavior, the solver protocol, browser-source security
 controls, session lifecycle, or the browser source set changes.
 
-### Two browser settings no longer govern anything
+### The V8 settings are named for the worker they configure
 
-**Constraint.** `browser_max_instances` and `browser_idle_timeout_s` configured the local
-Puppeteer browser pool. That pool was removed when browser capture moved into the solver, so both
-settings are inert. `browser_max_memory_mb` is unaffected and still sets the Node worker's heap
-limit.
+**Constraint.** `v8_max_memory_mb`, `v8_idle_timeout_s` and `v8_debug_logging` govern the Node/V8
+worker that runs source scripts. They were named `browser_*` for the Puppeteer pool that browser
+capture used before it moved into the solver, and that pool no longer exists.
 
-**Evidence.** The Node worker no longer reads `BROWSER_MAX_INSTANCES` or
-`BROWSER_IDLE_TIMEOUT_MS`; nothing else consumes `V8Config::max_instances` or
-`idle_timeout_s` beyond reporting them. Session lifetime is now the solver's, set per capture by
-`session_ttl_minutes`.
+**Evidence.** `browser_max_instances` reached `V8Config::max_instances`, which only ever appeared
+in `browser_stats()` and the diagnostics payload; nothing enforced a limit, so it was dropped
+rather than renamed. `browser_idle_timeout_s` was live — `jobs/browser_reap.rs` reads it and
+`jobs/recurring.rs` sets the reap cadence from it — but it was governing two unrelated lifetimes
+at once: the local V8 worker and the solver's own sessions.
 
-**Consequence.** The columns and the settings DTO still carry both values, so a restore or an API
-client can set them and observe no effect.
+**Consequence.** The solver already expires sessions on `SOLVER_SESSION_TTL_MINUTES`, so an
+operator lowering the setting could only make the host reap earlier than the solver, never later,
+and the two could disagree silently. `reap_solver_sessions` now takes `http::solver_session_ttl()`
+and the setting governs the local worker alone.
 
-**Enforcement.** Both controls are removed from Settings → Advanced, so the UI no longer offers a
-knob that does nothing. The advanced form still round-trips the stored values, so saving other
-settings does not blank the columns. Dropping them needs a migration, DTO changes, and
-`cargo sqlx prepare`, so it is batched with other pre-1.0 schema cleanup rather than taken as its
-own migration.
+**Enforcement.** Migration `20260818000001` renames the three columns and drops the fourth. The
+DTO carries `#[serde(alias = "browser_*")]` on each renamed field, because they are required
+rather than optional and a backup written before the rename would otherwise fail to deserialise —
+`backup_import_tests::a_backup_written_before_the_v8_rename_still_restores` fails with
+`missing field v8_debug_logging` if an alias is removed.
 
-**Revalidate when.** The pre-1.0 schema cleanup lands, or a solver-side equivalent of either
-control is exposed and needs a home.
+**Revalidate when.** A solver-side equivalent of either control is exposed and needs a home, or
+the local V8 worker stops being the thing these configure.
 
 ## HTTP routing
 

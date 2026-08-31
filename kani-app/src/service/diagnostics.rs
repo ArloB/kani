@@ -47,7 +47,6 @@ pub struct BrowserDiagnostics {
     pub solver_attempts: u64,
     pub solver_successes: u64,
     pub solver_failures: u64,
-    pub max_instances: u32,
     pub max_memory_mb: u32,
     pub idle_timeout_s: u32,
 }
@@ -157,7 +156,6 @@ impl AppService {
             solver_attempts: stats.solver_attempts,
             solver_successes: stats.solver_successes,
             solver_failures: stats.solver_failures,
-            max_instances: stats.max_instances,
             max_memory_mb: stats.max_memory_mb,
             idle_timeout_s: stats.idle_timeout_s,
         };

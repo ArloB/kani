@@ -17,7 +17,6 @@ pub fn set_v8_debug_logging(enabled: bool) {
 #[derive(Clone, Copy, Debug)]
 pub struct V8Config {
     pub max_memory_mb: u32,
-    pub max_instances: u32,
     pub idle_timeout_s: u32,
 }
 
@@ -25,7 +24,6 @@ impl Default for V8Config {
     fn default() -> Self {
         Self {
             max_memory_mb: 512,
-            max_instances: 2,
             idle_timeout_s: 300,
         }
     }
@@ -33,7 +31,6 @@ impl Default for V8Config {
 
 static V8_CONFIG: RwLock<V8Config> = RwLock::new(V8Config {
     max_memory_mb: 512,
-    max_instances: 2,
     idle_timeout_s: 300,
 });
 
@@ -68,7 +65,6 @@ pub fn browser_stats() -> kani_shared::types::BrowserStats {
         solver_successes: BROWSER_SOLVER_SUCCESSES_TOTAL.load(Ordering::Relaxed),
         solver_failures: BROWSER_SOLVER_FAILURES_TOTAL.load(Ordering::Relaxed),
         max_memory_mb: cfg.max_memory_mb,
-        max_instances: cfg.max_instances,
         idle_timeout_s: cfg.idle_timeout_s,
     }
 }
@@ -863,7 +859,6 @@ mod tests {
     fn v8_config_default_values() {
         let cfg = V8Config::default();
         assert_eq!(cfg.max_memory_mb, 512);
-        assert_eq!(cfg.max_instances, 2);
         assert_eq!(cfg.idle_timeout_s, 300);
     }
 
@@ -872,16 +867,13 @@ mod tests {
         let restore = v8_config();
         set_v8_config(V8Config {
             max_memory_mb: 1024,
-            max_instances: 4,
             idle_timeout_s: 120,
         });
         let cfg = v8_config();
         assert_eq!(cfg.max_memory_mb, 1024);
-        assert_eq!(cfg.max_instances, 4);
         assert_eq!(cfg.idle_timeout_s, 120);
         let stats = browser_stats();
         assert_eq!(stats.max_memory_mb, 1024);
-        assert_eq!(stats.max_instances, 4);
         assert_eq!(stats.idle_timeout_s, 120);
         set_v8_config(restore);
     }

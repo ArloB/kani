@@ -256,7 +256,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
                     RecurringJobKind::DbVacuum => Some(s.db_vacuum_interval_hours * 60 * 60),
                     RecurringJobKind::AuditPrune => Some(s.audit_prune_interval_hours * 60 * 60),
                     RecurringJobKind::TrashPurge => Some(s.trash_purge_interval_hours * 60 * 60),
-                    RecurringJobKind::BrowserProcessReap => Some(s.browser_idle_timeout_s.max(60)),
+                    RecurringJobKind::BrowserProcessReap => Some(s.v8_idle_timeout_s.max(60)),
                     RecurringJobKind::IntegrityScrubQuick => {
                         Some(s.integrity_quick_scrub_interval_hours * 60 * 60)
                     }

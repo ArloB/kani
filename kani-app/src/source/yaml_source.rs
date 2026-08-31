@@ -105,10 +105,13 @@ impl YamlSource {
         }
     }
 
+    /// `idle_for` governs the local V8 worker only; solver sessions expire on the
+    /// solver's own TTL, so the host has nothing to configure for them.
     pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
         let (local, solver) = tokio::join!(
             kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for),
-            self.http.reap_solver_sessions(&self.config.id, idle_for)
+            self.http
+                .reap_solver_sessions(&self.config.id, kani_core::http::solver_session_ttl())
         );
         local || solver > 0
     }

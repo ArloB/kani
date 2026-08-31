@@ -216,14 +216,13 @@ export function AdvancedSection({ settings, bootId }) {
     wasm_storage_path: settings?.wasm_storage_path ?? '',
     max_wasm_instances: settings?.max_wasm_instances ?? null,
     cover_max_dimension: settings?.cover_max_dimension ?? null,
-    browser_max_memory_mb: settings?.browser_max_memory_mb ?? null,
-    browser_max_instances: settings?.browser_max_instances ?? null,
-    browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
+    v8_max_memory_mb: settings?.v8_max_memory_mb ?? null,
+    v8_idle_timeout_s: settings?.v8_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
     update_check_enabled: settings?.update_check_enabled ?? true,
     global_search_timeout_secs: Number(settings?.global_search_timeout_secs ?? 6),
     opds_page_index_zero_based: settings?.opds_page_index_zero_based ?? false,
-    browser_debug_logging: settings?.browser_debug_logging ?? false,
+    v8_debug_logging: settings?.v8_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
   const [form, setForm] = useState(initial);
@@ -331,11 +330,11 @@ export function AdvancedSection({ settings, bootId }) {
         ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800', label: t('settings.advanced.cover_dim.label') })}
       <//>
       <${SettingsRow}
-        label=${t('settings.advanced.browser_max_memory.label')}
-        description=${t('settings.advanced.browser_max_memory.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
+        label=${t('settings.advanced.v8_max_memory.label')}
+        description=${t('settings.advanced.v8_max_memory.desc')}
+        tooltip=${t('settings.advanced.v8_caps.tooltip')}
       >
-        ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.browser_max_memory.label') })}
+        ${numInput('v8_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.v8_max_memory.label') })}
       <//>
       <${ToggleRow}
         label=${t('settings.advanced.http_logging.label')}
@@ -362,10 +361,10 @@ export function AdvancedSection({ settings, bootId }) {
         onChange=${(v) => set('opds_page_index_zero_based', v)}
       />
       <${ToggleRow}
-        label=${t('settings.advanced.browser_logging.label')}
-        description=${t('settings.advanced.browser_logging.desc')}
-        checked=${form.browser_debug_logging}
-        onChange=${(v) => set('browser_debug_logging', v)}
+        label=${t('settings.advanced.v8_logging.label')}
+        description=${t('settings.advanced.v8_logging.desc')}
+        checked=${form.v8_debug_logging}
+        onChange=${(v) => set('v8_debug_logging', v)}
       />
       <${ToggleRow}
         label=${t('settings.advanced.registration.label')}

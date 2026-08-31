@@ -35,6 +35,12 @@ const REQUEST_TIMEOUT_SECS: u64 = 35;
 const SOLVER_CAPTURE_SOLVE_HEADROOM_MS: u64 = 60_000;
 const SOLVER_CAPTURE_TRANSPORT_BUFFER_MS: u64 = 5_000;
 const SOLVER_SESSION_TTL_MINUTES: u64 = 5;
+
+/// How long the solver itself keeps a session before expiring it. The host reaps
+/// against this rather than an operator setting, so the two cannot disagree.
+pub const fn solver_session_ttl() -> std::time::Duration {
+    std::time::Duration::from_secs(SOLVER_SESSION_TTL_MINUTES * 60)
+}
 const SOLVER_SESSION_CONTROL_TIMEOUT_SECS: u64 = 10;
 /// Allows the complete retry schedule and one solver attempt to finish.
 const WHOLE_CALL_DEADLINE_SECS: u64 = 120;

@@ -39,7 +39,7 @@ impl BackgroundJob for BrowserReapJob {
 
     async fn run(self: Box<Self>, ctx: JobContext) -> Result<(), JobError> {
         let svc = ctx.service();
-        let idle_secs = svc.settings.read().await.browser_idle_timeout_s.max(0) as u64;
+        let idle_secs = svc.settings.read().await.v8_idle_timeout_s.max(0) as u64;
         let idle_for = std::time::Duration::from_secs(idle_secs);
         for id in svc.sources.active_ids() {
             if let Some(backend) = svc.sources.get_backend(id) {
