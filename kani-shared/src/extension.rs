@@ -355,6 +355,7 @@ pub struct RateLimitConfig {
     pub max_hook_requests: u32,
 }
 
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
 fn default_max_hook_requests() -> u32 {
     3
 }

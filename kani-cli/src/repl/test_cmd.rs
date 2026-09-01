@@ -237,6 +237,7 @@ fn extract_json_rows(ep: &ValidatedEndpoint, body: &str) -> Result<serde_json::V
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     fn entry(url: &str, status: u16, body: &str) -> har::HarEntry {

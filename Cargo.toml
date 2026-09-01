@@ -95,4 +95,4 @@ unnecessary_wraps = "allow"                  # 2 remaining, both change a signat
 useless_let_if_seq = "allow"                 # 3 remaining
 manual_let_else = "allow"                    # 20 remaining
 redundant_closure_for_method_calls = "allow" # 54 remaining
-redundant_pub_crate = "allow"                # 303 remaining, drained by the pub-surface sweep
+redundant_pub_crate = "allow"                # 304, and see the register: draining it widens markers
