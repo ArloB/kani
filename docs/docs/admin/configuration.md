@@ -68,13 +68,29 @@ primarily for initial provisioning and managed deployments.
 Raising scripting budgets weakens a resource limit applied to untrusted extension logic. Prefer
 rewriting the extension unless a measured workload requires the change.
 
-For browser-backed sources behind a managed challenge, run
-`ghcr.io/kani-app/flaresolverr:latest` and configure its `/v1` URL through
-**Settings → Advanced**. It solves the challenge and runs the extension's capture script in the same
-browser, then reuses one cleared session per source and domain. Keep this solver private:
-extension-authored JavaScript is sent to it for execution. A stock FlareSolverr remains supported
-for ordinary HTTP challenge solving and best-effort cookie replay, but cannot reliably capture
-device-bound pages. Each source's browser toggle disables its browser endpoints.
+### Browser sources and the solver
+
+For browser-backed sources behind a managed challenge, run `ghcr.io/kani-app/flaresolverr:latest`.
+It solves the challenge and runs the extension's capture script in the same browser, then reuses
+one cleared session per source and domain. A stock FlareSolverr remains supported for ordinary
+HTTP challenge solving and best-effort cookie replay, but cannot reliably capture device-bound
+pages. Each source's browser toggle disables its browser endpoints.
+
+The `solver` service in `docker-compose.yml` already runs this image. To set it up:
+
+1. Start both services. The compose file binds the solver to `127.0.0.1:8191`, so nothing outside
+   the host can reach it.
+2. In **Settings → Advanced**, set the solver URL to `http://solver:8191/v1` — `solver` is the
+   compose service name, reachable from the Kani container. Outside Docker, use
+   `http://127.0.0.1:8191/v1`.
+3. Press **Test connection**. It reports *Browser sources supported* for this image, or
+   *Challenge solving only* for a stock FlareSolverr. The same state appears under
+   **Diagnostics → Browser runtime**.
+4. If anything other than Kani can reach the solver, set its `API_KEY` and the matching
+   `KANI_SOLVER_SECRET` on the Kani service. Both are commented out in the compose file.
+
+**Keep this solver private.** `/v1` executes caller-supplied JavaScript against named browser
+profiles, so an exposed instance is remote code execution against your host.
 
 ## Capacity and diagnostics
 
