@@ -287,6 +287,10 @@ pub enum ReplCommand {
         endpoint: String,
         /// Expected number of rows
         expected_count: usize,
+        /// URL fragment identifying the HAR entry, when the endpoint's route does
+        /// not appear in it
+        #[arg(long)]
+        url_contains: Option<String>,
     },
     /// Run an endpoint against a HAR fixture and diff the output against an expected JSON file
     Replay {
@@ -298,6 +302,10 @@ pub enum ReplCommand {
         endpoint: String,
         /// Path to the expected JSON output file
         expected: String,
+        /// URL fragment identifying the HAR entry, when the endpoint's route does
+        /// not appear in it
+        #[arg(long)]
+        url_contains: Option<String>,
     },
     /// Make a live HTTP request to an endpoint and save the response as a HAR file
     Record {
@@ -419,13 +427,27 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 har,
                 endpoint,
                 expected_count,
-            } => crate::repl::test_cmd::run_test(&file, &har, &endpoint, expected_count),
+                url_contains,
+            } => crate::repl::test_cmd::run_test(
+                &file,
+                &har,
+                &endpoint,
+                expected_count,
+                url_contains.as_deref(),
+            ),
             ReplCommand::Replay {
                 file,
                 har,
                 endpoint,
                 expected,
-            } => crate::repl::test_cmd::run_replay(&file, &har, &endpoint, &expected),
+                url_contains,
+            } => crate::repl::test_cmd::run_replay(
+                &file,
+                &har,
+                &endpoint,
+                &expected,
+                url_contains.as_deref(),
+            ),
             ReplCommand::Record {
                 file,
                 endpoint,

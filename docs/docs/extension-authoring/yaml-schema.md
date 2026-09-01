@@ -206,5 +206,10 @@ cargo run -p kani-cli -- repl inspect my-source.yaml
 cargo run -p kani-cli -- repl test my-source.yaml
 ```
 
+`repl test` and `repl replay` pick the HAR entry whose URL matches the endpoint's route. A HAR
+written by `repl record` holds a single entry, but one exported from a browser holds every request
+the page made, so an endpoint with no matching entry is an error rather than a guess. Pass
+`--url-contains <fragment>` when the route does not appear in the recorded URL.
+
 Use `kani-cli --help` and subcommand help for the current flags. Generated Rust is an artifact of
 the YAML definition; edit the YAML and regenerate rather than maintaining both by hand.
