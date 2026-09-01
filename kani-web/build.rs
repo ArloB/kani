@@ -174,7 +174,12 @@ fn build_js() {
         );
     }
 
-    std::fs::create_dir_all("../static/js/dist").expect("failed to create static/js/dist");
+    // esbuild names split chunks by content hash, so a rebuild adds files rather
+    // than replacing them, and `stage_assets_for_embedding` copies whatever it
+    // finds. Without this the binary carries every past build's chunks.
+    let dist = Path::new("../static/js/dist");
+    let _ = std::fs::remove_dir_all(dist);
+    std::fs::create_dir_all(dist).expect("failed to create static/js/dist");
 
     let status = std::process::Command::new(&binary)
         .args([

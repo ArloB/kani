@@ -209,6 +209,20 @@ or per-token throttle behavior changes.
 
 ## Delivery workflows
 
+### Content-hashed bundle output accumulates unless the directory is cleared
+
+**Constraint.** `build_js` clears `static/js/dist` before invoking esbuild. The bundler names
+split chunks by content hash, so a rebuild writes new files beside the old ones instead of
+replacing them, and `stage_assets_for_embedding` copies whatever the directory holds.
+
+**Evidence.** Before the clean was added the directory held 483 files and 8.0 MB, of which
+408 files and 7.09 MB — 88% by size — were unreachable from the `app.js` entry point and were
+being embedded in every release binary. Ten hashed copies of each page module had accumulated.
+A clean build produces 71 files and 906 KB.
+
+**Consequence.** Any future output whose filename varies by content needs the same treatment.
+Reachability is the test, not file count: walk the import graph from the entry the HTML names.
+
 ### Matrix outputs cannot carry per-architecture digests
 
 **Constraint.** A GitHub Actions matrix exposes one last-writer-wins job output rather than an
