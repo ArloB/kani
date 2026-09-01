@@ -3,7 +3,7 @@ use crate::ids::{ChapterId, MangaId, UserId};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
-pub(crate) struct ReadProgressBuffer(std::sync::Arc<std::sync::Mutex<HashMap<(i64, i64), i64>>>);
+pub struct ReadProgressBuffer(std::sync::Arc<std::sync::Mutex<HashMap<(i64, i64), i64>>>);
 
 impl ReadProgressBuffer {
     pub fn record(&self, user_id: i64, chapter_id: i64, page: i64) {

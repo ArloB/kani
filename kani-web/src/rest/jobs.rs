@@ -12,7 +12,7 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Deserialize, Default)]
-pub(crate) struct JobsQuery {
+pub(super) struct JobsQuery {
     pub job_type: Option<String>,
     pub status: Option<String>,
     pub limit: Option<i64>,
@@ -43,7 +43,7 @@ fn parse_statuses(raw: Option<&str>) -> Vec<String> {
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn list_jobs(
+pub(super) async fn list_jobs(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
     Query(q): Query<JobsQuery>,
@@ -71,7 +71,7 @@ pub(crate) async fn list_jobs(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn get_job(
+pub(super) async fn get_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,
@@ -92,7 +92,7 @@ pub(crate) async fn get_job(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn cancel_job(
+pub(super) async fn cancel_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,
@@ -113,7 +113,7 @@ pub(crate) async fn cancel_job(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn pause_job(
+pub(super) async fn pause_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,
@@ -134,7 +134,7 @@ pub(crate) async fn pause_job(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn resume_job(
+pub(super) async fn resume_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,

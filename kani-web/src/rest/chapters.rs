@@ -43,7 +43,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_chapter_page_manifest(
+pub(super) async fn get_chapter_page_manifest(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(id): Path<ChapterId>,
@@ -63,7 +63,7 @@ pub(crate) async fn get_chapter_page_manifest(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn set_chapter_progress_handler(
+pub(super) async fn set_chapter_progress_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -84,7 +84,7 @@ pub(crate) async fn set_chapter_progress_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_bookmarks_handler(
+pub(super) async fn get_bookmarks_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -103,7 +103,7 @@ pub(crate) async fn get_bookmarks_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn toggle_bookmark_handler(
+pub(super) async fn toggle_bookmark_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -125,7 +125,7 @@ pub(crate) async fn toggle_bookmark_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_chapter_note_handler(
+pub(super) async fn get_chapter_note_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -145,7 +145,7 @@ pub(crate) async fn get_chapter_note_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn set_chapter_note_handler(
+pub(super) async fn set_chapter_note_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -166,7 +166,7 @@ pub(crate) async fn set_chapter_note_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_manga_chapter_notes_handler(
+pub(super) async fn get_manga_chapter_notes_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -193,7 +193,7 @@ pub(crate) async fn get_manga_chapter_notes_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn set_chapter_read_status_handler(
+pub(super) async fn set_chapter_read_status_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Json(body): Json<SetReadStatusRequest>,
@@ -213,7 +213,7 @@ pub(crate) async fn set_chapter_read_status_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_continue_reading_handler(
+pub(super) async fn get_continue_reading_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -233,7 +233,7 @@ pub(crate) async fn get_continue_reading_handler(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn mark_chapters_up_to_handler(
+pub(super) async fn mark_chapters_up_to_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,

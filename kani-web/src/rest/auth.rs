@@ -55,7 +55,7 @@ pub fn router() -> Router<AppState> {
     ),
     tag = "auth"
 )]
-pub(crate) async fn auth_login(
+pub(super) async fn auth_login(
     mut auth: AuthSession,
     State(state): State<AppState>,
     client_ip: crate::client_ip::ClientIp,
@@ -172,7 +172,7 @@ pub(crate) async fn auth_login(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn auth_logout(
+pub(super) async fn auth_logout(
     mut auth: AuthSession,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
@@ -200,7 +200,7 @@ pub(crate) async fn auth_logout(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn auth_me(
+pub(super) async fn auth_me(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(json!({
@@ -218,7 +218,7 @@ pub(crate) async fn auth_me(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn get_current_user(
+pub(super) async fn get_current_user(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -249,7 +249,7 @@ pub(crate) async fn get_current_user(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn change_password(
+pub(super) async fn change_password(
     auth: AuthSession,
     State(state): State<AppState>,
     Json(body): Json<ChangePasswordRequest>,
@@ -296,7 +296,7 @@ pub(crate) async fn change_password(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn logout_everywhere(
+pub(super) async fn logout_everywhere(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -322,7 +322,7 @@ pub(crate) async fn logout_everywhere(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn list_sessions(
+pub(super) async fn list_sessions(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     auth: AuthSession,
     State(state): State<AppState>,
@@ -355,7 +355,7 @@ pub(crate) async fn list_sessions(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn revoke_all_other_sessions(
+pub(super) async fn revoke_all_other_sessions(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     auth: AuthSession,
     State(state): State<AppState>,
@@ -388,7 +388,7 @@ pub(crate) async fn revoke_all_other_sessions(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn revoke_session(
+pub(super) async fn revoke_session(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     axum::extract::Path(session_id): axum::extract::Path<String>,
@@ -418,7 +418,7 @@ pub(crate) async fn revoke_session(
     ),
     tag = "auth"
 )]
-pub(crate) async fn password_strength(
+pub(super) async fn password_strength(
     State(state): State<AppState>,
     Json(body): Json<PasswordStrengthRequest>,
 ) -> impl IntoResponse {
@@ -464,7 +464,7 @@ pub(crate) async fn password_strength(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn totp_setup(
+pub(super) async fn totp_setup(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -488,7 +488,7 @@ pub(crate) async fn totp_setup(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn totp_verify(
+pub(super) async fn totp_verify(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -511,7 +511,7 @@ pub(crate) async fn totp_verify(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn totp_disable(
+pub(super) async fn totp_disable(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -534,7 +534,7 @@ pub(crate) async fn totp_disable(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn totp_regenerate_backup_codes(
+pub(super) async fn totp_regenerate_backup_codes(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -554,7 +554,7 @@ pub(crate) async fn totp_regenerate_backup_codes(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn totp_step_up(
+pub(super) async fn totp_step_up(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     auth: AuthSession,
@@ -576,7 +576,7 @@ pub(crate) async fn totp_step_up(
     ),
     tag = "system"
 )]
-pub(crate) async fn get_features(
+pub(super) async fn get_features(
     State(state): State<AppState>,
     auth: AuthSession,
 ) -> impl IntoResponse {
@@ -600,7 +600,7 @@ pub(crate) async fn get_features(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoResponse, AppError> {
+pub(super) async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoResponse, AppError> {
     let user = auth
         .user
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
@@ -619,7 +619,7 @@ pub(crate) async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoRes
     ),
     tag = "auth"
 )]
-pub(crate) async fn get_registration_enabled(
+pub(super) async fn get_registration_enabled(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.get_settings().await.registration_enabled;
@@ -640,7 +640,7 @@ pub(crate) async fn get_registration_enabled(
     responses((status = 200, description = "Whether first-run setup is available")),
     tag = "auth"
 )]
-pub(crate) async fn setup_state(
+pub(super) async fn setup_state(
     State(state): State<AppState>,
     PeerAddr(peer): PeerAddr,
 ) -> Result<impl IntoResponse, AppError> {
@@ -675,7 +675,7 @@ fn setup_allowed_from(peer: Option<std::net::SocketAddr>) -> bool {
     ),
     tag = "auth"
 )]
-pub(crate) async fn auth_setup(
+pub(super) async fn auth_setup(
     auth: AuthSession,
     State(state): State<AppState>,
     PeerAddr(peer): PeerAddr,
@@ -724,7 +724,7 @@ pub(crate) async fn auth_setup(
     ),
     tag = "auth"
 )]
-pub(crate) async fn get_captcha(
+pub(super) async fn get_captcha(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     if !state.get_settings().await.registration_enabled {
@@ -762,7 +762,7 @@ pub(crate) async fn get_captcha(
     ),
     tag = "auth"
 )]
-pub(crate) async fn auth_register(
+pub(super) async fn auth_register(
     auth: AuthSession,
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
@@ -811,7 +811,7 @@ pub(crate) async fn auth_register(
     responses((status = 200, description = "Whether password reset via email is enabled")),
     tag = "auth"
 )]
-pub(crate) async fn get_password_reset_enabled(
+pub(super) async fn get_password_reset_enabled(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.get_settings().await.password_reset_enabled;
@@ -826,7 +826,7 @@ pub(crate) async fn get_password_reset_enabled(
     ),
     tag = "auth"
 )]
-pub(crate) async fn password_reset_request(
+pub(super) async fn password_reset_request(
     State(state): State<AppState>,
     Json(body): Json<PasswordResetRequestBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -843,7 +843,7 @@ pub(crate) async fn password_reset_request(
     ),
     tag = "auth"
 )]
-pub(crate) async fn password_reset_confirm(
+pub(super) async fn password_reset_confirm(
     State(state): State<AppState>,
     Json(body): Json<PasswordResetConfirmBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -873,7 +873,7 @@ pub(crate) async fn password_reset_confirm(
     ),
     tag = "auth"
 )]
-pub(crate) async fn password_reset_validate(
+pub(super) async fn password_reset_validate(
     State(state): State<AppState>,
     Query(q): Query<TokenQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -890,7 +890,7 @@ pub(crate) async fn password_reset_validate(
     ),
     tag = "auth"
 )]
-pub(crate) async fn verify_email(
+pub(super) async fn verify_email(
     State(state): State<AppState>,
     Json(body): Json<TokenQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -907,7 +907,7 @@ pub(crate) async fn verify_email(
     security(("session" = [])),
     tag = "auth"
 )]
-pub(crate) async fn resend_verification(
+pub(super) async fn resend_verification(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

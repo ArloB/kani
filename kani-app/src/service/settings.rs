@@ -613,7 +613,7 @@ const MASKED_KEYS: &[&str] = &[
 ];
 
 /// Returns a copy of the config JSON with credential values replaced by `PLACEHOLDER`.
-pub(crate) fn mask_email_config(config_json: &str) -> String {
+pub(super) fn mask_email_config(config_json: &str) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(config_json) else {
         return config_json.to_string();
     };

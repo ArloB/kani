@@ -13,7 +13,7 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct SavedSearchBody {
+pub(super) struct SavedSearchBody {
     pub name: String,
     pub query_json: String,
 }
@@ -28,7 +28,7 @@ pub(crate) struct SavedSearchBody {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn list_saved_searches(
+pub(super) async fn list_saved_searches(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -46,7 +46,7 @@ pub(crate) async fn list_saved_searches(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn create_saved_search(
+pub(super) async fn create_saved_search(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<SavedSearchBody>,
@@ -71,7 +71,7 @@ pub(crate) async fn create_saved_search(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn update_saved_search(
+pub(super) async fn update_saved_search(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -96,7 +96,7 @@ pub(crate) async fn update_saved_search(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn delete_saved_search(
+pub(super) async fn delete_saved_search(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Path(id): Path<i64>,

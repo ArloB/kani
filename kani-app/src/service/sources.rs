@@ -6,7 +6,7 @@ use sqlx::Row as _;
 
 const DEFAULT_GLOBAL_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 
-pub(crate) fn compile_pure_registry(
+pub(super) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
     if metadata.scripts.is_empty() {
@@ -24,7 +24,7 @@ pub(crate) fn compile_pure_registry(
     }
 }
 
-pub(crate) fn compile_hook_registry(
+pub(super) fn compile_hook_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::HookRegistry>> {
     let scripts = kani_core::scripting::HookScripts {
@@ -48,7 +48,7 @@ pub(crate) fn compile_hook_registry(
     }
 }
 
-pub(crate) async fn resolve_option_set(
+pub(super) async fn resolve_option_set(
     cache: &dyn kani_core::cache::CacheBackend,
     client: &kani_core::http::SmartClient,
     source_id: i64,

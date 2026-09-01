@@ -20,7 +20,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn get_settings(
+pub(super) async fn get_settings(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsView>,
     auth: crate::auth::AuthSession,
     State(svc): State<Arc<dyn SettingsDomain>>,
@@ -59,7 +59,7 @@ pub(crate) async fn get_settings(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn update_settings(
+pub(super) async fn update_settings(
     auth: AuthSession,
     State(svc): State<Arc<dyn SettingsDomain>>,
     Json(update): Json<crate::types::SettingsUpdate>,
@@ -123,7 +123,7 @@ pub(crate) async fn update_settings(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn start_refresh_all_rest(
+pub(super) async fn start_refresh_all_rest(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -140,7 +140,7 @@ pub(crate) async fn start_refresh_all_rest(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_refresh_status(
+pub(super) async fn get_refresh_status(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -157,7 +157,7 @@ pub(crate) async fn get_refresh_status(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn test_solver(
+pub(super) async fn test_solver(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     Json(body): Json<SolverTestBody>,
 ) -> Result<impl IntoResponse, AppError> {

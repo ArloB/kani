@@ -21,7 +21,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn serve_chapter_cbz(
+pub(super) async fn serve_chapter_cbz(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
@@ -56,7 +56,7 @@ pub(crate) async fn serve_chapter_cbz(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn export_epub(
+pub(super) async fn export_epub(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
@@ -94,7 +94,7 @@ pub(crate) async fn export_epub(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn export_kepub(
+pub(super) async fn export_kepub(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
@@ -134,7 +134,7 @@ pub(crate) async fn export_kepub(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn export_kcc(
+pub(super) async fn export_kcc(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,

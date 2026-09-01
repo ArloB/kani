@@ -15,13 +15,13 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct VolumeBody {
+pub(super) struct VolumeBody {
     pub name: Option<String>,
     pub volume_num: Option<f64>,
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct AssignVolumeBody {
+pub(super) struct AssignVolumeBody {
     pub volume_id: Option<i64>,
 }
 
@@ -36,7 +36,7 @@ pub(crate) struct AssignVolumeBody {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn list_volumes(
+pub(super) async fn list_volumes(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,
@@ -56,7 +56,7 @@ pub(crate) async fn list_volumes(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn create_volume(
+pub(super) async fn create_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,
@@ -82,7 +82,7 @@ pub(crate) async fn create_volume(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn update_volume(
+pub(super) async fn update_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path((manga_id, volume_id)): Path<(MangaId, i64)>,
@@ -107,7 +107,7 @@ pub(crate) async fn update_volume(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_volume(
+pub(super) async fn delete_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path((manga_id, volume_id)): Path<(MangaId, i64)>,
@@ -129,7 +129,7 @@ pub(crate) async fn delete_volume(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn assign_chapter_volume(
+pub(super) async fn assign_chapter_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path((manga_id, chapter_id)): Path<(MangaId, ChapterId)>,

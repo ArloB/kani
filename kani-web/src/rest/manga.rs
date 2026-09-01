@@ -89,7 +89,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_manga(
+pub(super) async fn get_manga(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -109,7 +109,7 @@ pub(crate) async fn get_manga(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_manga(
+pub(super) async fn delete_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -130,7 +130,7 @@ pub(crate) async fn delete_manga(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn untrash_manga_handler(
+pub(super) async fn untrash_manga_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -140,7 +140,7 @@ pub(crate) async fn untrash_manga_handler(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct UndoTokenBody {
+pub(super) struct UndoTokenBody {
     token: uuid::Uuid,
 }
 
@@ -156,7 +156,7 @@ pub(crate) struct UndoTokenBody {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn untrash_manga_by_token_handler(
+pub(super) async fn untrash_manga_by_token_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Json(body): Json<UndoTokenBody>,
@@ -175,7 +175,7 @@ pub(crate) async fn untrash_manga_by_token_handler(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn list_trash_handler(
+pub(super) async fn list_trash_handler(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -194,7 +194,7 @@ pub(crate) async fn list_trash_handler(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn purge_trash_one_handler(
+pub(super) async fn purge_trash_one_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -213,7 +213,7 @@ pub(crate) async fn purge_trash_one_handler(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn purge_trash_all_handler(
+pub(super) async fn purge_trash_all_handler(
     _: AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -233,7 +233,7 @@ pub(crate) async fn purge_trash_all_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn upload_manga_cover_handler(
+pub(super) async fn upload_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -265,7 +265,7 @@ pub(crate) async fn upload_manga_cover_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn clear_manga_cover_handler(
+pub(super) async fn clear_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -285,7 +285,7 @@ pub(crate) async fn clear_manga_cover_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_local_manga_details(
+pub(super) async fn get_local_manga_details(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
@@ -381,7 +381,7 @@ pub(crate) async fn get_local_manga_details(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_local_chapters(
+pub(super) async fn get_local_chapters(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -426,7 +426,7 @@ pub(crate) async fn get_local_chapters(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_chapter_ids(
+pub(super) async fn get_chapter_ids(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -457,7 +457,7 @@ pub(crate) async fn get_chapter_ids(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn download_all(
+pub(super) async fn download_all(
     _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -476,7 +476,7 @@ pub(crate) async fn download_all(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn cancel_all_downloads(
+pub(super) async fn cancel_all_downloads(
     _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -495,7 +495,7 @@ pub(crate) async fn cancel_all_downloads(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn refresh_manga(
+pub(super) async fn refresh_manga(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -517,7 +517,7 @@ pub(crate) async fn refresh_manga(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn scan_manga(
+pub(super) async fn scan_manga(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -538,7 +538,7 @@ pub(crate) async fn scan_manga(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn toggle_auto_download(
+pub(super) async fn toggle_auto_download(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -560,7 +560,7 @@ pub(crate) async fn toggle_auto_download(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn toggle_auto_scan_manga(
+pub(super) async fn toggle_auto_scan_manga(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -582,7 +582,7 @@ pub(crate) async fn toggle_auto_scan_manga(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn toggle_download_all_preferred(
+pub(super) async fn toggle_download_all_preferred(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -605,7 +605,7 @@ pub(crate) async fn toggle_download_all_preferred(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn update_manga_notes(
+pub(super) async fn update_manga_notes(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -631,7 +631,7 @@ pub(crate) async fn update_manga_notes(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn update_local_metadata_handler(
+pub(super) async fn update_local_metadata_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -663,7 +663,7 @@ pub(crate) async fn update_local_metadata_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn mark_manga_seen(
+pub(super) async fn mark_manga_seen(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -684,7 +684,7 @@ pub(crate) async fn mark_manga_seen(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn preview_migration(
+pub(super) async fn preview_migration(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -709,7 +709,7 @@ pub(crate) async fn preview_migration(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn migrate_manga_handler(
+pub(super) async fn migrate_manga_handler(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -736,7 +736,7 @@ pub(crate) async fn migrate_manga_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_download_rules(
+pub(super) async fn get_download_rules(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -756,7 +756,7 @@ pub(crate) async fn get_download_rules(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn add_download_rule(
+pub(super) async fn add_download_rule(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -784,7 +784,7 @@ pub(crate) async fn add_download_rule(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_download_rule(
+pub(super) async fn delete_download_rule(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
@@ -805,7 +805,7 @@ pub(crate) async fn delete_download_rule(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn update_download_rule(
+pub(super) async fn update_download_rule(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
@@ -827,7 +827,7 @@ pub(crate) async fn update_download_rule(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn reorder_download_rules(
+pub(super) async fn reorder_download_rules(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -849,7 +849,7 @@ pub(crate) async fn reorder_download_rules(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn preview_download_rules(
+pub(super) async fn preview_download_rules(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -860,7 +860,7 @@ pub(crate) async fn preview_download_rules(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct EnrichMetadataBody {
+pub(super) struct EnrichMetadataBody {
     pub(crate) provider: String,
 }
 
@@ -876,7 +876,7 @@ pub(crate) struct EnrichMetadataBody {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn enrich_metadata_handler(
+pub(super) async fn enrich_metadata_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,
@@ -1164,7 +1164,7 @@ mod tests {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_notify_prefs(
+pub(super) async fn get_notify_prefs(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1182,7 +1182,7 @@ pub(crate) async fn get_notify_prefs(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_all_upgrades(
+pub(super) async fn get_all_upgrades(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1190,7 +1190,7 @@ pub(crate) async fn get_all_upgrades(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct AutoReplaceBody {
+pub(super) struct AutoReplaceBody {
     pub enabled: bool,
 }
 
@@ -1206,7 +1206,7 @@ pub(crate) struct AutoReplaceBody {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_upgrade_auto_replace(
+pub(super) async fn set_upgrade_auto_replace(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,
@@ -1233,7 +1233,7 @@ pub(crate) async fn set_upgrade_auto_replace(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn apply_chapter_upgrade(
+pub(super) async fn apply_chapter_upgrade(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(chapter_id): Path<ChapterId>,
@@ -1259,7 +1259,7 @@ pub(crate) async fn apply_chapter_upgrade(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn dismiss_chapter_upgrade(
+pub(super) async fn dismiss_chapter_upgrade(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(chapter_id): Path<ChapterId>,
@@ -1279,7 +1279,7 @@ pub(crate) async fn dismiss_chapter_upgrade(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn dismiss_suppressed_chapters(
+pub(super) async fn dismiss_suppressed_chapters(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,

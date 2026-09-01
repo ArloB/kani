@@ -88,6 +88,7 @@ implicit_clone = "warn"
 inefficient_to_string = "warn"
 or_fun_call = "warn"
 redundant_clone = "warn"
+redundant_pub_crate = "warn"
 
 needless_collect = "allow"                   # 1 remaining
 redundant_else = "allow"                     # 2 remaining, both in the solver retry ladder
@@ -95,4 +96,3 @@ unnecessary_wraps = "allow"                  # 2 remaining, both change a signat
 useless_let_if_seq = "allow"                 # 3 remaining
 manual_let_else = "allow"                    # 20 remaining
 redundant_closure_for_method_calls = "allow" # 54 remaining
-redundant_pub_crate = "allow"                # 304, and see the register: draining it widens markers

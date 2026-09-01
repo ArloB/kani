@@ -9,7 +9,7 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
-pub(crate) struct TokenResponse {
+pub struct TokenResponse {
     id: String,
     name: String,
     kind: String,
@@ -24,7 +24,7 @@ pub(crate) struct TokenResponse {
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
-pub(crate) struct CreatedTokenResponse {
+pub struct CreatedTokenResponse {
     id: String,
     name: String,
     kind: String,
@@ -37,7 +37,7 @@ pub(crate) struct CreatedTokenResponse {
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
-pub(crate) struct CreateTokenBody {
+pub struct CreateTokenBody {
     name: String,
     expires_in_days: Option<u32>,
     /// "opds" (default) or "api".
@@ -94,7 +94,7 @@ fn rfc3339(secs: i64) -> String {
     security(("session" = [])),
     tag = "api-tokens"
 )]
-pub(crate) async fn list_tokens(
+pub(super) async fn list_tokens(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -115,7 +115,7 @@ pub(crate) async fn list_tokens(
     security(("session" = [])),
     tag = "api-tokens"
 )]
-pub(crate) async fn create_token(
+pub(super) async fn create_token(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
     Json(body): Json<CreateTokenBody>,
@@ -205,7 +205,7 @@ pub(crate) async fn create_token(
     security(("session" = [])),
     tag = "api-tokens"
 )]
-pub(crate) async fn revoke_token(
+pub(super) async fn revoke_token(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
     Path(id): Path<String>,

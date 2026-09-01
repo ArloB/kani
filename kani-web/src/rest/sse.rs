@@ -8,7 +8,7 @@ pub fn router() -> Router<AppState> {
         .route("/boot_id", get(get_boot_id))
 }
 
-pub(crate) async fn combined_sse(
+pub(super) async fn combined_sse(
     AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -89,7 +89,7 @@ impl Drop for SseClientGuard {
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn get_boot_id(
+pub(super) async fn get_boot_id(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {

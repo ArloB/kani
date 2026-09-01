@@ -19,7 +19,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_filter_tags(
+pub(super) async fn get_filter_tags(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -36,7 +36,7 @@ pub(crate) async fn get_filter_tags(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_filter_authors(
+pub(super) async fn get_filter_authors(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -53,7 +53,7 @@ pub(crate) async fn get_filter_authors(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_filter_artists(
+pub(super) async fn get_filter_artists(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
