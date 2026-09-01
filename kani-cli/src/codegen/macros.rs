@@ -77,7 +77,11 @@ fn emit_filter_entry(f: &FilterEntry, option_sets: &BTreeMap<String, OptionSetDe
             } else {
                 "Select"
             };
-            let opts = emit_opts_with_values(&resolved_options);
+            let opts = emit_name_value_opts(
+                resolved_options
+                    .iter()
+                    .map(|o| (o.name.as_str(), o.value.as_str())),
+            );
             let def = match &f.default {
                 Some(FilterDefault::Option { name: n, value: v }) => {
                     format!(", default: (\"{}\", \"{}\")", escape_str(n), escape_str(v))
@@ -103,16 +107,11 @@ fn emit_filter_entry(f: &FilterEntry, option_sets: &BTreeMap<String, OptionSetDe
     }
 }
 
-/// Emit Select/Sort options as `("Name", "value")` tuples (always tuple form).
-fn emit_opts_with_values(opts: &[FilterOption]) -> String {
-    opts.iter()
-        .map(|o| {
-            format!(
-                "(\"{}\", \"{}\")",
-                escape_str(&o.name),
-                escape_str(&o.value)
-            )
-        })
+/// Emits `("Name", "value")` tuples, the form Select, Sort, and preference option
+/// lists all take. Shared so the escaping cannot diverge between them.
+fn emit_name_value_opts<'a>(opts: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
+    opts.into_iter()
+        .map(|(name, value)| format!("(\"{}\", \"{}\")", escape_str(name), escape_str(value)))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -185,7 +184,9 @@ fn emit_pref_entry(p: &PreferenceEntry, option_sets: &BTreeMap<String, OptionSet
         }
 
         PreferenceKind::Select => {
-            let opts = emit_pref_opts(&resolve_pref_options(p, option_sets));
+            let resolved = resolve_pref_options(p, option_sets);
+            let opts =
+                emit_name_value_opts(resolved.iter().map(|o| (o.name.as_str(), o.value.as_str())));
             let def = escape_str(&p.default);
             format!("    \"{key}\", \"{label}\", Select, [{opts}], default: \"{def}\"{desc_suffix}")
         }
@@ -202,19 +203,6 @@ fn emit_pref_entry(p: &PreferenceEntry, option_sets: &BTreeMap<String, OptionSet
             format!("    \"{key}\", \"{label}\", MultiValueList{desc_suffix}")
         }
     }
-}
-
-fn emit_pref_opts(opts: &[PrefOption]) -> String {
-    opts.iter()
-        .map(|o| {
-            format!(
-                "(\"{}\", \"{}\")",
-                escape_str(&o.name),
-                escape_str(&o.value)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn escape_str(s: &str) -> String {
@@ -266,4 +254,35 @@ pub fn emit_fetched_option_sets(
         })
         .collect();
     format!("r#\"[{}]\"#", entries.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_emit_as_name_then_value_tuples() {
+        let opts = [("Action", "1"), ("Comedy", "4")];
+        assert_eq!(
+            emit_name_value_opts(opts),
+            r#"("Action", "1"), ("Comedy", "4")"#,
+            "the display name comes first and the wire value second"
+        );
+    }
+
+    /// The output is pasted into a Rust string literal, so a quote or backslash in
+    /// a source's own option list would end the literal early and the generated
+    /// crate would not compile.
+    #[test]
+    fn quotes_and_backslashes_in_an_option_are_escaped() {
+        assert_eq!(
+            emit_name_value_opts([(r#"He said "hi""#, r"a\b")]),
+            r#"("He said \"hi\"", "a\\b")"#
+        );
+    }
+
+    #[test]
+    fn an_empty_option_list_emits_nothing() {
+        assert_eq!(emit_name_value_opts([]), "");
+    }
 }
