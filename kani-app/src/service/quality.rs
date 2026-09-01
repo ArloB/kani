@@ -627,8 +627,8 @@ impl AppService {
         source_chapter_id: &str,
     ) -> Option<Vec<String>> {
         let backend = self.sources.get_backend(source_id)?;
-        let decoded_manga = crate::utils::decode_manga_id(source_manga_id);
-        let decoded_chapter = crate::utils::decode_manga_id(source_chapter_id);
+        let decoded_manga = kani_shared::decode_manga_id(source_manga_id);
+        let decoded_chapter = kani_shared::decode_manga_id(source_chapter_id);
         let chapter = backend
             .get_pages(&decoded_manga, &decoded_chapter)
             .await

@@ -1,6 +1,6 @@
 use crate::evaluator::shared::{
     Env, EvalBudget, Value, blueprint_has_fetch, charge_fetch_request, eval_common_expr,
-    eval_fetch_field, fetch_body, send_prepared_request,
+    eval_fetch_field, fetch_body, header_pair, insert_field_value, send_prepared_request,
 };
 use kani_shared::ast::{Blueprint, Expr, OffsetType, OnFailurePolicy, SubBlueprintKind};
 use std::future::Future;
@@ -68,37 +68,9 @@ async fn resolve_url_and_headers(
             Arc::clone(&budget),
         )
         .await?;
-        match (k, v) {
-            (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
-            _ => return Err("Fetch: header keys and values must be strings".into()),
-        }
+        resolved_headers.push(header_pair(k, v)?);
     }
     Ok((url, resolved_headers))
-}
-
-fn insert_field_value(
-    row: &mut serde_json::Map<String, serde_json::Value>,
-    field_name: &str,
-    optional: bool,
-    val: Value,
-    max_string_length: usize,
-) -> Result<(), String> {
-    match val.to_json() {
-        Some(v) => {
-            if let serde_json::Value::String(s) = &v
-                && s.len() > max_string_length
-            {
-                return Err(format!("limit:max_string_length:{max_string_length}"));
-            }
-            row.insert(field_name.to_string(), v);
-            Ok(())
-        }
-        None if optional => {
-            row.insert(field_name.to_string(), serde_json::Value::Null);
-            Ok(())
-        }
-        None => Err(format!("Required field '{}' produced null", field_name)),
-    }
 }
 
 pub async fn extract_json(
@@ -392,10 +364,7 @@ async fn eval_json_field(
                 Arc::clone(&budget),
             )
             .await?;
-            match (k, v) {
-                (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
-                _ => return Err("Fetch: header keys and values must be strings".into()),
-            }
+            resolved_headers.push(header_pair(k, v)?);
         }
         let result = eval_fetch_field(
             state,

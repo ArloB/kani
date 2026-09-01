@@ -19,7 +19,7 @@ use crate::error::{Result, ServiceError};
 use crate::events::{AppEvent, RefreshProgressEvent};
 use crate::ids::MangaId;
 use crate::models::{DownloadRuleRow, Settings};
-use crate::utils::decode_manga_id;
+use kani_shared::decode_manga_id;
 use kani_shared::types::{
     ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList,
     MigrationPreview, MigrationResult, SearchScope, Source,

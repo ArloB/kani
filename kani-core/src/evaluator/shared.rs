@@ -1449,6 +1449,49 @@ fn numeric_op(op: &Op, l: Value, r: Value) -> Result<Value, String> {
     }
 }
 
+/// Inserts a field's evaluated value into a row, enforcing the string limit and
+/// the field's own optionality.
+///
+/// A `None` value means the expression produced nothing: optional fields record
+/// that as JSON null, required fields are an error naming the field. Shared by the
+/// HTML and JSON evaluators so both enforce the same rule.
+pub fn insert_field_value(
+    row: &mut serde_json::Map<String, serde_json::Value>,
+    field_name: &str,
+    optional: bool,
+    val: Value,
+    max_string_length: usize,
+) -> Result<(), String> {
+    match val.to_json() {
+        Some(v) => {
+            if let serde_json::Value::String(s) = &v
+                && s.len() > max_string_length
+            {
+                return Err(format!("limit:max_string_length:{max_string_length}"));
+            }
+            row.insert(field_name.to_string(), v);
+            Ok(())
+        }
+        None if optional => {
+            row.insert(field_name.to_string(), serde_json::Value::Null);
+            Ok(())
+        }
+        None => Err(format!("Required field '{field_name}' produced null")),
+    }
+}
+
+/// Coerces an evaluated header key/value pair to strings.
+///
+/// A header whose key or value evaluated to a non-string is a blueprint error
+/// rather than something to stringify, because the coercion would be silent and
+/// the resulting request would not be the one the extension described.
+pub fn header_pair(key: Value, value: Value) -> Result<(String, String), String> {
+    match (key, value) {
+        (Value::Str(k), Value::Str(v)) => Ok((k, v)),
+        _ => Err("Fetch: header keys and values must be strings".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1723,5 +1766,81 @@ merge([
         assert!(description.contains("Alternative names:\nAlternative"));
         assert!(description.contains("Year: 2024"));
         assert!(description.contains("Rating: 4.5 from 12 ratings"));
+    }
+}
+
+#[cfg(test)]
+mod field_insertion_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn row() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+
+    #[test]
+    fn a_string_at_the_limit_is_accepted_and_one_over_is_not() {
+        let mut r = row();
+        insert_field_value(&mut r, "t", false, Value::Str("abcd".into()), 4).unwrap();
+        assert_eq!(r["t"], "abcd", "a string of exactly the limit must pass");
+
+        insert_field_value(&mut r, "t", false, Value::Str("abc".into()), 4).unwrap();
+        assert_eq!(r["t"], "abc");
+
+        let error =
+            insert_field_value(&mut r, "t", false, Value::Str("abcde".into()), 4).unwrap_err();
+        assert_eq!(
+            error, "limit:max_string_length:4",
+            "one character over the limit must be refused, and the error carries the limit"
+        );
+        assert_eq!(r["t"], "abc", "a refused value must not land in the row");
+    }
+
+    #[test]
+    fn the_limit_applies_to_strings_alone() {
+        let mut r = row();
+        // A long non-string carries no length the limit could describe.
+        insert_field_value(&mut r, "n", false, Value::Int(1_234_567_890), 2).unwrap();
+        assert_eq!(r["n"], 1_234_567_890_i64);
+    }
+
+    #[test]
+    fn an_absent_optional_field_becomes_null_and_an_absent_required_one_is_an_error() {
+        let mut r = row();
+        insert_field_value(&mut r, "maybe", true, Value::Null, 100).unwrap();
+        assert!(
+            r.contains_key("maybe") && r["maybe"].is_null(),
+            "an optional field must be present as null, not missing: {r:?}"
+        );
+
+        let error = insert_field_value(&mut r, "must", false, Value::Null, 100).unwrap_err();
+        assert!(
+            error.contains("must"),
+            "the error must name the field that produced nothing, got: {error}"
+        );
+        assert!(
+            !r.contains_key("must"),
+            "a required field that produced nothing must not be inserted"
+        );
+    }
+
+    #[test]
+    fn header_pairs_must_be_strings_on_both_sides() {
+        assert_eq!(
+            header_pair(Value::Str("Referer".into()), Value::Str("https://x".into())).unwrap(),
+            ("Referer".to_string(), "https://x".to_string())
+        );
+
+        for (key, value) in [
+            (Value::Int(1), Value::Str("v".into())),
+            (Value::Str("k".into()), Value::Int(1)),
+            (Value::Null, Value::Null),
+        ] {
+            let error = header_pair(key, value).unwrap_err();
+            assert!(
+                error.contains("must be strings"),
+                "a non-string header part must be refused rather than coerced, got: {error}"
+            );
+        }
     }
 }
