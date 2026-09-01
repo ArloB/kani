@@ -7,11 +7,8 @@ static/icons/*.png
 *.snap.new
 lcov.info
 .env
-*.db
 *.db*
-kani-shared/bindings
 /library
-kani-web/dist
 todo.txt
 changes
 /plans
@@ -24,7 +21,6 @@ static/js/vendor/
 static/fonts/
 static/changelog.md
 static/js/dist/
-static/types/
 static/css/main.css
 tools/
 .idea/
