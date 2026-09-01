@@ -36,6 +36,8 @@ postcard = { version = "1", features = ["alloc"] }
 quick-xml = { version = "0.39.2", features = ["serialize"] }
 base64 = "0.22"
 sha2.workspace = true
+ed25519-dalek.workspace = true
+hex = "0.4"
 
 # HTML parsing (for extensions)
 scraper = "0.25.0"

@@ -19,6 +19,7 @@ pub mod option_set_fetcher;
 pub mod probe;
 pub mod quality;
 pub mod scripting;
+pub mod signing;
 pub mod sources;
 pub mod transform;
 pub mod utilities;

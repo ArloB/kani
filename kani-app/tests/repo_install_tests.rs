@@ -18,7 +18,7 @@ fn gen_key() -> SigningKey {
 }
 
 fn sign(key: &SigningKey, data: &[u8]) -> String {
-    signature_b64(&sign_artifact(data, &key.to_bytes()))
+    signature_b64(&sign_artifact(data, key))
 }
 
 fn pk_b64(key: &SigningKey) -> String {
