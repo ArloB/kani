@@ -17,13 +17,6 @@ pub struct FullMetadata {
     pub external_ids: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-/// Provider-attributed metadata result.
-pub struct MetadataResult {
-    pub provider: String,
-    pub metadata: FullMetadata,
-}
-
 #[async_trait::async_trait]
 /// External metadata lookup implemented by each registered provider.
 /// `Ok(None)` means the provider found no match rather than failing.

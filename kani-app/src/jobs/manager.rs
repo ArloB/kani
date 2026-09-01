@@ -337,7 +337,6 @@ impl JobManager {
             circuit_breakers.insert(
                 row.source_id,
                 CircuitBreaker {
-                    source_id: row.source_id,
                     state,
                     failure_count: row.failure_count as u32,
                     last_failure_at: row.last_failure_at,
@@ -492,9 +491,7 @@ impl JobManager {
             if let Some(sid) = source_id {
                 let now = unix_now();
                 let is_open = {
-                    let mut entry = circuit_breakers
-                        .entry(sid)
-                        .or_insert_with(|| crate::jobs::circuit_breaker::CircuitBreaker::new(sid));
+                    let mut entry = circuit_breakers.entry(sid).or_default();
                     entry.maybe_transition_to_half_open(now);
                     entry.is_open_at(now)
                 };
@@ -688,7 +685,7 @@ impl JobManager {
                     Err(e) => {
                         if let (Some(sid), JobError::Download(kind)) = (source_id, &e) {
                             let mut entry = cb_t.entry(sid).or_insert_with(|| {
-                                crate::jobs::circuit_breaker::CircuitBreaker::new(sid)
+                                crate::jobs::circuit_breaker::CircuitBreaker::new()
                             });
                             entry.record_failure(kind, now);
                             let state = entry.state.to_string();

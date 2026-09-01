@@ -58,18 +58,6 @@ impl TokenThrottle {
     }
 }
 
-/// Whether a tracker mapping is due for a sync: never-synced rows are always stale.
-pub fn is_stale(
-    last_synced_at: Option<time::OffsetDateTime>,
-    now: time::OffsetDateTime,
-    interval: time::Duration,
-) -> bool {
-    match last_synced_at {
-        None => true,
-        Some(ts) => now - ts >= interval,
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct TrackerSyncJob {
     id: JobId,
@@ -154,25 +142,5 @@ mod tests {
         t.record_rate_limited(1, now, Duration::from_secs(60));
         assert!(t.delay_before(1, now, MIN_TOKEN_SPACING) >= Duration::from_secs(60));
         assert_eq!(t.delay_before(2, now, MIN_TOKEN_SPACING), Duration::ZERO);
-    }
-
-    #[test]
-    fn never_synced_is_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        assert!(is_stale(None, now, time::Duration::hours(24)));
-    }
-
-    #[test]
-    fn recently_synced_is_not_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        let last = now - time::Duration::hours(1);
-        assert!(!is_stale(Some(last), now, time::Duration::hours(24)));
-    }
-
-    #[test]
-    fn old_sync_is_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        let last = now - time::Duration::hours(25);
-        assert!(is_stale(Some(last), now, time::Duration::hours(24)));
     }
 }

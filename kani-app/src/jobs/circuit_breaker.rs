@@ -22,17 +22,21 @@ impl std::fmt::Display for CircuitState {
 }
 
 pub struct CircuitBreaker {
-    pub source_id: i64,
     pub state: CircuitState,
     pub failure_count: u32,
     pub last_failure_at: Option<i64>,
     pub next_retry_at: Option<i64>,
 }
 
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CircuitBreaker {
-    pub fn new(source_id: i64) -> Self {
+    pub fn new() -> Self {
         Self {
-            source_id,
             state: CircuitState::Closed,
             failure_count: 0,
             last_failure_at: None,
@@ -121,14 +125,14 @@ mod tests {
 
     #[test]
     fn starts_closed() {
-        let cb = CircuitBreaker::new(1);
+        let cb = CircuitBreaker::new();
         assert_eq!(cb.state, CircuitState::Closed);
         assert!(!cb.is_open_at(now()));
     }
 
     #[test]
     fn opens_after_threshold_network_failures() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         let kind = DownloadErrorKind::Network { retryable: true };
         for _ in 0..FAILURE_THRESHOLD {
             cb.record_failure(&kind, now());
@@ -139,7 +143,7 @@ mod tests {
 
     #[test]
     fn auth_required_opens_immediately() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         cb.record_failure(&DownloadErrorKind::AuthRequired, now());
         assert_eq!(cb.state, CircuitState::Open);
         assert!(cb.is_open_at(now()));
@@ -147,7 +151,7 @@ mod tests {
 
     #[test]
     fn not_found_does_not_count() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         for _ in 0..10 {
             cb.record_failure(&DownloadErrorKind::NotFound, now());
         }
@@ -156,7 +160,7 @@ mod tests {
 
     #[test]
     fn transitions_to_half_open_after_timeout() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         let kind = DownloadErrorKind::Network { retryable: true };
         for _ in 0..FAILURE_THRESHOLD {
             cb.record_failure(&kind, now());
@@ -169,7 +173,7 @@ mod tests {
 
     #[test]
     fn half_open_success_closes_circuit() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         cb.state = CircuitState::HalfOpen;
         cb.failure_count = FAILURE_THRESHOLD;
         cb.record_success();
@@ -179,7 +183,7 @@ mod tests {
 
     #[test]
     fn half_open_failure_reopens() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         cb.state = CircuitState::HalfOpen;
         cb.failure_count = FAILURE_THRESHOLD;
         cb.record_failure(&DownloadErrorKind::Network { retryable: true }, now());
@@ -189,7 +193,7 @@ mod tests {
 
     #[test]
     fn success_resets_failure_count() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         let kind = DownloadErrorKind::Network { retryable: true };
         for _ in 0..3 {
             cb.record_failure(&kind, now());

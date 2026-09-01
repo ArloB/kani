@@ -21,16 +21,12 @@ pub(crate) const WASM_EPOCH_TICK_MS: u64 = 10;
 /// Maximum simultaneous background jobs across all types.
 pub(crate) const DEFAULT_MAX_CONCURRENT_JOBS: usize = 10;
 
-/// Maximum simultaneous chapter downloads across all sources.
-pub const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 3;
-
 /// Maximum simultaneous chapter downloads from a single source.
+#[cfg(any(test, feature = "test-util"))]
 pub const DEFAULT_PER_SOURCE_DOWNLOAD_CONCURRENCY: usize = 1;
 
-/// Maximum simultaneous pages fetched within one chapter download.
-pub const DEFAULT_IMAGE_FETCH_CONCURRENCY: usize = 4;
-
 /// Maximum simultaneous source scans (library-wide refresh).
+#[cfg(any(test, feature = "test-util"))]
 pub const DEFAULT_SCAN_CONCURRENCY: usize = 2;
 
 /// How many completed/failed/cancelled jobs to retain before pruning.

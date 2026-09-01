@@ -577,9 +577,6 @@ pub struct StatsQuery {
     /// Number of days for the daily_activity window. Default 90.
     #[garde(range(min = 1, max = 365))]
     pub period: Option<i32>,
-    /// Reserved: comma-separated list of stat blocks to compute.
-    #[garde(skip)]
-    pub metrics: Option<String>,
 }
 
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
