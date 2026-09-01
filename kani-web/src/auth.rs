@@ -26,7 +26,7 @@ use crate::error::AppError;
 ///
 /// This must remain inside the writable data directory: account creation and credential delivery
 /// form one setup operation, while container home directories may be read-only.
-pub fn admin_password_path() -> std::path::PathBuf {
+pub(crate) fn admin_password_path() -> std::path::PathBuf {
     std::env::var("KANI_DATA_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| ".".into()))
@@ -74,7 +74,7 @@ pub struct Credentials {
 }
 
 /// Web session bound to Kani's SQL-backed authentication backend.
-pub type AuthSession = axum_login::AuthSession<AuthBackend>;
+pub(crate) type AuthSession = axum_login::AuthSession<AuthBackend>;
 
 #[derive(Clone)]
 /// SQL-backed `axum-login` authentication and role-loading backend.
@@ -88,7 +88,7 @@ impl AuthBackend {
     }
 
     /// Fetch a user row by ID.
-    pub async fn fetch_user_by_id(&self, id: UserId) -> Result<Option<User>, AppError> {
+    pub(crate) async fn fetch_user_by_id(&self, id: UserId) -> Result<Option<User>, AppError> {
         struct Row {
             id: i64,
             username: String,
@@ -221,7 +221,7 @@ impl AuthBackend {
 
     /// Changes a user's password and simultaneously rotates `change_id`,
     /// invalidating all existing sessions.
-    pub async fn change_password(
+    pub(crate) async fn change_password(
         &self,
         user_id: UserId,
         new_password: &str,
@@ -248,7 +248,7 @@ impl AuthBackend {
     }
 
     /// Rotates `change_id` invalidating all active sessions.
-    pub async fn cycle_change_id(&self, user_id: UserId) -> Result<(), AppError> {
+    pub(crate) async fn cycle_change_id(&self, user_id: UserId) -> Result<(), AppError> {
         let change_id = fresh_change_id();
         sqlx::query!(
             "UPDATE users SET change_id = ? WHERE id = ?",
@@ -262,7 +262,7 @@ impl AuthBackend {
 
     /// Activates or deactivates a user account.
     /// Deactivating also rotates `change_id` to terminate live sessions.
-    pub async fn set_active(&self, user_id: UserId, active: bool) -> Result<(), AppError> {
+    pub(crate) async fn set_active(&self, user_id: UserId, active: bool) -> Result<(), AppError> {
         if !active {
             self.cycle_change_id(user_id).await?;
         }
@@ -295,7 +295,7 @@ impl AuthBackend {
         Ok(())
     }
 
-    pub async fn count_users_with_role(&self, role_slug: &str) -> Result<i64, AppError> {
+    pub(crate) async fn count_users_with_role(&self, role_slug: &str) -> Result<i64, AppError> {
         let count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM user_roles WHERE role_slug = ?",
             role_slug
@@ -318,7 +318,7 @@ impl AuthBackend {
     }
 
     /// Lists all users. Single query via GROUP_CONCAT — avoids N+1.
-    pub async fn list_users(&self) -> Result<Vec<User>, AppError> {
+    pub(crate) async fn list_users(&self) -> Result<Vec<User>, AppError> {
         struct Row {
             id: i64,
             username: String,
@@ -373,7 +373,7 @@ impl AuthBackend {
     }
 
     /// Updates a user's username and/or email.
-    pub async fn update_user(
+    pub(crate) async fn update_user(
         &self,
         user_id: UserId,
         username: Option<&str>,
@@ -393,7 +393,7 @@ impl AuthBackend {
     }
 
     /// Deletes a user account and all associated data.
-    pub async fn delete_user(&self, user_id: UserId) -> Result<(), AppError> {
+    pub(crate) async fn delete_user(&self, user_id: UserId) -> Result<(), AppError> {
         sqlx::query!("DELETE FROM users WHERE id = ?", user_id)
             .execute(&self.db)
             .await?;
@@ -401,7 +401,7 @@ impl AuthBackend {
     }
 
     /// Resets a user's password (admin action — no current-password check).
-    pub async fn admin_reset_password(
+    pub(crate) async fn admin_reset_password(
         &self,
         user_id: UserId,
         new_password: &str,
@@ -421,7 +421,7 @@ impl AuthBackend {
     }
 
     /// Lists all roles with their permissions.
-    pub async fn list_roles(&self) -> Result<Vec<RoleWithPermissions>, AppError> {
+    pub(crate) async fn list_roles(&self) -> Result<Vec<RoleWithPermissions>, AppError> {
         #[derive(sqlx::FromRow)]
         struct RoleRow {
             slug: String,
@@ -462,7 +462,7 @@ impl AuthBackend {
     }
 
     /// Creates a new role with the given slug, optional parent, description, and permissions.
-    pub async fn create_role(
+    pub(crate) async fn create_role(
         &self,
         slug: &str,
         parent: Option<&str>,
@@ -491,7 +491,7 @@ impl AuthBackend {
 
     /// Updates a role's description and replaces its permission set.
     /// The `user` and `admin` role slugs cannot be modified.
-    pub async fn update_role(
+    pub(crate) async fn update_role(
         &self,
         slug: &str,
         description: Option<&str>,
@@ -522,7 +522,7 @@ impl AuthBackend {
     }
 
     /// Deletes a role. Returns an error for the protected `user` and `admin` roles.
-    pub async fn delete_role(&self, slug: &str) -> Result<(), AppError> {
+    pub(crate) async fn delete_role(&self, slug: &str) -> Result<(), AppError> {
         if slug == "user" || slug == "admin" {
             return Err(AppError::Forbidden(format!(
                 "The '{slug}' role cannot be deleted"
@@ -537,7 +537,7 @@ impl AuthBackend {
 
 /// A role with its direct (non-inherited) permission list.
 #[derive(serde::Serialize)]
-pub struct RoleWithPermissions {
+pub(crate) struct RoleWithPermissions {
     pub slug: String,
     pub parent: Option<String>,
     pub description: Option<String>,
@@ -699,7 +699,7 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::passw
 }
 
 /// Generates 16 fresh random bytes for use as `change_id`.
-pub fn fresh_change_id() -> Vec<u8> {
+pub(crate) fn fresh_change_id() -> Vec<u8> {
     use argon2::password_hash::rand_core::{OsRng, RngCore};
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);

@@ -63,7 +63,7 @@ pub struct LibraryUpgrade {
 /// What is stored in `chapters.upgrade_available`. Dismissals live inside the
 /// descriptor so a dismissed candidate survives re-scans without a side table.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UpgradeDescriptor {
+pub(crate) struct UpgradeDescriptor {
     #[serde(default)]
     pub candidates: Vec<UpgradeCandidate>,
     /// `(candidate_source_chapter_id, scanlator)` pairs the user has waved away.
@@ -88,7 +88,7 @@ fn dismissal_key(c: &UpgradeCandidate) -> (String, Option<String>) {
 
 impl AppService {
     /// The comparison rules as currently configured.
-    pub async fn quality_policy(&self) -> kani_core::quality::QualityPolicy {
+    pub(crate) async fn quality_policy(&self) -> kani_core::quality::QualityPolicy {
         use kani_core::quality::AxisRule;
         let s = self.settings.read().await;
         kani_core::quality::QualityPolicy {

@@ -25,18 +25,18 @@ pub enum Severity {
 /// A stable identifier per condition, so re-registering updates in place and a
 /// subsystem that recovers can clear itself.
 pub mod ids {
-    pub const CREDENTIAL_KEY: &str = "credential_key";
+    pub(crate) const CREDENTIAL_KEY: &str = "credential_key";
     pub const ENCRYPTED_SETTINGS: &str = "encrypted_settings";
-    pub const CREDENTIAL_MIGRATION: &str = "credential_migration";
+    pub(crate) const CREDENTIAL_MIGRATION: &str = "credential_migration";
     pub const TRACKER_CREDENTIALS: &str = "tracker_credentials";
     pub const WASM_MODULE_CACHE: &str = "wasm_module_cache";
-    pub const STORAGE_DIRECTORY: &str = "storage_directory";
+    pub(crate) const STORAGE_DIRECTORY: &str = "storage_directory";
     pub const LIBRARY_PATH: &str = "library_path";
-    pub const SOURCE_REGISTRY: &str = "source_registry";
+    pub(crate) const SOURCE_REGISTRY: &str = "source_registry";
 
     /// One id per source, so several broken extensions each report themselves
     /// instead of overwriting one shared entry.
-    pub fn source_load(source_name: &str) -> String {
+    pub(crate) fn source_load(source_name: &str) -> String {
         format!("source_load:{source_name}")
     }
 }
@@ -137,7 +137,7 @@ impl DegradationRegistry {
 
 /// Emitted once at the end of startup so a degraded boot is visible in the log
 /// without reading every preceding line.
-pub fn log_startup_summary(registry: &DegradationRegistry) {
+pub(crate) fn log_startup_summary(registry: &DegradationRegistry) {
     let list = registry.list();
     if list.is_empty() {
         return;

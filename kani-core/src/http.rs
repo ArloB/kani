@@ -724,7 +724,7 @@ impl SmartClient {
         }
     }
 
-    pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
+    pub(crate) async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
 
         let domain = request.uri().host().map(base_domain).unwrap_or_default();
@@ -1384,7 +1384,7 @@ impl SmartClient {
         Ok((cookies, ua))
     }
 
-    pub fn solver_configured(&self) -> bool {
+    pub(crate) fn solver_configured(&self) -> bool {
         self.solver_url
             .load()
             .as_deref()
@@ -1437,7 +1437,7 @@ impl SmartClient {
 
     /// Establishes what the configured solver can do, and caches it. The index
     /// is unauthenticated while the commands are not, so both are checked.
-    pub async fn probe_solver_capability(&self, url: &str) -> SolverCapability {
+    pub(crate) async fn probe_solver_capability(&self, url: &str) -> SolverCapability {
         let Ok(client) = self.solver_http() else {
             return SolverCapability::Unreachable;
         };
@@ -1934,7 +1934,7 @@ impl SmartClient {
     /// routable network in the clear. The payload matters more than the key:
     /// signing would protect the credential but leaves the extension script
     /// and the captured data readable, which only TLS fixes.
-    pub fn solver_transport_warning(&self) -> Option<&'static str> {
+    pub(crate) fn solver_transport_warning(&self) -> Option<&'static str> {
         let guard = self.solver_url.load();
         let url = guard.as_deref()?;
         solver_transport_is_exposed(url).then_some(

@@ -43,7 +43,7 @@ fn matches(header_value: &str, etag: &str) -> bool {
     })
 }
 
-pub async fn etag_middleware(req: Request, next: Next) -> Response {
+pub(crate) async fn etag_middleware(req: Request, next: Next) -> Response {
     if req.method() != Method::GET && req.method() != Method::HEAD {
         return next.run(req).await;
     }

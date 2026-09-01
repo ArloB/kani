@@ -115,7 +115,9 @@ pub fn build_blueprint_core(
 }
 
 /// Build a request-free, non-chaining sub-blueprint for `then` and `for_each` fetch expressions.
-pub fn build_sub_blueprint(ep: &yaml::model::ValidatedEndpoint) -> kani_shared::ast::Blueprint {
+pub(crate) fn build_sub_blueprint(
+    ep: &yaml::model::ValidatedEndpoint,
+) -> kani_shared::ast::Blueprint {
     use kani_shared::ast::BlueprintBuilder;
     use yaml::model::FieldSource;
 

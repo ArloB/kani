@@ -29,7 +29,7 @@ impl ComicPages {
     /// Build a `Pages` block from the complete set of double-page indices.
     /// Only emits individual `<Page>` elements that are actually needed — one
     /// per image entry, with `DoublePage="true"` on the flagged ones.
-    pub fn from_flags(total: usize, double_pages: &HashSet<usize>) -> Self {
+    pub(crate) fn from_flags(total: usize, double_pages: &HashSet<usize>) -> Self {
         let pages = (0..total)
             .map(|i| ComicPage {
                 image: i as u32,
@@ -71,7 +71,7 @@ pub struct ComicInfo {
 }
 
 /// Serialise a `ComicInfo` to a UTF-8 XML string with a proper declaration.
-pub fn build_xml(info: &ComicInfo) -> crate::error::Result<String> {
+pub(crate) fn build_xml(info: &ComicInfo) -> crate::error::Result<String> {
     let mut buf = String::from(r#"<?xml version="1.0" encoding="utf-8"?>"#);
     buf.push('\n');
     let serialized = quick_xml::se::to_string(info).map_err(|e| {
@@ -104,7 +104,7 @@ struct ParsedComicInfo {
 
 /// Returns `true` if the XML string contains a `<Pages>` element with at
 /// least one `<Page>` child — i.e., spread metadata has already been written.
-pub fn has_pages_metadata(xml: &str) -> bool {
+pub(crate) fn has_pages_metadata(xml: &str) -> bool {
     match quick_xml::de::from_str::<ParsedComicInfo>(xml) {
         Ok(info) => info.pages.map(|p| !p.pages.is_empty()).unwrap_or(false),
         Err(_) => false,
@@ -115,7 +115,7 @@ pub fn has_pages_metadata(xml: &str) -> bool {
 /// 0-based image indices that are flagged as `DoublePage="true"`.
 ///
 /// Returns an empty set on parse failure or when no `<Pages>` block exists.
-pub fn parse_double_pages(xml: &str) -> HashSet<u32> {
+pub(crate) fn parse_double_pages(xml: &str) -> HashSet<u32> {
     match quick_xml::de::from_str::<ParsedComicInfo>(xml) {
         Ok(info) => info
             .pages

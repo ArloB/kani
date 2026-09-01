@@ -9,10 +9,10 @@ use std::ops::Range;
 use self::parseexpr::ParseExpr;
 pub use self::parseexpr::SpannedParseExpr;
 
-pub const MAX_INPUT_BYTES: usize = 64 * 1024;
-pub const MAX_TOKENS: usize = 16_384;
-pub const MAX_NESTING: usize = 50;
-pub const MAX_AST_NODES: usize = 10_000;
+pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_TOKENS: usize = 16_384;
+pub(crate) const MAX_NESTING: usize = 50;
+pub(crate) const MAX_AST_NODES: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DslParseErrorKind {

@@ -25,7 +25,7 @@ impl Default for Endpoints {
     }
 }
 
-pub struct AnilistTracker {
+pub(crate) struct AnilistTracker {
     client_id: String,
     client_secret: String,
     http: rquest::Client,
@@ -46,6 +46,10 @@ impl AnilistTracker {
     /// `{base}/token`, `{base}/graphql`) and shorten the client timeout so a
     /// stalled-origin test resolves quickly.
     #[cfg(any(test, feature = "test-util"))]
+    #[allow(
+        dead_code,
+        reason = "the seam exists for tracker tests plan 19 has not written yet"
+    )]
     pub fn with_test_base(mut self, base: &str) -> Self {
         self.http = rquest::Client::builder()
             .timeout(std::time::Duration::from_millis(500))

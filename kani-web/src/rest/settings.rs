@@ -123,7 +123,7 @@ pub(crate) async fn update_settings(
     security(("session" = [])),
     tag = "library"
 )]
-pub async fn start_refresh_all_rest(
+pub(crate) async fn start_refresh_all_rest(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {

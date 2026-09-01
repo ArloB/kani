@@ -119,7 +119,7 @@ impl LogHandle {
     }
 
     /// Returns all matching entries, newest-first, with no pagination.
-    pub fn query_all(
+    pub(crate) fn query_all(
         &self,
         level_filter: &[String],
         source_filter: &[String],

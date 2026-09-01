@@ -3,7 +3,7 @@ use crate::ids::{ChapterId, MangaId, UserId};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
-pub struct ReadProgressBuffer(std::sync::Arc<std::sync::Mutex<HashMap<(i64, i64), i64>>>);
+pub(crate) struct ReadProgressBuffer(std::sync::Arc<std::sync::Mutex<HashMap<(i64, i64), i64>>>);
 
 impl ReadProgressBuffer {
     pub fn record(&self, user_id: i64, chapter_id: i64, page: i64) {
@@ -204,7 +204,7 @@ impl AppService {
 
     /// Like [`Self::get_chapter_progress`] but also returns the last-read timestamp
     /// formatted as RFC 3339 (for the OPDS-PSE `pse:lastReadDate` attribute).
-    pub async fn get_chapter_progress_full(
+    pub(crate) async fn get_chapter_progress_full(
         &self,
         user_id: UserId,
         chapter_id: ChapterId,

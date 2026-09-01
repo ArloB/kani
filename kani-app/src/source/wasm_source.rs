@@ -76,7 +76,7 @@ impl WasmSource {
 
     /// `idle_for` governs the local V8 worker only; solver sessions expire on the
     /// solver's own TTL, so the host has nothing to configure for them.
-    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+    pub(crate) async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
         let (local, solver) = tokio::join!(
             kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for),
             self.smart_client
@@ -85,7 +85,7 @@ impl WasmSource {
         local || solver > 0
     }
 
-    pub async fn shutdown_v8(&self, reason: &str) -> bool {
+    pub(crate) async fn shutdown_v8(&self, reason: &str) -> bool {
         let (local, solver) = tokio::join!(
             kani_core::v8_process::shutdown(&self.v8_process, reason),
             self.smart_client
@@ -94,7 +94,7 @@ impl WasmSource {
         local || solver > 0
     }
 
-    pub async fn retire_v8(&self, reason: &str) -> bool {
+    pub(crate) async fn retire_v8(&self, reason: &str) -> bool {
         let (local, solver) = tokio::join!(
             kani_core::v8_process::retire(&self.v8_process, reason),
             self.smart_client

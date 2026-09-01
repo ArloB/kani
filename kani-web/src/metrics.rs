@@ -127,7 +127,7 @@ pub fn router(state: crate::state::AppState) -> Router {
 
 #[derive(Clone)]
 /// Router state pairing the Prometheus renderer with application authorization state.
-pub struct MetricsState {
+pub(crate) struct MetricsState {
     handle: PrometheusHandle,
     app: crate::state::AppState,
 }
@@ -164,7 +164,7 @@ async fn authorized(app: &crate::state::AppState, headers: &HeaderMap) -> bool {
     }
 }
 
-pub fn sync_runtime_counters() {
+pub(crate) fn sync_runtime_counters() {
     let stats = kani_core::v8_process::browser_stats();
     metrics::counter!("kani_v8_calls_total").absolute(stats.calls_total);
     metrics::counter!("kani_v8_process_restarts_total").absolute(stats.restarts);

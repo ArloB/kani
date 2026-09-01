@@ -100,7 +100,7 @@ pub async fn ensure_recurring_rows(pool: &sqlx::SqlitePool) -> Result<()> {
     Ok(())
 }
 
-pub async fn record_run(
+pub(crate) async fn record_run(
     pool: &sqlx::SqlitePool,
     kind: RecurringJobKind,
     interval_override: Option<i64>,

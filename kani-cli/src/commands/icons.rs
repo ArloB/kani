@@ -32,7 +32,7 @@ pub fn run() -> Result<(), CliError> {
 /// - `icon-192.png`          — 192×192, standard
 /// - `icon-512.png`          — 512×512, standard
 /// - `icon-512-maskable.png` — 512×512 with 20% safe-zone padding for maskable use
-pub fn generate_icons(svg_path: &Path, out_dir: &Path) -> Result<(), CliError> {
+pub(crate) fn generate_icons(svg_path: &Path, out_dir: &Path) -> Result<(), CliError> {
     let svg_data = std::fs::read(svg_path)
         .map_err(|e| CliError::Other(format!("failed to read {}: {e}", svg_path.display())))?;
 

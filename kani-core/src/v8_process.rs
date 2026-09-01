@@ -40,7 +40,7 @@ pub fn set_v8_config(cfg: V8Config) {
     }
 }
 
-pub fn v8_config() -> V8Config {
+pub(crate) fn v8_config() -> V8Config {
     V8_CONFIG.read().map(|g| *g).unwrap_or_default()
 }
 
@@ -69,7 +69,7 @@ pub fn browser_stats() -> kani_shared::types::BrowserStats {
     }
 }
 
-pub fn record_browser_solver_result(success: bool) {
+pub(crate) fn record_browser_solver_result(success: bool) {
     BROWSER_SOLVER_ATTEMPTS_TOTAL.fetch_add(1, Ordering::Relaxed);
     if success {
         BROWSER_SOLVER_SUCCESSES_TOTAL.fetch_add(1, Ordering::Relaxed);

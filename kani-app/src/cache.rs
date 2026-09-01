@@ -92,15 +92,15 @@ impl RequestCache {
         }
     }
 
-    pub async fn cbz_pages_get(&self, key: (i64, i64)) -> Option<Arc<Vec<String>>> {
+    pub(crate) async fn cbz_pages_get(&self, key: (i64, i64)) -> Option<Arc<Vec<String>>> {
         self.cbz_pages.get(&key).await
     }
 
-    pub async fn cbz_pages_put(&self, key: (i64, i64), value: Arc<Vec<String>>) {
+    pub(crate) async fn cbz_pages_put(&self, key: (i64, i64), value: Arc<Vec<String>>) {
         self.cbz_pages.insert(key, value).await;
     }
 
-    pub async fn get_or_fetch_manga_details<F, E>(
+    pub(crate) async fn get_or_fetch_manga_details<F, E>(
         &self,
         source_id: i64,
         manga_id: &str,
@@ -115,7 +115,7 @@ impl RequestCache {
             .await
     }
 
-    pub async fn get_or_fetch_popular_manga<F, E>(
+    pub(crate) async fn get_or_fetch_popular_manga<F, E>(
         &self,
         source_id: i64,
         page: i32,
@@ -132,7 +132,7 @@ impl RequestCache {
             .await
     }
 
-    pub async fn get_or_fetch_chapter_list<F, E>(
+    pub(crate) async fn get_or_fetch_chapter_list<F, E>(
         &self,
         source_id: i64,
         manga_id: &str,
@@ -159,7 +159,7 @@ impl RequestCache {
             .await
     }
 
-    pub async fn get_or_fetch_search_results<F, E>(
+    pub(crate) async fn get_or_fetch_search_results<F, E>(
         &self,
         source_id: i64,
         query: &str,
@@ -180,7 +180,7 @@ impl RequestCache {
             .await
     }
 
-    pub async fn get_or_fetch_pages<F, E>(
+    pub(crate) async fn get_or_fetch_pages<F, E>(
         &self,
         source_id: i64,
         manga_id: &str,
@@ -199,24 +199,31 @@ impl RequestCache {
             .await
     }
 
-    pub fn get_preference_schema(&self, source_id: i64) -> Option<Vec<kani_core::PreferenceSpec>> {
+    pub(crate) fn get_preference_schema(
+        &self,
+        source_id: i64,
+    ) -> Option<Vec<kani_core::PreferenceSpec>> {
         self.preference_schema
             .get(&source_id)
             .map(|r| r.value().clone())
     }
 
-    pub fn insert_preference_schema(&self, source_id: i64, schema: Vec<kani_core::PreferenceSpec>) {
+    pub(crate) fn insert_preference_schema(
+        &self,
+        source_id: i64,
+        schema: Vec<kani_core::PreferenceSpec>,
+    ) {
         self.preference_schema.insert(source_id, schema);
     }
 
-    pub async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {
+    pub(crate) async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {
         let owned = manga_id.to_string();
         let _ = self.chapter_list.invalidate_entries_if(
             move |(sid, mid, _page, _page_size, _sort), _| *sid == source_id && *mid == owned,
         );
     }
 
-    pub fn invalidate_stats(&self, user_id: crate::ids::UserId) {
+    pub(crate) fn invalidate_stats(&self, user_id: crate::ids::UserId) {
         let raw = user_id.0;
         let _ = self
             .stats
@@ -267,7 +274,7 @@ impl RequestCache {
         self.invalidate_library();
     }
 
-    pub fn invalidate_source(&self, source_id: i64) {
+    pub(crate) fn invalidate_source(&self, source_id: i64) {
         let sid = source_id;
         let _ = self
             .manga_details
@@ -297,7 +304,7 @@ impl Default for RequestCache {
 const NS_MAX_BYTES: i64 = 4 * 1024 * 1024;
 const NS_MAX_ROWS: i64 = 4096;
 
-pub struct SqliteCache {
+pub(crate) struct SqliteCache {
     pool: SqlitePool,
 }
 

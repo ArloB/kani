@@ -1,6 +1,6 @@
 //! Post-process generated Rust source through `rustfmt` if available.
 
-pub fn try_rustfmt(source: &str) -> String {
+pub(crate) fn try_rustfmt(source: &str) -> String {
     let result = std::process::Command::new("rustfmt")
         .args(["--edition", "2021", "--emit", "stdout"])
         .stdin(std::process::Stdio::piped())

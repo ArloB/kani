@@ -190,7 +190,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn retry_missing_covers(&self) {
+    pub(crate) async fn retry_missing_covers(&self) {
         struct Row {
             id: MangaId,
             cover_url: String,

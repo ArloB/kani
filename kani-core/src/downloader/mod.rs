@@ -148,10 +148,10 @@ impl DownloaderManager {
     }
 }
 
-pub const DEFAULT_CONCURRENT_PAGES: usize = 4;
-pub const DEFAULT_MAX_ATTEMPTS: i64 = 3;
+pub(crate) const DEFAULT_CONCURRENT_PAGES: usize = 4;
+pub(crate) const DEFAULT_MAX_ATTEMPTS: i64 = 3;
 /// Default delay before the first page retry, in milliseconds.
-pub const DEFAULT_INITIAL_RETRY_DELAY_MS: i64 = 1_000;
+pub(crate) const DEFAULT_INITIAL_RETRY_DELAY_MS: i64 = 1_000;
 
 #[derive(Debug, Clone)]
 /// Page-level concurrency and retry policy for a [`DownloaderManager`].

@@ -40,14 +40,14 @@ impl CircuitBreaker {
         }
     }
 
-    pub fn is_open_at(&self, now: i64) -> bool {
+    pub(crate) fn is_open_at(&self, now: i64) -> bool {
         match &self.state {
             CircuitState::Open => self.next_retry_at.is_none_or(|t| now < t),
             _ => false,
         }
     }
 
-    pub fn maybe_transition_to_half_open(&mut self, now: i64) {
+    pub(crate) fn maybe_transition_to_half_open(&mut self, now: i64) {
         if matches!(&self.state, CircuitState::Open) && self.next_retry_at.is_some_and(|t| now >= t)
         {
             self.state = CircuitState::HalfOpen;

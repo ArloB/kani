@@ -3,7 +3,7 @@
 use crate::yaml::model::{ValidatedChapterSort, ValidatedExtension};
 use crate::yaml::schema::YamlCacheScope;
 
-pub fn emit_cargo_toml(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
+pub(crate) fn emit_cargo_toml(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     let id = &ext.id;
     let features: &str = if embedded_bytes {
         ", features = [\"meta\"]"
@@ -29,7 +29,7 @@ id = "{id}"
     )
 }
 
-pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
+pub(crate) fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     let struct_name = to_pascal_case(&ext.id);
     let base_url = &ext.base_url;
     let id = &ext.id;
@@ -215,7 +215,7 @@ impl {struct_name} {{
     )
 }
 
-pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
+pub(crate) fn emit_guest_impl(ext: &ValidatedExtension) -> String {
     let struct_name = to_pascal_case(&ext.id);
 
     let popular_impl: String = if ext.popular.is_some() {
@@ -301,7 +301,7 @@ bindings::export!({struct_name});
 /// every namespace from the YAML `cache:` block. Empty when no `cache` block
 /// was declared, in which case the registry is still emitted (as `&[]`) so
 /// generated crates always expose a stable symbol.
-pub fn emit_cache_registry(ext: &ValidatedExtension) -> String {
+pub(crate) fn emit_cache_registry(ext: &ValidatedExtension) -> String {
     let entries: Vec<String> = ext
         .cache
         .iter()
@@ -331,7 +331,7 @@ pub fn emit_cache_registry(ext: &ValidatedExtension) -> String {
 
 /// Emits the `get_chapter_sort_list` (and optionally `default_chapter_sort`)
 /// `MangaExtension` impl methods from a validated `chapter_sort` block.
-pub fn emit_chapter_sort(cs: &ValidatedChapterSort) -> String {
+pub(crate) fn emit_chapter_sort(cs: &ValidatedChapterSort) -> String {
     let entries: Vec<String> = cs
         .options
         .iter()
@@ -393,7 +393,7 @@ fn emit_btreemap_string_string(map: &std::collections::BTreeMap<String, String>)
     }
 }
 
-pub fn to_pascal_case(s: &str) -> String {
+pub(crate) fn to_pascal_case(s: &str) -> String {
     s.split(['-', '_'])
         .filter(|p| !p.is_empty())
         .map(|p| {

@@ -25,7 +25,7 @@ pub enum SigningError {
     DigestMismatch { expected: String, actual: String },
 }
 
-pub fn sha256_digest(data: &[u8]) -> [u8; 32] {
+pub(crate) fn sha256_digest(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }
 

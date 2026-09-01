@@ -1,15 +1,16 @@
 use sha2::{Digest, Sha256};
 
-pub const THUMBNAIL_SIZES: &[(&str, u32)] = &[("xs", 80), ("sm", 160), ("md", 320), ("lg", 640)];
+pub(crate) const THUMBNAIL_SIZES: &[(&str, u32)] =
+    &[("xs", 80), ("sm", 160), ("md", 320), ("lg", 640)];
 
-pub fn parse_thumbnail_formats(csv: &str) -> Vec<String> {
+pub(crate) fn parse_thumbnail_formats(csv: &str) -> Vec<String> {
     csv.split(',')
         .map(|s| s.trim().to_lowercase())
         .filter(|s| s == "jpeg")
         .collect()
 }
 
-pub fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     format!("{:x}", h.finalize())

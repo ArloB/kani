@@ -8,7 +8,7 @@ pub fn router() -> Router<AppState> {
         .route("/boot_id", get(get_boot_id))
 }
 
-pub async fn combined_sse(
+pub(crate) async fn combined_sse(
     AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

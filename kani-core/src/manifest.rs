@@ -48,7 +48,7 @@ pub struct PageDigest {
 }
 
 /// Current serialized chapter-manifest schema.
-pub const MANIFEST_SCHEMA: u32 = 1;
+pub(crate) const MANIFEST_SCHEMA: u32 = 1;
 
 #[derive(Debug)]
 /// Failure while reading an archive or constructing its manifest.

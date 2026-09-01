@@ -3,7 +3,7 @@
 use crate::yaml::model::{QueryEntry, QueryValue};
 use crate::yaml::schema::{ArrayFormat, BoolFormat, FilterFormatCfg, FilterMappingEntry};
 
-pub fn emit_request_block(
+pub(crate) fn emit_request_block(
     route: &str,
     method: &str,
     headers: &[(String, String)],
@@ -134,7 +134,7 @@ fn emit_filter_apply(
 /// composite-id subfield; these are sanitized to `manga_hid` since `.` is not
 /// a valid Rust identifier character (the matching local is emitted by the
 /// decode prologue).
-pub fn emit_route_format(route: &str, base_url_expr: &str) -> String {
+pub(crate) fn emit_route_format(route: &str, base_url_expr: &str) -> String {
     let mut vars: Vec<String> = Vec::new();
     let mut fmt = String::new();
     let bytes = route.as_bytes();

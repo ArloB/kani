@@ -16,7 +16,7 @@ pub struct CapturedManifest {
 
 /// The stored form of a `ColourProfile`. Matches its serde representation so
 /// the two cannot drift apart silently.
-pub fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
+pub(crate) fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
     use kani_core::quality::ColourProfile::*;
     match c {
         Monochrome => "monochrome",
@@ -27,7 +27,7 @@ pub fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
     .to_string()
 }
 
-pub fn colour_from_column(s: &str) -> kani_core::quality::ColourProfile {
+pub(crate) fn colour_from_column(s: &str) -> kani_core::quality::ColourProfile {
     use kani_core::quality::ColourProfile::*;
     match s {
         "monochrome" => Monochrome,

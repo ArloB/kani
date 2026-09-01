@@ -12,7 +12,7 @@ use crate::models::Settings;
 /// Provider-agnostic email sending interface.
 /// Implement this trait to add a new email provider.
 #[async_trait]
-pub trait EmailTransport: Send + Sync {
+pub(crate) trait EmailTransport: Send + Sync {
     async fn send(
         &self,
         from: &str,
@@ -32,7 +32,7 @@ pub struct EmailService {
 
 impl EmailService {
     /// Constructs from current settings. Returns `None` if email is disabled or unconfigured.
-    pub fn from_settings(s: &Settings) -> Option<Self> {
+    pub(crate) fn from_settings(s: &Settings) -> Option<Self> {
         if !s.email_enabled || s.email_from_address.is_empty() {
             return None;
         }

@@ -27,7 +27,7 @@ pub fn score(path: &Path) -> Result<(), CliError> {
 /// Per-page perceptual-hash distance between two CBZs. Zero means visually
 /// identical pages; a large distance means the pages differ, not merely the
 /// encoding.
-pub fn phash_compare(a: &Path, b: &Path) -> Result<(), CliError> {
+pub(crate) fn phash_compare(a: &Path, b: &Path) -> Result<(), CliError> {
     let ma = kani_core::manifest::manifest_for_cbz(a)
         .map_err(|e| CliError::Other(format!("cannot read {}: {e}", a.display())))?;
     let mb = kani_core::manifest::manifest_for_cbz(b)

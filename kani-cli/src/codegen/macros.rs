@@ -7,7 +7,7 @@ use crate::yaml::schema::{
     OptionSetItem, PrefOption, PreferenceEntry, PreferenceKind, ResponseType,
 };
 
-pub fn emit_filter_list(
+pub(crate) fn emit_filter_list(
     filters: &[FilterEntry],
     option_sets: &BTreeMap<String, OptionSetDef>,
 ) -> String {
@@ -134,7 +134,7 @@ fn emit_opts_multiselect(opts: &[FilterOption]) -> String {
         .join(", ")
 }
 
-pub fn emit_preference_list(
+pub(crate) fn emit_preference_list(
     prefs: &[PreferenceEntry],
     option_sets: &BTreeMap<String, OptionSetDef>,
 ) -> String {
@@ -212,7 +212,7 @@ fn escape_str(s: &str) -> String {
 /// Builds the JSON array literal (as a Rust string) for `get_fetched_option_sets`.
 /// For each filter with an `options_ref` pointing to a `Fetched` option_set, emits
 /// one `FilterFetchDef` entry so the host can fetch and merge options at render time.
-pub fn emit_fetched_option_sets(
+pub(crate) fn emit_fetched_option_sets(
     filters: &[FilterEntry],
     option_sets: &BTreeMap<String, OptionSetDef>,
 ) -> String {

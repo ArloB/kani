@@ -66,7 +66,7 @@ impl AppService {
 
     /// Validates a reset token and returns the user ID if valid.
     /// Does not consume the token — call `consume_reset_token` separately.
-    pub async fn validate_reset_token(&self, raw_token: &str) -> Result<(i64, String)> {
+    pub(crate) async fn validate_reset_token(&self, raw_token: &str) -> Result<(i64, String)> {
         let hash = hash_token(raw_token);
         let row = sqlx::query!(
             "SELECT prt.user_id, u.email FROM password_reset_tokens prt

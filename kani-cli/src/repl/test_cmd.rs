@@ -75,7 +75,7 @@ fn evaluate_endpoint_count(
     }
 }
 
-pub fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, CliError> {
+pub(crate) fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, CliError> {
     let path = Path::new(file);
     let src = std::fs::read_to_string(path)?;
     let ext: YamlExtension = serde_yaml::from_str(&src)

@@ -4,7 +4,7 @@ use crate::jobs::framework::{BackgroundJob, JobContext, JobId};
 use crate::models::RefreshOptions;
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct RefreshMangaJob {
+pub(crate) struct RefreshMangaJob {
     id: JobId,
     pub manga_id: i64,
     pub manga_title: String,

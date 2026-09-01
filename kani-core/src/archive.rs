@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::manifest::{ChapterManifest, archive_hash};
 
 /// Schema version written to `ARCHIVE.json`.
-pub const ARCHIVE_SCHEMA: u32 = 1;
+pub(crate) const ARCHIVE_SCHEMA: u32 = 1;
 
 const VIEWER_HTML: &str = include_str!("archive_viewer.html");
 
@@ -67,7 +67,7 @@ impl ArchiveVerifyReport {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// Portable `ARCHIVE.json` index at the root of an export.
-pub struct ArchiveIndex {
+pub(crate) struct ArchiveIndex {
     pub schema: u32,
     /// Export creation time as a Unix timestamp in seconds.
     pub created_at: i64,
@@ -82,7 +82,7 @@ pub struct ArchiveIndex {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// One series entry in an [`ArchiveIndex`].
-pub struct ArchiveIndexSeries {
+pub(crate) struct ArchiveIndexSeries {
     pub slug: String,
     pub cover: Option<String>,
     pub chapters: Vec<ArchiveIndexChapter>,
@@ -90,7 +90,7 @@ pub struct ArchiveIndexSeries {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 /// One chapter entry in an [`ArchiveIndexSeries`].
-pub struct ArchiveIndexChapter {
+pub(crate) struct ArchiveIndexChapter {
     pub slug: String,
     pub cbz: String,
     pub manifest: String,

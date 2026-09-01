@@ -751,7 +751,7 @@ impl AppService {
         }
     }
 
-    pub async fn fetch_and_store_chapter_page(
+    pub(crate) async fn fetch_and_store_chapter_page(
         &self,
         source_id: i64,
         manga_id: &str,
@@ -822,7 +822,7 @@ impl AppService {
             .map_err(|e| ServiceError::Internal(e.to_string()))
     }
 
-    pub async fn fetch_and_store_remaining_chapters(
+    pub(crate) async fn fetch_and_store_remaining_chapters(
         &self,
         source_id: i64,
         manga_id: String,

@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use image::{DynamicImage, ImageFormat};
 use rquest::header::HeaderMap;
 
-pub struct LcgTileDescramble;
+pub(crate) struct LcgTileDescramble;
 
 impl Transform for LcgTileDescramble {
     fn names(&self) -> &'static [&'static str] {

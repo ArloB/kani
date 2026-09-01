@@ -34,7 +34,7 @@ impl SourceRegistry {
         self.slots.remove(&id);
     }
 
-    pub async fn remove_and_shutdown(&self, id: i64, reason: &str) -> bool {
+    pub(crate) async fn remove_and_shutdown(&self, id: i64, reason: &str) -> bool {
         let backend = self.slots.remove(&id).map(|(_, slot)| slot.load_full());
         if let Some(backend) = backend {
             backend.retire_v8(reason).await;
@@ -44,7 +44,7 @@ impl SourceRegistry {
         }
     }
 
-    pub async fn shutdown_all(&self, reason: &str) {
+    pub(crate) async fn shutdown_all(&self, reason: &str) {
         let backends: Vec<_> = self
             .slots
             .iter()

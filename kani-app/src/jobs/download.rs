@@ -166,7 +166,7 @@ pub(crate) async fn run_chapter_download(
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ChapterDownloadJob {
+pub(crate) struct ChapterDownloadJob {
     id: JobId,
     pub chapter_id: i64,
     pub manga_id: i64,
@@ -405,7 +405,7 @@ impl BackgroundJob for MangaDownloadAllJob {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SourceScanJob {
+pub(crate) struct SourceScanJob {
     id: JobId,
     pub manga_id: i64,
     pub manga_title: String,
@@ -458,7 +458,7 @@ impl BackgroundJob for SourceScanJob {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LibraryScanJob {
+pub(crate) struct LibraryScanJob {
     id: JobId,
     pub manga_ids: Vec<i64>,
     pub trigger: String,

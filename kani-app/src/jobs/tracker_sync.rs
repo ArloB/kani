@@ -5,16 +5,16 @@ use crate::jobs::error::JobError;
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
 /// Default per-token spacing; provider `Retry-After` extends it dynamically.
-pub const MIN_TOKEN_SPACING: Duration = Duration::from_millis(700);
+pub(crate) const MIN_TOKEN_SPACING: Duration = Duration::from_millis(700);
 
 /// Maximum number of stale entries processed in a single run, to bound work.
-pub const MAX_ENTRIES_PER_RUN: usize = 200;
+pub(crate) const MAX_ENTRIES_PER_RUN: usize = 200;
 
 /// Per-token call throttle: enforces a minimum spacing between calls and honours a
 /// rate-limit backoff window (driven by HTTP 429 `Retry-After`). Pure and clock-injected
 /// so it can be unit-tested without sleeping.
 #[derive(Default)]
-pub struct TokenThrottle {
+pub(crate) struct TokenThrottle {
     last_call: HashMap<i64, Instant>,
     backoff_until: HashMap<i64, Instant>,
 }
@@ -22,7 +22,12 @@ pub struct TokenThrottle {
 impl TokenThrottle {
     /// How long to wait before the next call for `token_key`, given `now` and the minimum
     /// spacing. Returns the larger of the spacing gap and any active backoff window.
-    pub fn delay_before(&self, token_key: i64, now: Instant, min_spacing: Duration) -> Duration {
+    pub(crate) fn delay_before(
+        &self,
+        token_key: i64,
+        now: Instant,
+        min_spacing: Duration,
+    ) -> Duration {
         let mut wait = Duration::ZERO;
         if let Some(&last) = self.last_call.get(&token_key) {
             let next_allowed = last + min_spacing;
@@ -38,12 +43,17 @@ impl TokenThrottle {
         wait
     }
 
-    pub fn record_call(&mut self, token_key: i64, at: Instant) {
+    pub(crate) fn record_call(&mut self, token_key: i64, at: Instant) {
         self.last_call.insert(token_key, at);
     }
 
     /// Register a rate-limit backoff for `token_key` lasting `retry_after` from `at`.
-    pub fn record_rate_limited(&mut self, token_key: i64, at: Instant, retry_after: Duration) {
+    pub(crate) fn record_rate_limited(
+        &mut self,
+        token_key: i64,
+        at: Instant,
+        retry_after: Duration,
+    ) {
         self.backoff_until.insert(token_key, at + retry_after);
     }
 }
@@ -61,7 +71,7 @@ pub fn is_stale(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct TrackerSyncJob {
+pub(crate) struct TrackerSyncJob {
     id: JobId,
 }
 

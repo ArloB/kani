@@ -112,7 +112,7 @@ pub struct ChapterSortOptionYaml {
 }
 
 /// Latest extension schema version accepted and emitted by this build.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
@@ -365,7 +365,7 @@ pub enum FieldDef {
 }
 
 impl FieldDef {
-    pub fn expr_str(&self) -> &str {
+    pub(crate) fn expr_str(&self) -> &str {
         match self {
             FieldDef::Expr(e) => e,
             FieldDef::Full { expr, .. } => expr,
@@ -380,7 +380,7 @@ impl FieldDef {
         }
     }
 
-    pub fn as_composite(&self) -> Option<&BTreeMap<String, String>> {
+    pub(crate) fn as_composite(&self) -> Option<&BTreeMap<String, String>> {
         match self {
             FieldDef::Composite(map) => Some(map),
             _ => None,
@@ -647,7 +647,7 @@ pub enum YamlIdEncoding {
 }
 
 impl YamlIdEncoding {
-    pub fn to_ast(self) -> kani_shared::ast::IdEncoding {
+    pub(crate) fn to_ast(self) -> kani_shared::ast::IdEncoding {
         match self {
             YamlIdEncoding::Base64Url => kani_shared::ast::IdEncoding::Base64Url,
             YamlIdEncoding::Base64 => kani_shared::ast::IdEncoding::Base64,

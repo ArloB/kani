@@ -53,7 +53,7 @@ pub fn load(path: &str) -> Result<Har, crate::error::CliError> {
         .map_err(|e| crate::error::CliError::Other(format!("HAR parse error in {path}: {e}")))
 }
 
-pub fn find_entry<'a>(har: &'a Har, url_fragment: &str) -> Option<&'a HarEntry> {
+pub(crate) fn find_entry<'a>(har: &'a Har, url_fragment: &str) -> Option<&'a HarEntry> {
     har.log
         .entries
         .iter()

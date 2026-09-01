@@ -166,7 +166,7 @@ pub enum AppError {
 
 impl AppError {
     /// Short machine-readable code included in JSON error bodies.
-    pub fn error_code(&self) -> &'static str {
+    pub(crate) fn error_code(&self) -> &'static str {
         match self {
             Self::NotFound(_) => "not_found",
             Self::Conflict(_) => "conflict",

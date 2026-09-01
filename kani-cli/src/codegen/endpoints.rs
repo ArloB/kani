@@ -78,7 +78,9 @@ fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
     ))
 }
 
-pub fn emit_browser_script_statics(scripts: &std::collections::BTreeMap<String, String>) -> String {
+pub(crate) fn emit_browser_script_statics(
+    scripts: &std::collections::BTreeMap<String, String>,
+) -> String {
     scripts
         .keys()
         .map(|name| {
@@ -89,7 +91,7 @@ pub fn emit_browser_script_statics(scripts: &std::collections::BTreeMap<String, 
         .join("\n")
 }
 
-pub fn emit_popular(
+pub(crate) fn emit_popular(
     popular: &ValidatedPopular,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -126,7 +128,7 @@ pub fn emit_popular(
     }
 }
 
-pub fn emit_search(
+pub(crate) fn emit_search(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -141,7 +143,7 @@ pub fn emit_search(
     )
 }
 
-pub fn emit_manga_details(
+pub(crate) fn emit_manga_details(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -213,7 +215,7 @@ pub fn emit_manga_details(
     }
 }
 
-pub fn emit_chapter_list(
+pub(crate) fn emit_chapter_list(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -285,7 +287,7 @@ pub fn emit_chapter_list(
     }
 }
 
-pub fn emit_pages(
+pub(crate) fn emit_pages(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,

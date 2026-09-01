@@ -4,7 +4,7 @@ use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 use kani_shared::types::MigrationResult;
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct MigrationJob {
+pub(crate) struct MigrationJob {
     id: JobId,
     pub manga_id: i64,
     pub target_source_id: i64,

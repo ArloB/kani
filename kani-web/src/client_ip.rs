@@ -22,7 +22,7 @@ pub struct TrustedProxies {
 impl TrustedProxies {
     /// Reads `KANI_TRUSTED_PROXIES`: a comma-separated list of addresses or CIDR blocks.
     /// Unparseable entries are returned rather than ignored so the caller can refuse to start.
-    pub fn from_env() -> (Self, Vec<String>) {
+    pub(crate) fn from_env() -> (Self, Vec<String>) {
         match std::env::var("KANI_TRUSTED_PROXIES") {
             Ok(spec) => Self::parse(&spec),
             Err(_) => (Self::default(), Vec::new()),
@@ -67,7 +67,7 @@ impl TrustedProxies {
 /// rather than as a shared bucket. When the peer is trusted, the rightmost `X-Forwarded-For`
 /// entry that is not itself a trusted proxy is the client; anything further left was written by
 /// a hop we do not vouch for.
-pub fn client_ip(
+pub(crate) fn client_ip(
     headers: &HeaderMap,
     peer: Option<IpAddr>,
     trusted: &TrustedProxies,
@@ -162,11 +162,11 @@ fn in_net(ip: IpAddr, net: IpAddr, prefix: u8) -> bool {
 /// the trusted-proxy rules from [`AppState`](crate::state::AppState) so no handler can decide to
 /// believe a header on its own. Extraction never fails.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ClientIp(pub Option<IpAddr>);
+pub(crate) struct ClientIp(pub Option<IpAddr>);
 
 impl ClientIp {
     /// Rendered for storage, with the same sentinel [`client_ip_string`] uses.
-    pub fn to_key(self) -> String {
+    pub(crate) fn to_key(self) -> String {
         self.0
             .map(|ip| ip.to_string())
             .unwrap_or_else(|| "unknown".to_string())

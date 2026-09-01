@@ -5,7 +5,7 @@ use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedExtension, Val
 use crate::yaml::schema::YamlOffsetType;
 use kani_yaml::{build_blueprint_core, make_fetch_expr};
 
-pub fn emit_blueprint_chain(
+pub(crate) fn emit_blueprint_chain(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     parent_endpoint_name: &str,
@@ -100,7 +100,7 @@ pub fn emit_blueprint_chain(
 }
 
 /// Emit only the `BlueprintBuilder::new(...)...build()` without the `.request()` line.
-pub fn emit_blueprint_chain_no_request(
+pub(crate) fn emit_blueprint_chain_no_request(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     parent_endpoint_name: &str,

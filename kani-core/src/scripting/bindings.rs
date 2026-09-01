@@ -176,7 +176,7 @@ fn ctx_capture_page_payload(
         .map_err(|error| Box::<rhai::EvalAltResult>::from(error.to_string()))
 }
 
-pub fn register_hook_bindings(engine: &mut Engine) {
+pub(crate) fn register_hook_bindings(engine: &mut Engine) {
     engine
         .register_type_with_name::<ScriptableRequest>("Request")
         .register_get("method", req_get_method)

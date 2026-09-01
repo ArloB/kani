@@ -38,7 +38,7 @@ impl From<kani_yaml::YamlError> for CliError {
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-pub fn report_dsl_errors(
+pub(crate) fn report_dsl_errors(
     filename: &str,
     source: &str,
     field_path: Option<&str>,
@@ -67,7 +67,7 @@ pub fn report_dsl_errors(
     }
 }
 
-pub fn report_custom_error(
+pub(crate) fn report_custom_error(
     filename: &str,
     source: &str,
     message: &str,

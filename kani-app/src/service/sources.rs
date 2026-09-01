@@ -850,7 +850,7 @@ impl AppService {
         }
     }
 
-    pub async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
+    pub(crate) async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
         let ms = elapsed_ms as f64;
         let _ = sqlx::query(
             r#"INSERT INTO source_health (source_id, last_success_at, consecutive_error_count, avg_response_ms)
@@ -869,7 +869,7 @@ impl AppService {
         .await;
     }
 
-    pub async fn record_source_error(&self, source_id: i64) {
+    pub(crate) async fn record_source_error(&self, source_id: i64) {
         let _ = sqlx::query(
             r#"INSERT INTO source_health (source_id, last_error_at, consecutive_error_count)
                VALUES (?, datetime('now'), 1)

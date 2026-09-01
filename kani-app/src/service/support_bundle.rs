@@ -7,12 +7,12 @@ use crate::service::AppService;
 const REDACTED: &str = "***REDACTED***";
 const SECRET_MARKERS: [&str; 5] = ["secret", "token", "password", "key", "dsn"];
 
-pub fn is_secret_field(name: &str) -> bool {
+pub(crate) fn is_secret_field(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     SECRET_MARKERS.iter().any(|m| lower.contains(m))
 }
 
-pub fn redact(value: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn redact(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.iter()
@@ -32,7 +32,7 @@ pub fn redact(value: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-pub fn bundle_filename(now: time::OffsetDateTime) -> String {
+pub(crate) fn bundle_filename(now: time::OffsetDateTime) -> String {
     format!(
         "kani-support-{:04}{:02}{:02}-{:02}{:02}{:02}.zip",
         now.year(),

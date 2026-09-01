@@ -51,7 +51,7 @@ unsafe impl Send for SafeHtml {}
 unsafe impl Sync for SafeHtml {}
 
 impl SafeHtml {
-    pub fn parse_document(html: &str) -> Self {
+    pub(crate) fn parse_document(html: &str) -> Self {
         Self(scraper::Html::parse_document(html))
     }
 
@@ -64,7 +64,7 @@ impl SafeHtml {
 pub struct SendHtml(pub Arc<Mutex<SafeHtml>>);
 
 impl SendHtml {
-    pub fn parse_document(html: &str) -> Self {
+    pub(crate) fn parse_document(html: &str) -> Self {
         Self(Arc::new(Mutex::new(SafeHtml::parse_document(html))))
     }
 
@@ -115,7 +115,7 @@ impl AllowedHost {
 use crate::http::SmartClient;
 
 /// Maximum combined HTML, element-list, and JSON handles held by one guest store.
-pub const MAX_HANDLES: usize = 10_000;
+pub(crate) const MAX_HANDLES: usize = 10_000;
 
 /// Per-instance host resources and capability state exposed through WIT imports.
 /// Handle maps own guest-visible resources and are cleared between provider calls.
@@ -162,7 +162,7 @@ pub struct HostState {
 impl StoredNode {
     /// Locks the document, wraps the node as an `ElementRef`, and calls `f`.
     /// Returns an error if the node is not an element or the lock is poisoned.
-    pub fn with_element<T, F>(&self, f: F) -> std::result::Result<T, String>
+    pub(crate) fn with_element<T, F>(&self, f: F) -> std::result::Result<T, String>
     where
         F: FnOnce(scraper::ElementRef) -> std::result::Result<T, String>,
     {
@@ -180,7 +180,7 @@ impl StoredNode {
 
     /// Like [`Self::with_element`] but returns `Ok(None)` when the node is not an element,
     /// so callers that treat that as a non-error can propagate it cleanly.
-    pub fn try_with_element<T, F>(&self, f: F) -> std::result::Result<Option<T>, String>
+    pub(crate) fn try_with_element<T, F>(&self, f: F) -> std::result::Result<Option<T>, String>
     where
         F: FnOnce(scraper::ElementRef) -> std::result::Result<Option<T>, String>,
     {
@@ -269,7 +269,7 @@ impl HostState {
         self.next_doc_handle = 1;
     }
 
-    pub fn charge_io(&mut self) -> std::result::Result<(), String> {
+    pub(crate) fn charge_io(&mut self) -> std::result::Result<(), String> {
         self.io_count += 1;
         if self.io_count > 32 {
             return Err("Extension exceeded maximum HTTP request count".into());
@@ -282,7 +282,7 @@ impl HostState {
 
     /// Returns an error string if the total live handle count is at or above
     /// [`MAX_HANDLES`].
-    pub fn check_handle_capacity(&self) -> std::result::Result<(), String> {
+    pub(crate) fn check_handle_capacity(&self) -> std::result::Result<(), String> {
         let total = self.html_docs.len() + self.html_lists.len() + self.json_docs.len();
         if total >= MAX_HANDLES {
             Err(format!(
@@ -294,17 +294,17 @@ impl HostState {
     }
 
     /// Enforces the `AllowedHost` policy for a given request host string.
-    pub fn check_allowed_host(&self, host: &str) -> std::result::Result<(), String> {
+    pub(crate) fn check_allowed_host(&self, host: &str) -> std::result::Result<(), String> {
         self.allowed_host.allows_host(host)
     }
 
-    pub fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
+    pub(crate) fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
         self.json_docs
             .get(&handle)
             .ok_or_else(|| "Invalid JSON handle".to_string())
     }
 
-    pub fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
+    pub(crate) fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
         self.html_docs
             .get(&handle)
             .ok_or_else(|| "Document not found".to_string())
@@ -312,7 +312,7 @@ impl HostState {
 
     /// Returns a reference to the compiled selector, parsing and caching it on
     /// the first call for a given `selector` string.
-    pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
+    pub(crate) fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
         let cache = self
             .selector_cache
             .get_mut()
@@ -609,6 +609,8 @@ pub mod result_conversions {
     }
 }
 
+/// Reached from other crates only through the `$crate::` path inside
+/// `sources.rs`'s macros, so it must stay `pub` despite no direct caller naming it.
 pub fn ext_error_from_wit(
     e: kani::extension::types::ExtensionError,
 ) -> kani_shared::extension::ExtensionError {

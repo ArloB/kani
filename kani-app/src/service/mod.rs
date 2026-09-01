@@ -1230,19 +1230,19 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn rebuild_email_service(&self) {
+    pub(crate) async fn rebuild_email_service(&self) {
         let settings = self.settings.read().await;
         let svc = email::EmailService::from_settings(&settings);
         *self.email_service.write().await = svc;
     }
 
     /// Returns a clone of the email service if email is enabled and configured.
-    pub async fn mailer(&self) -> Option<email::EmailService> {
+    pub(crate) async fn mailer(&self) -> Option<email::EmailService> {
         self.email_service.read().await.clone()
     }
 
     /// Spawns a background task to send an email. Logs errors but never fails the caller.
-    pub fn send_email_bg(&self, to: String, subject: String, html: String) {
+    pub(crate) fn send_email_bg(&self, to: String, subject: String, html: String) {
         let svc = self.email_service.clone();
         tokio::spawn(async move {
             let guard = svc.read().await;
@@ -1459,7 +1459,7 @@ impl AppService {
 
     /// Schedules a cover download retry for the given manga ID.
     /// Called from library operations when a cover download fails.
-    pub async fn schedule_cover_retry(&self, manga_id: MangaId) {
+    pub(crate) async fn schedule_cover_retry(&self, manga_id: MangaId) {
         self.cover_retry_queue.lock().await.insert(manga_id);
     }
 

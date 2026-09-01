@@ -7,7 +7,7 @@ static START: LazyLock<Instant> = LazyLock::new(Instant::now);
 static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
 
 #[derive(Debug, Clone)]
-pub struct BuildInfo {
+pub(crate) struct BuildInfo {
     pub version: String,
     pub git_sha: String,
 }

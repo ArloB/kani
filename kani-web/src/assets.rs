@@ -160,7 +160,7 @@ fn hex16(bytes: &[u8]) -> String {
 /// Caching headers are not set here: `cache_control_middleware` already keys on
 /// the `/js/` and `/css/` prefixes, and duplicating that would let the two
 /// drift.
-pub fn respond(asset: Option<Asset>, request_headers: &HeaderMap) -> Response {
+pub(crate) fn respond(asset: Option<Asset>, request_headers: &HeaderMap) -> Response {
     let Some(asset) = asset else {
         return StatusCode::NOT_FOUND.into_response();
     };

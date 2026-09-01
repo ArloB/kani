@@ -106,7 +106,7 @@ impl JobRegistry {
 }
 
 /// Queue entry ordered by descending priority and then oldest submission first.
-pub struct QueuedJob {
+pub(crate) struct QueuedJob {
     pub priority: JobPriority,
     pub created_at: Instant,
     pub source_id: Option<i64>,
@@ -1148,7 +1148,10 @@ impl JobManager {
 
     /// Trims completed, failed, and cancelled jobs to the newest `max_history`.
     /// Runs after every job completes, so the `jobs` table cannot grow without bound.
-    pub async fn prune_history(pool: &sqlx::sqlite::SqlitePool, max_history: usize) -> Result<u64> {
+    pub(crate) async fn prune_history(
+        pool: &sqlx::sqlite::SqlitePool,
+        max_history: usize,
+    ) -> Result<u64> {
         let max = max_history as i64;
         let result = sqlx::query!(
             "DELETE FROM jobs \
@@ -1170,7 +1173,7 @@ impl JobManager {
         Self::drain_active(&self.active, &self.completion_tx, timeout).await;
     }
 
-    pub fn active_count(&self) -> usize {
+    pub(crate) fn active_count(&self) -> usize {
         self.active.len()
     }
 
@@ -1194,11 +1197,11 @@ impl JobManager {
             .map(|cb| cb.state.to_string())
     }
 
-    pub fn invalidate_source_semaphore(&self, source_id: i64) {
+    pub(crate) fn invalidate_source_semaphore(&self, source_id: i64) {
         self.per_source_semaphores.remove(&source_id);
     }
 
-    pub fn invalidate_all_source_semaphores(&self) {
+    pub(crate) fn invalidate_all_source_semaphores(&self) {
         self.per_source_semaphores.clear();
     }
 }

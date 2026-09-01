@@ -125,7 +125,7 @@ const MAX_TACHI_BYTES: usize = 50 * 1024 * 1024;
 
 /// Extractor that authenticates by bearer token or session and enforces `P` before dispatch.
 /// An invalid explicit bearer token never falls back to session authentication.
-pub struct AuthGuard<P: AuthRequirement>(pub crate::auth::User, pub PhantomData<P>);
+pub(crate) struct AuthGuard<P: AuthRequirement>(pub crate::auth::User, pub PhantomData<P>);
 
 impl<S, P> axum::extract::FromRequestParts<S> for AuthGuard<P>
 where

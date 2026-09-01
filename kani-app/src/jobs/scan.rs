@@ -2,7 +2,7 @@ use crate::jobs::error::JobError;
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct AutoScanJob {
+pub(crate) struct AutoScanJob {
     id: JobId,
 }
 

@@ -8,17 +8,17 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub const MAX_EVAL_ITERATIONS: u32 = 100_000;
-pub const MAX_EVAL_DEPTH: u32 = 50;
-pub const MAX_LIST_SIZE: usize = 10_000;
+pub(crate) const MAX_EVAL_ITERATIONS: u32 = 100_000;
+pub(crate) const MAX_EVAL_DEPTH: u32 = 50;
+pub(crate) const MAX_LIST_SIZE: usize = 10_000;
 
 /// Marker on an evaluator error that carries an HTTP status the caller should
 /// classify (`__http_status__:429:120`). Canonical definition lives in
 /// `kani_shared` so both backends decode it identically; re-exported here for
 /// the evaluator that produces it.
 pub use kani_shared::extension::HTTP_STATUS_ERR_PREFIX;
-pub const MAX_STRING_LENGTH: usize = 1_000_000;
-pub const ARENA_ENV_MARKER: &str = "\0kani:arena";
+pub(crate) const MAX_STRING_LENGTH: usize = 1_000_000;
+pub(crate) const ARENA_ENV_MARKER: &str = "\0kani:arena";
 
 /// Overridable ceilings for the declarative evaluator. Production uses
 /// [`EvalLimits::default`] (the `MAX_*` consts); tests shrink them via
@@ -54,7 +54,7 @@ impl EvalBudget {
         Self::with_limits(EvalLimits::default())
     }
 
-    pub fn with_limits(limits: EvalLimits) -> Self {
+    pub(crate) fn with_limits(limits: EvalLimits) -> Self {
         Self {
             steps_remaining: AtomicU32::new(limits.max_iterations),
             depth_current: AtomicU32::new(0),
@@ -68,7 +68,7 @@ impl EvalBudget {
         self.depth_current.store(0, Ordering::Relaxed);
     }
 
-    pub fn charge_step(&self) -> Result<(), String> {
+    pub(crate) fn charge_step(&self) -> Result<(), String> {
         let prev = self
             .steps_remaining
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
@@ -84,7 +84,7 @@ impl EvalBudget {
         }
     }
 
-    pub fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
+    pub(crate) fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
         let d = self.depth_current.fetch_add(1, Ordering::Relaxed);
         if d >= self.limits.max_depth {
             self.depth_current.fetch_sub(1, Ordering::Relaxed);
@@ -98,7 +98,7 @@ impl EvalBudget {
 }
 
 #[derive(Debug)]
-pub struct DepthGuard {
+pub(crate) struct DepthGuard {
     budget: Arc<EvalBudget>,
 }
 
@@ -123,7 +123,7 @@ pub enum Value {
     Json(serde_json::Value),
 }
 
-pub fn eval_flat_arena(
+pub(crate) fn eval_flat_arena(
     arena: &ExprArena,
     root: kani_shared::ast::ExprId,
     env: &Env,
@@ -251,7 +251,7 @@ impl Value {
         }
     }
 
-    pub fn into_str(self, op: &str) -> Result<String, String> {
+    pub(crate) fn into_str(self, op: &str) -> Result<String, String> {
         match self {
             Value::Str(s) => Ok(s),
             _ => Err(format!("{}: expected string value", op)),
@@ -260,7 +260,7 @@ impl Value {
 
     /// Apply `f` to the inner string, propagating `Null` as `Null`.
     /// Returns `Err` if the value is neither `Str` nor `Null`.
-    pub fn map_str<F>(self, op: &str, f: F) -> Result<Value, String>
+    pub(crate) fn map_str<F>(self, op: &str, f: F) -> Result<Value, String>
     where
         F: FnOnce(String) -> Result<Value, String>,
     {
@@ -271,7 +271,7 @@ impl Value {
         }
     }
 
-    pub fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
+    pub(crate) fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
         match self {
             Value::List(v) => Ok(v),
             Value::Json(serde_json::Value::Array(arr)) => {
@@ -281,7 +281,7 @@ impl Value {
         }
     }
 
-    pub fn into_json(self, op: &str) -> Result<serde_json::Value, String> {
+    pub(crate) fn into_json(self, op: &str) -> Result<serde_json::Value, String> {
         match self {
             Value::Json(v) => Ok(v),
             Value::Null => Ok(serde_json::Value::Null),
@@ -290,7 +290,7 @@ impl Value {
     }
 
     /// Returns `Ok(Some(StoredNode))` for an HTML element, `Ok(None)` for Null, or an error otherwise.
-    pub fn into_html_element(self, op: &str) -> Result<Option<StoredNode>, String> {
+    pub(crate) fn into_html_element(self, op: &str) -> Result<Option<StoredNode>, String> {
         match self {
             Value::HtmlElement { doc, node_id } => Ok(Some(StoredNode { doc, node_id })),
             Value::Null => Ok(None),
@@ -348,7 +348,7 @@ impl Env {
 ///
 /// `recurse` takes `(&'a Expr, Env)` so callers can move `env` on the final call instead of
 /// always cloning. With the Arc-backed `Env`, all other clones are O(1) regardless.
-pub async fn eval_common_expr<'a, F>(
+pub(crate) async fn eval_common_expr<'a, F>(
     expr: &'a Expr,
     env: Env,
     recurse: &F,
@@ -1041,7 +1041,7 @@ fn compare_sort_key(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 
 /// Fetch a URL and return the response body as a String.
-pub async fn fetch_body(
+pub(crate) async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
@@ -1259,7 +1259,7 @@ fn expr_has_fetch(expr: &kani_shared::ast::Expr) -> bool {
     }
 }
 
-pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
+pub(crate) fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
     bp.fields.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.scalars.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.bindings.iter().any(|b| expr_has_fetch(&b.expr))
@@ -1268,7 +1268,7 @@ pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
 /// Charges the io/host-allowlist budget and builds a `RequestDef` without sending it. Only
 /// valid when `state.hook_registry` is `None`, since hooks can retry/rewrite a request after
 /// seeing the response — see [`send_prepared_request`].
-pub fn charge_fetch_request(
+pub(crate) fn charge_fetch_request(
     state: &mut crate::wasm::HostState,
     url: &str,
     method: &kani_shared::ast::HttpMethod,
@@ -1298,7 +1298,7 @@ pub fn charge_fetch_request(
 /// `Clone`-cheap `SmartClient` instead of `&mut HostState` so callers can run several of these
 /// concurrently; the per-domain rate limiter/semaphore in `SmartClient::send_request` still
 /// applies. Mirrors `fetch_body`'s no-hooks path exactly.
-pub async fn send_prepared_request(
+pub(crate) async fn send_prepared_request(
     client: crate::http::SmartClient,
     req: kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
@@ -1337,7 +1337,7 @@ pub async fn send_prepared_request(
     String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string())
 }
 
-pub async fn eval_fetch_field(
+pub(crate) async fn eval_fetch_field(
     state: &mut crate::wasm::HostState,
     url: &str,
     method: &kani_shared::ast::HttpMethod,
@@ -1455,7 +1455,7 @@ fn numeric_op(op: &Op, l: Value, r: Value) -> Result<Value, String> {
 /// A `None` value means the expression produced nothing: optional fields record
 /// that as JSON null, required fields are an error naming the field. Shared by the
 /// HTML and JSON evaluators so both enforce the same rule.
-pub fn insert_field_value(
+pub(crate) fn insert_field_value(
     row: &mut serde_json::Map<String, serde_json::Value>,
     field_name: &str,
     optional: bool,
@@ -1485,7 +1485,7 @@ pub fn insert_field_value(
 /// A header whose key or value evaluated to a non-string is a blueprint error
 /// rather than something to stringify, because the coercion would be silent and
 /// the resulting request would not be the one the extension described.
-pub fn header_pair(key: Value, value: Value) -> Result<(String, String), String> {
+pub(crate) fn header_pair(key: Value, value: Value) -> Result<(String, String), String> {
     match (key, value) {
         (Value::Str(k), Value::Str(v)) => Ok((k, v)),
         _ => Err("Fetch: header keys and values must be strings".into()),

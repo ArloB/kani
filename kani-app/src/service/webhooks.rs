@@ -155,7 +155,7 @@ pub struct UpdateWebhookBody {
 impl WebhookService {
     /// Build the delivery envelope and resolve the webhooks that should receive it.
     /// Returns `(event_type, serialized_body, applicable_webhooks)`.
-    pub async fn applicable_deliveries(
+    pub(crate) async fn applicable_deliveries(
         &self,
         payload: &WebhookPayload,
     ) -> Result<(String, String, Vec<WebhookRow>)> {
@@ -325,7 +325,7 @@ impl WebhookService {
         Ok(rows)
     }
 
-    pub async fn get_by_id(&self, id: i64) -> Result<WebhookRow> {
+    pub(crate) async fn get_by_id(&self, id: i64) -> Result<WebhookRow> {
         sqlx::query_as!(
             WebhookRow,
             r#"SELECT id, url, secret, events, enabled AS "enabled: bool", created_at

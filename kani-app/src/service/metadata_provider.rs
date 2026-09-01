@@ -59,7 +59,11 @@ impl MetadataProviderRegistry {
             .collect()
     }
 
-    pub async fn fetch_from(&self, provider_id: &str, title: &str) -> Result<Option<FullMetadata>> {
+    pub(crate) async fn fetch_from(
+        &self,
+        provider_id: &str,
+        title: &str,
+    ) -> Result<Option<FullMetadata>> {
         let provider = self
             .providers
             .get(provider_id)

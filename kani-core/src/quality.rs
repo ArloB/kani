@@ -5,7 +5,7 @@ use crate::manifest::ChapterManifest;
 /// dHash: grayscale, resize to 9x8, compare each pixel with its right neighbour.
 /// 64 comparisons produce 64 bits. Resilient to re-encoding and mild rescaling,
 /// which is exactly what a source silently re-uploading a chapter does.
-pub fn perceptual_hash_page(decoded: &image::DynamicImage) -> u64 {
+pub(crate) fn perceptual_hash_page(decoded: &image::DynamicImage) -> u64 {
     use image::imageops::FilterType;
 
     let small = decoded
@@ -58,7 +58,7 @@ pub enum ColourProfile {
 /// three-page sample of first/middle/last, a colour opener and a colour closer
 /// give two of three — which is an accented chapter, not a colour release, and
 /// a majority threshold would get it wrong.
-pub fn colour_profile_from_flags(flags: impl IntoIterator<Item = bool>) -> ColourProfile {
+pub(crate) fn colour_profile_from_flags(flags: impl IntoIterator<Item = bool>) -> ColourProfile {
     let known: Vec<bool> = flags.into_iter().collect();
     if known.is_empty() {
         return ColourProfile::Unknown;
@@ -81,7 +81,7 @@ pub fn colour_profile_from_flags(flags: impl IntoIterator<Item = bool>) -> Colou
 /// answer `Unknown` for them. With the decoded pixels in hand the question is
 /// answerable: sample a bounded grid and count pixels whose channels diverge by
 /// more than chroma subsampling and ringing produce on grey input.
-pub fn is_colour_image(decoded: &image::DynamicImage) -> bool {
+pub(crate) fn is_colour_image(decoded: &image::DynamicImage) -> bool {
     use image::imageops::FilterType;
 
     const CHANNEL_SPREAD: u8 = 24;
@@ -122,7 +122,7 @@ pub struct QualityScore {
     pub colour: ColourProfile,
 }
 
-pub fn median_of(mut values: Vec<u8>) -> Option<u8> {
+pub(crate) fn median_of(mut values: Vec<u8>) -> Option<u8> {
     if values.is_empty() {
         return None;
     }

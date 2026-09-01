@@ -274,7 +274,7 @@ pub fn emit_expr(expr: &Expr) -> String {
 }
 
 /// Emit a `BlueprintBuilder::new(...)...build()` expression from a Blueprint struct.
-pub fn emit_blueprint_from_struct(bp: &Blueprint) -> String {
+pub(crate) fn emit_blueprint_from_struct(bp: &Blueprint) -> String {
     let mut lines = Vec::new();
     lines.push(format!(
         "BlueprintBuilder::new(\"{}\")",

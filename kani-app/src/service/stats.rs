@@ -163,7 +163,7 @@ impl AppService {
         })
     }
 
-    pub async fn capture_storage_snapshot(&self) -> crate::error::Result<()> {
+    pub(crate) async fn capture_storage_snapshot(&self) -> crate::error::Result<()> {
         let library_path = self.settings.read().await.library_path.clone();
 
         let library_used = dir_size_bytes(&library_path).await;
