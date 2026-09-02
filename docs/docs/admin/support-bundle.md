@@ -48,4 +48,3 @@ First search the [existing Kani issues](https://github.com/ArloB/kani/issues). I
 not been reported, follow the repository's current support convention: open a
 [GitHub Discussion](https://github.com/ArloB/kani/discussions), describe how to reproduce the
 problem, and attach the reviewed bundle. The team can direct confirmed bugs into an issue.
-
