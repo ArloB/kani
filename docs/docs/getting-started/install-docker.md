@@ -2,19 +2,33 @@
 
 ## Choose a deployment source
 
-The repository includes a supported Dockerfile and Compose file. Building a pinned release tag
-locally does not depend on a registry image:
+The default Compose file pulls the published image:
 
 ```bash
 git clone https://github.com/ArloB/kani.git
 cd kani
+docker compose pull
+docker compose up -d
+```
+
+The release pipeline builds a signed, multi-arch (`amd64`/`arm64`) image and publishes it to
+`ghcr.io/arlob/kani`, tagged with its version and, only for an actual release (never a
+prerelease), `latest`. Verify a pulled image's signature before trusting it in production:
+
+```bash
+cosign verify ghcr.io/arlob/kani:latest \
+  --certificate-identity-regexp "^https://github.com/ArloB/kani/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+To build from source instead — required before `v1.0.0` exists and `latest` first resolves, or
+to run an unreleased change — replace the `image:` line in `docker-compose.yml` with the
+commented-out `build:` block right above it, then:
+
+```bash
 git checkout <release-tag>
 docker compose up --build -d
 ```
-
-If a release publishes a container image, use the exact image coordinates and verification
-instructions from that GitHub Release. Do not infer a registry name or assume that a moving
-`latest` tag exists.
 
 ## Compose configuration
 
@@ -23,7 +37,7 @@ The essential shape of the included Compose service is:
 ```yaml
 services:
   kani:
-    build: .
+    image: ghcr.io/arlob/kani:latest
     ports:
       - "8242:8242"
     volumes:
@@ -35,10 +49,9 @@ services:
     restart: unless-stopped
 ```
 
-Start it and follow the logs:
+Follow the logs after starting it:
 
 ```bash
-docker compose up --build -d
 docker compose logs -f kani
 ```
 
@@ -49,9 +62,16 @@ docker compose logs -f kani
 | `/data` | SQLite database, installed extensions, browser profiles, and generated key files |
 | `/library` | Covers, downloaded chapter data, and archives |
 
-Both mounts must be writable by UID and GID 1000. `/data/secret.key` protects stored credentials,
-and `/data/proxy.key` signs image-proxy URLs. Losing either key can make the corresponding stored
-data unusable, so back them up with `kani.db`.
+Both mounts must be writable by UID and GID 1000, which the image handles for you automatically:
+the container starts as root, chowns `/data` and `/library`, then drops to the unprivileged `kani`
+user before running Kani itself — no action needed even on a bind mount Docker just created. This
+is not a LinuxServer.io-style image, though: there is no `PUID`/`PGID` remapping, and setting those
+variables has no effect. If you bind-mount a `/library` that already holds files owned by another
+user (migrating an existing collection, for example), chown it yourself first — the automatic
+chown only touches the mount roots, not recursively, so startup stays fast with a large library.
+
+`/data/secret.key` protects stored credentials, and `/data/proxy.key` signs image-proxy URLs.
+Losing either key can make the corresponding stored data unusable, so back them up with `kani.db`.
 
 Do not put the SQLite database on NFS, SMB, or another filesystem that does not provide SQLite's
 required locking semantics. The library may live on a separate large disk.
@@ -117,7 +137,14 @@ Exit code 0 is a clean shutdown. Exit code 42 requests a supervised restart, whi
 
 ## Upgrade
 
-Take a backup, fetch the intended release, review its notes, then rebuild the container:
+Take a backup, review the intended release's notes, then pull and restart:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Building from source instead: fetch the tag and rebuild —
 
 ```bash
 git fetch --tags

@@ -1,7 +1,20 @@
 #!/bin/sh
 
+# Started as root so a freshly host-created bind mount can be chowned; a
+# non-recursive chown so a restart with a large existing /library stays fast.
+# Not root when an operator has already pinned a non-root user (e.g. a
+# Kubernetes runAsNonRoot policy) -- nothing to fix in that case.
+if [ "$(id -u)" = "0" ]; then
+    chown kani:kani /data /library
+    # No --reset-env: that would wipe KANI_* / RUST_LOG and everything else
+    # docker-compose's `environment:` block or `ENV` set, which kani-web needs.
+    RUN_AS="setpriv --reuid=kani --regid=kani --clear-groups"
+else
+    RUN_AS=""
+fi
+
 while true; do
-    if /app/kani-web "$@"; then
+    if $RUN_AS /app/kani-web "$@"; then
         EXIT_CODE=0
     else
         EXIT_CODE=$?

@@ -6,6 +6,16 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-09-03
+
+### Fixed
+
+- The container failed to boot against a freshly created bind mount for `/data` or `/library`:
+  Docker creates the host directory owned by root, and the `kani` user (a fixed UID/GID 1000,
+  with no `PUID`/`PGID` remapping) couldn't write to it. The container now starts as root,
+  chowns both mount roots, and drops to the unprivileged `kani` user via `setpriv` before
+  running Kani itself.
+
 ## [1.0.0-rc.1] - 2026-09-02
 
 Release candidate. Soaking as the daily driver before tagging `v1.0.0`.

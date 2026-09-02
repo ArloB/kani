@@ -77,10 +77,15 @@ RUN chmod +x ./entrypoint.sh
 
 # /data holds the database and WASM extensions.
 # /library is a separate mount point for the manga image library — it can be
-# a bind-mounted path on a different drive/filesystem on the host.
+# a bind-mounted path on a different drive/filesystem on the host. Chowned
+# here so a fresh named volume (which Docker seeds from the image at this
+# path) starts out already correct; a bind mount is host-owned regardless,
+# which is what entrypoint.sh's runtime chown handles.
 RUN mkdir -p /data /library && chown kani:kani /data /library
 
-USER kani
+# No USER here: the container starts as root so entrypoint.sh can chown a
+# freshly created bind mount, then drops to the unprivileged `kani` user via
+# setpriv before running kani-web. kani-web itself never runs as root.
 
 # Run from /data so that relative paths in the database (./library, ./wasm_sources)
 # and the SQLite file (kani.db) all land inside the mounted volume.
