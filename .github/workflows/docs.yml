@@ -36,7 +36,7 @@ jobs:
         run: cd docs && mkdocs build --strict
 
       - name: Markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@v19
+        uses: DavidAnson/markdownlint-cli2-action@v24
         with:
           globs: "docs/**/*.md"
           config: ".markdownlint.yml"
