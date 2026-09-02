@@ -98,7 +98,7 @@ jobs:
         uses: bnjbvr/cargo-machete@main
 
       - name: Restore asset toolchain
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: tools-cache
         with:
           # esbuild and the Tailwind CLI, plus the vendored JS and fonts they
@@ -111,7 +111,7 @@ jobs:
           key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
 
       - name: Restore kani-cli binary
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: lint-kani-cli-cache
         if: steps.tools-cache.outputs.cache-hit != 'true'
         with:
@@ -133,7 +133,7 @@ jobs:
 
       # Never cache a partially populated tool directory after a failed setup.
       - name: Save asset toolchain
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: success() && steps.tools-cache.outputs.cache-hit != 'true'
         with:
           path: |
@@ -194,7 +194,7 @@ jobs:
         run: test -f "$HOME/.cargo/bin/cargo-sqlx" || cargo binstall sqlx-cli --no-confirm --no-symlinks --force
 
       - name: Restore kani-cli binary
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: kani-cli-cache
         with:
           path: target/release/kani-cli
@@ -205,14 +205,14 @@ jobs:
         run: cargo build --release -p kani-cli
 
       - name: Save kani-cli binary
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: target/release/kani-cli
           key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
 
       - name: Restore WASM extensions
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: wasm-cache
         with:
           path: wasm_sources/
@@ -223,7 +223,7 @@ jobs:
         run: ./target/release/kani-cli build --dev
 
       - name: Save WASM extensions
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: wasm_sources/
@@ -301,7 +301,7 @@ jobs:
       # every run otherwise. There is no requirements file for setup-python's
       # own cache to key on, so cache the wheel directory directly.
       - name: Cache pip downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-mkdocs-material
