@@ -7,6 +7,10 @@
 Kani is a self-hosted manga library server written in Rust with a WebAssembly extension system.
 Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/).
 
+> **You are looking at `develop`,** the default branch and the integration line for approved work.
+> It is ahead of the latest release and may contain unreleased changes. `main` tracks releases
+> only. To run a released version, use a tagged image or check out a release tag.
+
 <!--screenshot: docs/screenshots/library.png — library grid view with category tabs and filters-->
 <!--screenshot: docs/screenshots/reader.png — chapter reader in scroll mode-->
 
@@ -198,7 +202,8 @@ cache before it reaches CI, provided `sqlx-cli` is installed (`cargo binstall sq
 
 Branch from `develop` (`git checkout -b feature/<name> develop`) and open a PR into `develop`. Keep
 each branch focused on one feature or a closely related set of changes. Update `main` from
-`develop` only for releases.
+`develop` only for releases. `develop` is the default branch, so a new pull request targets it
+without needing an explicit base.
 
 ---
 
