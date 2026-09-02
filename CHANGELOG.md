@@ -6,6 +6,10 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-09-02
+
+Release candidate. Soaking as the daily driver before tagging `v1.0.0`.
+
 ### Removed
 
 - Kani no longer runs its own browser. Browser capture happens in the configured solver, so the
