@@ -176,7 +176,7 @@ pub(crate) fn emit_route_format(route: &str, base_url_expr: &str) -> String {
         }
     }
 
-    let mut args = vec![format!("{base_url_expr}")];
+    let mut args = vec![base_url_expr.to_string()];
     args.extend(vars);
     format!("format!(\"{{}}{fmt}\", {})", args.join(", "))
 }
