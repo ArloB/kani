@@ -209,6 +209,29 @@ or per-token throttle behavior changes.
 
 ## Delivery workflows
 
+### `dist-workspace.toml` can reference a workflow fragment with no `uses:` site
+
+**Constraint.** `github-build-setup = "fragments/build-setup.yml"` in `dist-workspace.toml` has
+`cargo-dist` read that file directly as an asset when it generates or validates `release.yml`
+(the `dist generate --check` job in `ci.yml`). A grep for `uses:` across `.github/workflows/`
+does not find this reference, because it is consumed as a config-key file path, not invoked
+through GitHub Actions' own reference syntax.
+
+**Failure signature.** `dist generate --check` fails with `failed to load github-build-setup
+file … No such file or directory`, on a file that has zero conventional workflow references and
+looks safe to delete by every ordinary check.
+
+**Consequence.** `.github/workflows/fragments/build-setup.yml` was deleted as dead CI config
+during the 2026-08/09 waste sweep on the (true but incomplete) claim that it had no `uses:`
+reference from any workflow. Restored once CI caught it on the next PR.
+
+**Enforcement.** Before deleting anything under `.github/workflows/fragments/`, grep
+`dist-workspace.toml` for its filename in addition to grepping workflows for `uses:`, and run
+`dist generate --check` locally.
+
+**Revalidate when.** `dist-workspace.toml`'s `github-build-setup` key changes, or the fragment
+directory gains a second consumer.
+
 ### Content-hashed bundle output accumulates unless the directory is cleared
 
 **Constraint.** `build_js` clears `static/js/dist` before invoking esbuild. The bundler names
