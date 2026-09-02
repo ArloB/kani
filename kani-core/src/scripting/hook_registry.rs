@@ -92,7 +92,7 @@ impl HookRegistry {
         })
     }
 
-    pub fn run_pre_request(
+    pub(crate) fn run_pre_request(
         &self,
         req: &mut ScriptableRequest,
         ctx: ScriptableCtx,
@@ -127,7 +127,7 @@ impl HookRegistry {
         }))
     }
 
-    pub fn run_on_status(
+    pub(crate) fn run_on_status(
         &self,
         req: &ScriptableRequest,
         resp: &ScriptableResponse,
@@ -187,6 +187,7 @@ mod tests {
             cache_namespace: "test".to_string(),
             prefs: HashMap::new(),
             v8_process: None,
+            http: None,
             browser_scripts: None,
             browser_profile_key: None,
         }

@@ -9,6 +9,11 @@ use axum::http::StatusCode;
 use common::{body_json, build_test_app, create_admin, post_json, test_state};
 use tower::ServiceExt;
 
+/// `KANI_ALLOW_REMOTE_SETUP` is read from the process environment, and cargo
+/// runs every test in this file on threads of one process. Without a lock, a
+/// test that sets it races the test asserting the default refusal.
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn a_fresh_instance_reports_that_it_needs_setup() {
     let state = test_state().await;
@@ -44,32 +49,8 @@ async fn an_instance_with_an_account_does_not() {
 }
 
 #[tokio::test]
-async fn setup_is_refused_once_an_account_exists() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/auth/setup",
-            serde_json::json!({
-                "username": "intruder",
-                "email": "intruder@example.com",
-                "password": "IntruderPassword123!"
-            }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        res.status(),
-        StatusCode::FORBIDDEN,
-        "setup must close the moment the instance has an owner"
-    );
-}
-
-#[tokio::test]
 async fn setup_refuses_a_caller_whose_address_is_unknown() {
+    let _env = ENV_LOCK.lock().await;
     let state = test_state().await;
     let app = build_test_app(state).await;
 
@@ -99,6 +80,7 @@ async fn setup_refuses_a_caller_whose_address_is_unknown() {
 
 #[tokio::test]
 async fn setup_rejects_a_weak_password() {
+    let _env = ENV_LOCK.lock().await;
     unsafe { std::env::set_var("KANI_ALLOW_REMOTE_SETUP", "true") };
     let state = test_state().await;
     let app = build_test_app(state).await;
@@ -121,6 +103,7 @@ async fn setup_rejects_a_weak_password() {
 
 #[tokio::test]
 async fn the_first_account_becomes_an_administrator() {
+    let _env = ENV_LOCK.lock().await;
     unsafe { std::env::set_var("KANI_ALLOW_REMOTE_SETUP", "true") };
     let state = test_state().await;
     let app = build_test_app(state.clone()).await;

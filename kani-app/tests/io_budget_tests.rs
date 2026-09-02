@@ -62,6 +62,7 @@ fn base_endpoint(container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpo
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     }
 }
 

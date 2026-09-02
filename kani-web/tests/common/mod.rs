@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, dead_code)]
 
+pub mod routes;
+
 use axum::{Router, body::Body, http::Request};
 use axum_login::{
     AuthManagerLayerBuilder,
@@ -28,13 +30,17 @@ pub async fn test_db() -> sqlx::SqlitePool {
     pool
 }
 
+/// Must match the `csrf_secret` [`test_state`] installs, or the tokens the request
+/// helpers build will not validate.
+const TEST_CSRF_SECRET: [u8; 32] = [0u8; 32];
+
 pub async fn test_state() -> AppState {
     let pool = test_db().await;
     let service = Arc::new(AppService::new_for_test(pool.clone()).await);
     let (_, log_handle) = RingBufferLayer::new(100);
     AppState {
         rate_limiter: Arc::new(AuthRateLimiter::new(pool, service.settings.clone())),
-        csrf_secret: Arc::new([0u8; 32]),
+        csrf_secret: Arc::new(TEST_CSRF_SECRET),
         trusted_proxies: Arc::new(Default::default()),
         public_instance: false,
         service,
@@ -57,15 +63,58 @@ pub async fn build_test_app(state: AppState) -> Router {
     kani_web::app::build_app(state).await
 }
 
+/// A running app with an administrator already signed in, returning the router
+/// and that session's cookie. Four lines of identical preamble opened almost
+/// every REST test; seeding fixtures first needs [`admin_app_with_state`].
+pub async fn admin_app() -> (Router, String) {
+    let (app, cookie, _) = admin_app_with_state().await;
+    (app, cookie)
+}
+
+/// As [`admin_app`], but also hands back the state so a test can read or seed
+/// the database around the request it is making.
+pub async fn admin_app_with_state() -> (Router, String, AppState) {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state.clone()).await;
+    let cookie = login(&app, username, password).await;
+    (app, cookie, state)
+}
+
+pub const ADMIN_USERNAME: &str = "admin";
+pub const ADMIN_PASSWORD: &str = "Password1234!";
+
+/// A second signed-in session for the same administrator, for tests about one
+/// session affecting another.
+pub async fn second_admin_session(app: &Router) -> String {
+    login(app, ADMIN_USERNAME, ADMIN_PASSWORD).await
+}
+
 /// Create an admin user in the given state's DB and return (username, password).
 pub async fn create_admin(state: &AppState) -> (&'static str, &'static str) {
     let backend = AuthBackend::new(state.db.clone());
     let user = backend
-        .create_user("admin", "admin@test.local", "Password1234!")
+        .create_user(ADMIN_USERNAME, "admin@test.local", ADMIN_PASSWORD)
         .await
         .unwrap();
     backend.grant_role(user.id, "admin", None).await.unwrap();
-    ("admin", "Password1234!")
+    (ADMIN_USERNAME, ADMIN_PASSWORD)
+}
+
+/// A user holding no roles at all, so every permission check must refuse them.
+/// `create_user` grants the default `user` role, which carries real permissions;
+/// stripping it is what makes an authorisation test about authorisation.
+pub async fn create_permissionless_user(
+    state: &AppState,
+    username: &'static str,
+) -> (&'static str, &'static str) {
+    let credentials = create_regular_user(state, username).await;
+    sqlx::query("DELETE FROM user_roles WHERE user_id = (SELECT id FROM users WHERE username = ?)")
+        .bind(username)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    credentials
 }
 
 /// Create a standard (non-admin) user and return (username, password).
@@ -132,52 +181,60 @@ pub fn delete_req(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
+/// The CSRF token a browser holding `cookie` would have been given. Pair it with
+/// [`csrf_cookie`] on any hand-built state-changing request, so tests exercise the
+/// CSRF layer rather than bypassing it.
+#[allow(dead_code)]
+pub fn csrf_token(cookie: &str) -> String {
+    let session = cookie
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("id="))
+        .unwrap_or("anonymous");
+    kani_web::csrf::compute_token(session, &TEST_CSRF_SECRET)
+}
+
+/// `cookie` with the matching `kani_csrf` cookie appended, as one `Cookie` header.
+#[allow(dead_code)]
+pub fn csrf_cookie(cookie: &str) -> String {
+    format!("{cookie}; kani_csrf={}", csrf_token(cookie))
+}
+
+fn authed(method: &str, uri: &str, cookie: &str, body: Option<serde_json::Value>) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if matches!(method, "GET" | "HEAD" | "OPTIONS") {
+        builder = builder.header("Cookie", cookie);
+    } else {
+        builder = builder
+            .header("Cookie", csrf_cookie(cookie))
+            .header("X-CSRF-Token", csrf_token(cookie));
+    }
+    match body {
+        Some(value) => builder
+            .header("Content-Type", "application/json")
+            .body(Body::from(serde_json::to_string(&value).unwrap()))
+            .unwrap(),
+        None => builder.body(Body::empty()).unwrap(),
+    }
+}
+
 pub fn authed_get(uri: &str, cookie: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("Cookie", cookie)
-        .body(Body::empty())
-        .unwrap()
+    authed("GET", uri, cookie, None)
 }
 
 pub fn authed_post(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("POST", uri, cookie, Some(body))
 }
 
 pub fn authed_put(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PUT")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PUT", uri, cookie, Some(body))
 }
 
 pub fn authed_patch(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PATCH")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PATCH", uri, cookie, Some(body))
 }
 
 pub fn authed_delete(uri: &str, cookie: &str) -> Request<Body> {
-    Request::builder()
-        .method("DELETE")
-        .uri(uri)
-        .header("Cookie", cookie)
-        .body(Body::empty())
-        .unwrap()
+    authed("DELETE", uri, cookie, None)
 }
 
 pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -190,13 +247,7 @@ pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
 }
 
 pub fn put_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("PUT")
-        .uri(uri)
-        .header("Content-Type", "application/json")
-        .header("Cookie", cookie)
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap()
+    authed("PUT", uri, cookie, Some(body))
 }
 
 /// Drain the response body as raw bytes.
@@ -266,6 +317,18 @@ pub async fn build_test_app_with_proxy(state: AppState) -> Router {
 // DB row inserters are shared via kani-shared-test (identical across crates).
 #[allow(unused_imports)]
 pub use kani_shared_test::{insert_chapter, insert_manga, insert_source, insert_user};
+
+/// A source, a manga under it, and one chapter, returning `(manga_id, chapter_id)`.
+///
+/// Names are unique per call because `sources.name` is unique, so a test can seed
+/// twice to prove one manga's rows do not leak into another's.
+pub async fn seed_manga_with_chapter(state: &AppState) -> (i64, i64) {
+    let unique = uuid::Uuid::new_v4().to_string();
+    let source_id = insert_source(&state.db, &format!("src-{unique}")).await;
+    let manga_id = insert_manga(&state.db, source_id, &unique, "Manga").await;
+    let chapter_id = insert_chapter(&state.db, manga_id, &format!("c-{unique}"), 1.0).await;
+    (manga_id.into(), chapter_id.into())
+}
 
 /// Build a Basic-auth `Authorization` header value for the given credentials.
 pub fn basic_auth(username: &str, password: &str) -> String {

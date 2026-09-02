@@ -34,6 +34,7 @@ fn browser_payload_schema_parses_via_field() {
     );
     assert_eq!(details.script.as_deref(), Some("fetch_popular"));
     assert_eq!(details.timeout_ms, 15000);
+    assert_eq!(details.auto_scroll, Some(false));
 }
 
 #[test]
@@ -55,6 +56,22 @@ fn browser_payload_codegen_emits_capture_page_payload() {
         "browser endpoint must embed the timeout: {}",
         generated.lib_rs
     );
+    assert!(generated.lib_rs.contains("capture_page_payload_configured"));
+    let capture = generated
+        .lib_rs
+        .find("capture_page_payload_configured")
+        .expect("configured capture call");
+    let capture = &generated.lib_rs[capture..generated.lib_rs.len().min(capture + 500)];
+    assert!(
+        capture.contains("false"),
+        "disabled auto-scroll must be emitted: {capture}"
+    );
+}
+
+#[test]
+fn browser_payload_auto_scroll_defaults_to_true_after_validation() {
+    let validated = load_and_validate("browser_payload_full.yaml");
+    assert!(validated.manga_details.as_ref().unwrap().auto_scroll);
 }
 
 #[test]

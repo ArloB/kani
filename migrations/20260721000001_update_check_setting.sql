@@ -1,1 +1,0 @@
-ALTER TABLE settings ADD COLUMN update_check_enabled BOOLEAN NOT NULL DEFAULT 1;

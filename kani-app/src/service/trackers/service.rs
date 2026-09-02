@@ -289,7 +289,7 @@ impl AppService {
     }
 
     /// Rebuild the tracker registry in-place (hot-reload after credential changes).
-    pub async fn reload_tracker_registry(&self) -> Result<()> {
+    pub(crate) async fn reload_tracker_registry(&self) -> Result<()> {
         *self.tracker_registry.write().await =
             TrackerRegistry::new(&self.db, self.encryption.as_deref()).await?;
         Ok(())

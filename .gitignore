@@ -3,22 +3,14 @@ wasm_sources
 CLAUDE.md
 AGENTS.md
 .claude/
-# Generated PWA icons — regenerate with `cargo run -p kani-cli -- icons`.
-# The source mark itself is tracked: without it a clean checkout cannot build
-# the icons at all.
 static/icons/*.png
 *.snap.new
 lcov.info
 .env
-*.db
 *.db*
-kani-shared/bindings
 /library
-kani-web/dist
 todo.txt
 changes
-# Planning artifacts are local working notes, not documentation — they go stale
-# the moment the work lands and describe intent rather than the system.
 /plans
 /overviews
 *-plan.md
@@ -29,7 +21,6 @@ static/js/vendor/
 static/fonts/
 static/changelog.md
 static/js/dist/
-static/types/
 static/css/main.css
 tools/
 .idea/
@@ -37,3 +28,6 @@ tools/
 .codegraph/
 docs/site/
 .wasm_cache/
+.codex/
+/mutants.out/
+/mutants.out.old/

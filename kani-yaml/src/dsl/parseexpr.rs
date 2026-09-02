@@ -1,6 +1,10 @@
 use crate::error::YamlError;
 use chumsky::prelude::SimpleSpan;
-use kani_shared::ast::{Expr, Op, PadAlign};
+use kani_shared::ast::{
+    BinaryExprOp, Expr, ExprArena, ExprId, ExprLeaf, ExprNode, ManyExprOp, Op, PadAlign,
+    TernaryExprOp, UnaryExprOp,
+};
+use std::sync::Arc;
 
 /// A `ParseExpr` paired with its source span, produced at the parse boundary.
 ///
@@ -445,7 +449,7 @@ impl TryFrom<ParseExpr> for Expr {
 
 /// Conversion from `SpannedParseExpr` — the type produced at the parse boundary.
 ///
-/// This is the entry point for callers of `dsl::parser()`. The outer span is
+/// This is the entry point for callers of `dsl::parse()`. The outer span is
 /// used for accurate source positions in top-level errors (e.g. a bare map
 /// literal outside `.lookup()`). All other variants delegate to the inner
 /// `TryFrom<ParseExpr>` implementation which uses embedded spans where available.
@@ -453,12 +457,460 @@ impl TryFrom<SpannedParseExpr> for Expr {
     type Error = Vec<YamlError>;
 
     fn try_from(SpannedParseExpr(value, span): SpannedParseExpr) -> Result<Self, Self::Error> {
-        match value {
-            ParseExpr::MapLiteral(_) => Err(vec![YamlError::DslConversion {
-                message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
-                span: span.into_range(),
-            }]),
-            other => Expr::try_from(other),
+        if parse_node_count(&value) <= 32 {
+            return match value {
+                ParseExpr::MapLiteral(_) => Err(vec![YamlError::DslConversion {
+                    message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
+                    span: span.into_range(),
+                }]),
+                other => Expr::try_from(other),
+            };
         }
+        lower_arena(value, span)
+    }
+}
+
+fn parse_node_count(root: &ParseExpr) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![root];
+    while let Some(expr) = stack.pop() {
+        count += 1;
+        match expr {
+            ParseExpr::BinaryOperation { lhs, rhs, .. }
+            | ParseExpr::Let {
+                value: lhs,
+                body: rhs,
+                ..
+            } => {
+                stack.push(rhs);
+                stack.push(lhs);
+            }
+            ParseExpr::If {
+                condition,
+                then,
+                else_,
+            } => {
+                stack.push(else_);
+                stack.push(then);
+                stack.push(condition);
+            }
+            ParseExpr::List(items)
+            | ParseExpr::Concat(items)
+            | ParseExpr::Merge(items)
+            | ParseExpr::JsonArray(items)
+            | ParseExpr::Format { args: items, .. } => stack.extend(items.iter()),
+            ParseExpr::MethodCall { target, args, .. } => {
+                stack.extend(args.iter());
+                stack.push(target);
+            }
+            ParseExpr::SelfRef
+            | ParseExpr::Dom(_)
+            | ParseExpr::Json(_)
+            | ParseExpr::Var(_)
+            | ParseExpr::Literal(_)
+            | ParseExpr::Number(_)
+            | ParseExpr::Bool(_)
+            | ParseExpr::Null
+            | ParseExpr::Pref(_)
+            | ParseExpr::MapLiteral(_)
+            | ParseExpr::Index => {}
+        }
+    }
+    count
+}
+
+enum LowerWork {
+    Visit(ParseExpr),
+    Binary(Op),
+    Let(String),
+    If,
+    Many(ManyExprOp, usize),
+    Format(String, usize),
+    Method(String, usize, SimpleSpan),
+}
+
+fn lower_arena(value: ParseExpr, outer_span: SimpleSpan) -> Result<Expr, Vec<YamlError>> {
+    let mut work = vec![LowerWork::Visit(value)];
+    let mut results = Vec::<ExprId>::new();
+    let mut nodes = Vec::<ExprNode>::new();
+
+    while let Some(item) = work.pop() {
+        match item {
+            LowerWork::Visit(expr) => match expr {
+                ParseExpr::SelfRef => push_node(&mut nodes, &mut results, ExprLeaf::SelfRef),
+                ParseExpr::Dom(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Dom(value));
+                }
+                ParseExpr::Json(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Json(value));
+                }
+                ParseExpr::Var(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Var(value));
+                }
+                ParseExpr::Literal(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Literal(value));
+                }
+                ParseExpr::Number(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Number(value));
+                }
+                ParseExpr::Bool(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Bool(value));
+                }
+                ParseExpr::Null => push_node(&mut nodes, &mut results, ExprLeaf::Null),
+                ParseExpr::Pref(value) => {
+                    push_node(&mut nodes, &mut results, ExprLeaf::Pref(value));
+                }
+                ParseExpr::Index => push_node(&mut nodes, &mut results, ExprLeaf::Index),
+                ParseExpr::MapLiteral(table) => {
+                    let id = ExprId(nodes.len() as u32);
+                    nodes.push(ExprNode::MapLiteral(table));
+                    results.push(id);
+                }
+                ParseExpr::BinaryOperation { op, lhs, rhs } => {
+                    work.push(LowerWork::Binary(op));
+                    work.push(LowerWork::Visit(*rhs));
+                    work.push(LowerWork::Visit(*lhs));
+                }
+                ParseExpr::Let { name, value, body } => {
+                    work.push(LowerWork::Let(name));
+                    work.push(LowerWork::Visit(*body));
+                    work.push(LowerWork::Visit(*value));
+                }
+                ParseExpr::If {
+                    condition,
+                    then,
+                    else_,
+                } => {
+                    work.push(LowerWork::If);
+                    work.push(LowerWork::Visit(*else_));
+                    work.push(LowerWork::Visit(*then));
+                    work.push(LowerWork::Visit(*condition));
+                }
+                ParseExpr::List(items) => {
+                    push_many_work(&mut work, ManyExprOp::List, items);
+                }
+                ParseExpr::Concat(items) => {
+                    push_many_work(&mut work, ManyExprOp::Concat, items);
+                }
+                ParseExpr::Merge(items) => {
+                    push_many_work(&mut work, ManyExprOp::Merge, items);
+                }
+                ParseExpr::JsonArray(items) => {
+                    push_many_work(&mut work, ManyExprOp::JsonArray, items);
+                }
+                ParseExpr::Format { template, args } => {
+                    let len = args.len();
+                    work.push(LowerWork::Format(template, len));
+                    for arg in args.into_iter().rev() {
+                        work.push(LowerWork::Visit(arg));
+                    }
+                }
+                ParseExpr::MethodCall {
+                    target,
+                    name,
+                    args,
+                    span,
+                } => {
+                    let len = args.len();
+                    work.push(LowerWork::Method(name, len, span));
+                    for arg in args.into_iter().rev() {
+                        work.push(LowerWork::Visit(arg));
+                    }
+                    work.push(LowerWork::Visit(*target));
+                }
+            },
+            LowerWork::Binary(op) => {
+                let [lhs, rhs] = take_ids::<2>(&mut results);
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(ExprNode::BinaryOperation { op, lhs, rhs });
+                results.push(id);
+            }
+            LowerWork::Let(name) => {
+                let [value, body] = take_ids::<2>(&mut results);
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(ExprNode::Let { name, value, body });
+                results.push(id);
+            }
+            LowerWork::If => {
+                let [first, second, third] = take_ids::<3>(&mut results);
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(ExprNode::Ternary {
+                    op: TernaryExprOp::If,
+                    first,
+                    second,
+                    third,
+                });
+                results.push(id);
+            }
+            LowerWork::Many(op, len) => {
+                let items = results.split_off(results.len() - len);
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(ExprNode::Many { op, items });
+                results.push(id);
+            }
+            LowerWork::Format(template, len) => {
+                let args = results.split_off(results.len() - len);
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(ExprNode::Format { template, args });
+                results.push(id);
+            }
+            LowerWork::Method(name, len, span) => {
+                let values = results.split_off(results.len() - len - 1);
+                let target = values[0];
+                let args = &values[1..];
+                let node = lower_method(&nodes, target, &name, args, span)?;
+                let id = ExprId(nodes.len() as u32);
+                nodes.push(node);
+                results.push(id);
+            }
+        }
+    }
+
+    let Some(root) = results.pop() else {
+        return Err(vec![YamlError::DslConversion {
+            message: "expression produced no root node".to_string(),
+            span: outer_span.into_range(),
+        }]);
+    };
+    if !results.is_empty() || matches!(nodes[root.0 as usize], ExprNode::MapLiteral(_)) {
+        return Err(vec![YamlError::DslConversion {
+            message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
+            span: outer_span.into_range(),
+        }]);
+    }
+    let arena = ExprArena { nodes };
+    arena.validate(root).map_err(|message| {
+        vec![YamlError::DslConversion {
+            message,
+            span: outer_span.into_range(),
+        }]
+    })?;
+    Ok(Expr::Arena {
+        arena: Arc::new(arena),
+        root,
+    })
+}
+
+fn push_node(nodes: &mut Vec<ExprNode>, results: &mut Vec<ExprId>, leaf: ExprLeaf) {
+    let id = ExprId(nodes.len() as u32);
+    nodes.push(ExprNode::Leaf(leaf));
+    results.push(id);
+}
+
+fn push_many_work(work: &mut Vec<LowerWork>, op: ManyExprOp, items: Vec<ParseExpr>) {
+    let len = items.len();
+    work.push(LowerWork::Many(op, len));
+    for item in items.into_iter().rev() {
+        work.push(LowerWork::Visit(item));
+    }
+}
+
+fn take_ids<const N: usize>(results: &mut Vec<ExprId>) -> [ExprId; N] {
+    let values = results.split_off(results.len() - N);
+    values
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("lowering arity is statically known"))
+}
+
+fn literal(nodes: &[ExprNode], id: ExprId) -> Option<&str> {
+    match nodes.get(id.0 as usize) {
+        Some(ExprNode::Leaf(ExprLeaf::Literal(value))) => Some(value),
+        _ => None,
+    }
+}
+
+fn number(nodes: &[ExprNode], id: ExprId) -> Option<f64> {
+    match nodes.get(id.0 as usize) {
+        Some(ExprNode::Leaf(ExprLeaf::Number(value))) => Some(*value),
+        _ => None,
+    }
+}
+
+fn map_literal(nodes: &[ExprNode], id: ExprId) -> Option<&[(String, String)]> {
+    match nodes.get(id.0 as usize) {
+        Some(ExprNode::MapLiteral(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn lower_method(
+    nodes: &[ExprNode],
+    target: ExprId,
+    name: &str,
+    args: &[ExprId],
+    span: SimpleSpan,
+) -> Result<ExprNode, Vec<YamlError>> {
+    let unary = |op| Ok(ExprNode::Unary { op, target });
+    let binary = |op, rhs| {
+        Ok(ExprNode::Binary {
+            op,
+            lhs: target,
+            rhs,
+        })
+    };
+    let invalid = || {
+        Err(vec![YamlError::DslConversion {
+            message: format!("Unknown method '{name}' or invalid arguments"),
+            span: span.into_range(),
+        }])
+    };
+
+    if let Some(function) = name.strip_prefix("__user::") {
+        let mut all = Vec::with_capacity(args.len() + 1);
+        all.push(target);
+        all.extend_from_slice(args);
+        return Ok(ExprNode::UserFn {
+            name: function.to_string(),
+            args: all,
+        });
+    }
+
+    match (name, args) {
+        ("attr", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Attr(value.to_string()))
+            .map_or_else(invalid, unary),
+        ("text", []) => unary(UnaryExprOp::Text),
+        ("inner_html", []) => unary(UnaryExprOp::InnerHtml),
+        ("select", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Select(value.to_string()))
+            .map_or_else(invalid, unary),
+        ("first", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::First(value.to_string()))
+            .map_or_else(invalid, unary),
+        ("split", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Split(value.to_string()))
+            .map_or_else(invalid, unary),
+        ("at", [arg]) => number(nodes, *arg)
+            .map(|value| UnaryExprOp::At(value as i32))
+            .map_or_else(invalid, unary),
+        ("trim", []) => unary(UnaryExprOp::Trim),
+        ("lower", []) => unary(UnaryExprOp::Lower),
+        ("parse_float", []) => unary(UnaryExprOp::ParseFloat),
+        ("parse_int", []) => unary(UnaryExprOp::ParseInt),
+        ("to_string", []) => unary(UnaryExprOp::ToString),
+        ("str", []) => unary(UnaryExprOp::JsonStr),
+        ("int", []) => unary(UnaryExprOp::JsonInt),
+        ("float", []) => unary(UnaryExprOp::JsonFloat),
+        ("bool", []) => unary(UnaryExprOp::JsonBool),
+        ("array_len", []) => unary(UnaryExprOp::ArrayLen),
+        ("keys", []) => unary(UnaryExprOp::JsonKeys),
+        ("json_fold", []) => unary(UnaryExprOp::JsonFold),
+        ("children", []) => unary(UnaryExprOp::Children),
+        ("date_parse_rfc3339", []) => unary(UnaryExprOp::DateParseRfc3339),
+        ("not", []) => unary(UnaryExprOp::Not),
+        ("string_len", []) => unary(UnaryExprOp::StringLen),
+        ("slice", [start]) => number(nodes, *start)
+            .map(|value| UnaryExprOp::Slice(value as i32, None))
+            .map_or_else(invalid, unary),
+        ("slice", [start, end]) => match (number(nodes, *start), number(nodes, *end)) {
+            (Some(start), Some(end)) => unary(UnaryExprOp::Slice(start as i32, Some(end as i32))),
+            _ => invalid(),
+        },
+        ("replace", [from, to]) => match (literal(nodes, *from), literal(nodes, *to)) {
+            (Some(from), Some(to)) => unary(UnaryExprOp::Replace(from.into(), to.into())),
+            _ => invalid(),
+        },
+        ("lookup", [table]) => map_literal(nodes, *table)
+            .map(|table| ExprNode::Lookup {
+                target,
+                table: table.to_vec(),
+            })
+            .ok_or_else(|| invalid().expect_err("invalid always returns an error")),
+        ("matches", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Matches(value.into()))
+            .map_or_else(invalid, unary),
+        ("capture", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Capture(value.into()))
+            .map_or_else(invalid, unary),
+        ("ptr", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::JsonPtr(value.into()))
+            .map_or_else(invalid, unary),
+        ("has_class", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::HasClass(value.into()))
+            .map_or_else(invalid, unary),
+        ("starts_with", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::StartsWith(value.into()))
+            .map_or_else(invalid, unary),
+        ("ends_with", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::EndsWith(value.into()))
+            .map_or_else(invalid, unary),
+        ("date_parse", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::DateParse(value.into()))
+            .map_or_else(invalid, unary),
+        ("join", [arg]) => literal(nodes, *arg)
+            .map(|value| UnaryExprOp::Join(value.into()))
+            .map_or_else(invalid, unary),
+        ("map", [rhs]) => binary(BinaryExprOp::Map, *rhs),
+        ("flat_map", [rhs]) => binary(BinaryExprOp::FlatMap, *rhs),
+        ("filter", [rhs]) => binary(BinaryExprOp::Filter, *rhs),
+        ("prepend", [rhs]) => binary(BinaryExprOp::Prepend, *rhs),
+        ("append", [rhs]) => binary(BinaryExprOp::Append, *rhs),
+        ("fallback", [rhs]) => binary(BinaryExprOp::Fallback, *rhs),
+        ("resolve_url", [rhs]) => binary(BinaryExprOp::ResolveUrl, *rhs),
+        ("get", [rhs]) => binary(BinaryExprOp::JsonGet, *rhs),
+        ("sort_by", [rhs]) => binary(BinaryExprOp::SortBy, *rhs),
+        ("fold", [base, transform]) => Ok(ExprNode::Ternary {
+            op: TernaryExprOp::Fold,
+            first: target,
+            second: *base,
+            third: *transform,
+        }),
+        ("find", [key, value]) => Ok(ExprNode::Ternary {
+            op: TernaryExprOp::JsonFind,
+            first: target,
+            second: *key,
+            third: *value,
+        }),
+        ("split_n", [delimiter, n]) => match (literal(nodes, *delimiter), number(nodes, *n)) {
+            (Some(delimiter), Some(n)) => unary(UnaryExprOp::SplitN(delimiter.into(), n as usize)),
+            _ => invalid(),
+        },
+        ("take", [arg]) => number(nodes, *arg)
+            .map(|value| UnaryExprOp::Take(value as usize))
+            .map_or_else(invalid, unary),
+        ("skip", [arg]) => number(nodes, *arg)
+            .map(|value| UnaryExprOp::Skip(value as usize))
+            .map_or_else(invalid, unary),
+        ("reverse", []) => unary(UnaryExprOp::Reverse),
+        ("unique", []) => unary(UnaryExprOp::Unique),
+        ("url_encode" | "urlencode", []) => unary(UnaryExprOp::UrlEncode),
+        ("url_decode" | "urldecode", []) => unary(UnaryExprOp::UrlDecode),
+        ("format_padded", [width, fill, align]) => {
+            let Some(width) = number(nodes, *width) else {
+                return invalid();
+            };
+            let Some(fill) = literal(nodes, *fill) else {
+                return invalid();
+            };
+            let Some(align) = literal(nodes, *align) else {
+                return invalid();
+            };
+            let align = match align {
+                "left" => PadAlign::Left,
+                "right" => PadAlign::Right,
+                "center" => PadAlign::Center,
+                value => {
+                    return Err(vec![YamlError::DslConversion {
+                        message: format!(
+                            "format_padded align must be \"left\", \"right\", or \"center\", got {value:?}"
+                        ),
+                        span: span.into_range(),
+                    }]);
+                }
+            };
+            let mut chars = fill.chars();
+            let (Some(fill), None) = (chars.next(), chars.next()) else {
+                return Err(vec![YamlError::DslConversion {
+                    message: "format_padded fill must be exactly one character".to_string(),
+                    span: span.into_range(),
+                }]);
+            };
+            unary(UnaryExprOp::FormatPadded {
+                width: width as usize,
+                fill,
+                align,
+            })
+        }
+        _ => invalid(),
     }
 }

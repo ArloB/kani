@@ -63,7 +63,7 @@ pub struct LibraryUpgrade {
 /// What is stored in `chapters.upgrade_available`. Dismissals live inside the
 /// descriptor so a dismissed candidate survives re-scans without a side table.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UpgradeDescriptor {
+pub(crate) struct UpgradeDescriptor {
     #[serde(default)]
     pub candidates: Vec<UpgradeCandidate>,
     /// `(candidate_source_chapter_id, scanlator)` pairs the user has waved away.
@@ -88,7 +88,7 @@ fn dismissal_key(c: &UpgradeCandidate) -> (String, Option<String>) {
 
 impl AppService {
     /// The comparison rules as currently configured.
-    pub async fn quality_policy(&self) -> kani_core::quality::QualityPolicy {
+    pub(crate) async fn quality_policy(&self) -> kani_core::quality::QualityPolicy {
         use kani_core::quality::AxisRule;
         let s = self.settings.read().await;
         kani_core::quality::QualityPolicy {
@@ -241,7 +241,7 @@ impl AppService {
             // (b) A sibling at the same chapter number from a better-ranked
             // scanlator.
             let held_rank = rank(&held.scanlator);
-            for other in rows.iter() {
+            for other in &rows {
                 if other.id == held.id
                     || (other.chapter_number - held.chapter_number).abs() > f64::EPSILON
                 {
@@ -627,8 +627,8 @@ impl AppService {
         source_chapter_id: &str,
     ) -> Option<Vec<String>> {
         let backend = self.sources.get_backend(source_id)?;
-        let decoded_manga = crate::utils::decode_manga_id(source_manga_id);
-        let decoded_chapter = crate::utils::decode_manga_id(source_chapter_id);
+        let decoded_manga = kani_shared::decode_manga_id(source_manga_id);
+        let decoded_chapter = kani_shared::decode_manga_id(source_chapter_id);
         let chapter = backend
             .get_pages(&decoded_manga, &decoded_chapter)
             .await

@@ -51,7 +51,7 @@ fn action_button(label: &str, url: &str) -> String {
     )
 }
 
-pub fn password_reset_email(username: &str, reset_url: &str) -> (String, String) {
+pub(crate) fn password_reset_email(username: &str, reset_url: &str) -> (String, String) {
     let username = escape_html(username);
     let subject = "Reset your Kani password".to_string();
     let body = format!(
@@ -64,7 +64,7 @@ pub fn password_reset_email(username: &str, reset_url: &str) -> (String, String)
     (subject, base_layout("Reset your Kani password", &body))
 }
 
-pub fn email_verification_email(username: &str, verify_url: &str) -> (String, String) {
+pub(crate) fn email_verification_email(username: &str, verify_url: &str) -> (String, String) {
     let username = escape_html(username);
     let subject = "Verify your Kani email address".to_string();
     let body = format!(
@@ -77,7 +77,7 @@ pub fn email_verification_email(username: &str, verify_url: &str) -> (String, St
     (subject, base_layout("Verify your email address", &body))
 }
 
-pub fn password_changed_email(username: &str) -> (String, String) {
+pub(crate) fn password_changed_email(username: &str) -> (String, String) {
     let username = escape_html(username);
     let subject = "Your Kani password was changed".to_string();
     let body = format!(
@@ -88,7 +88,7 @@ pub fn password_changed_email(username: &str) -> (String, String) {
     (subject, base_layout("Password changed", &body))
 }
 
-pub fn admin_password_reset_email(username: &str) -> (String, String) {
+pub(crate) fn admin_password_reset_email(username: &str) -> (String, String) {
     let username = escape_html(username);
     let subject = "An administrator reset your Kani password".to_string();
     let body = format!(
@@ -102,7 +102,7 @@ pub fn admin_password_reset_email(username: &str) -> (String, String) {
     )
 }
 
-pub fn welcome_email(username: &str) -> (String, String) {
+pub(crate) fn welcome_email(username: &str) -> (String, String) {
     let username = escape_html(username);
     let subject = "Welcome to Kani".to_string();
     let body = format!(
@@ -112,7 +112,7 @@ pub fn welcome_email(username: &str) -> (String, String) {
     (subject, base_layout("Welcome to Kani", &body))
 }
 
-pub fn test_email() -> (String, String) {
+pub(crate) fn test_email() -> (String, String) {
     let subject = "Kani email test".to_string();
     let body = "<p>This is a test email from your Kani instance. If you received it, your email configuration is working correctly.</p>".to_string();
     (subject, base_layout("Email test", &body))

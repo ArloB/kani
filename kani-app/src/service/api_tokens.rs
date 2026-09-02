@@ -73,12 +73,12 @@ impl TokenKind {
 }
 
 /// Fixed scope set for an OPDS reader token. Not user-selectable.
-pub const OPDS_TOKEN_SCOPES: &str = "opds:read opds:progress";
+pub(crate) const OPDS_TOKEN_SCOPES: &str = "opds:read opds:progress";
 
 /// Upper bounds so a never-expiring credential is a deliberate choice rather
 /// than the default, and one account cannot mint an unbounded number.
-pub const MAX_TOKENS_PER_USER: i64 = 25;
-pub const MAX_TOKEN_LIFETIME_DAYS: u32 = 365;
+pub(crate) const MAX_TOKENS_PER_USER: i64 = 25;
+pub(crate) const MAX_TOKEN_LIFETIME_DAYS: u32 = 365;
 
 impl AppService {
     /// The permissions a user currently holds, resolved through role inheritance.

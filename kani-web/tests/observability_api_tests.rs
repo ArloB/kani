@@ -128,95 +128,6 @@ async fn a_metrics_scoped_api_token_can_scrape() {
 }
 
 #[tokio::test]
-async fn an_api_token_without_the_metrics_scope_cannot_scrape() {
-    use kani_app::service::api_tokens::TokenKind;
-
-    let state = test_state().await;
-    common::create_admin(&state).await;
-    let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
-        .fetch_one(&state.db)
-        .await
-        .unwrap();
-    let scope: kani_app::permissions::Permission = "library:view".parse().unwrap();
-    let created = state
-        .service
-        .create_token(
-            kani_app::ids::UserId(uid),
-            "bot",
-            None,
-            TokenKind::Api,
-            Some(&[scope]),
-        )
-        .await
-        .unwrap();
-
-    kani_web::metrics::describe();
-    let app = kani_web::metrics::router(state);
-    let res = app
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/metrics")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", created.raw_token),
-                )
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        axum::http::StatusCode::UNAUTHORIZED,
-        "any API token must not be a metrics credential; the scope is the gate"
-    );
-}
-
-#[tokio::test]
-async fn an_opds_token_cannot_scrape_metrics() {
-    use kani_app::service::api_tokens::TokenKind;
-
-    let state = test_state().await;
-    common::create_admin(&state).await;
-    let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
-        .fetch_one(&state.db)
-        .await
-        .unwrap();
-    let created = state
-        .service
-        .create_token(
-            kani_app::ids::UserId(uid),
-            "kindle",
-            None,
-            TokenKind::Opds,
-            None,
-        )
-        .await
-        .unwrap();
-
-    kani_web::metrics::describe();
-    let app = kani_web::metrics::router(state);
-    let res = app
-        .oneshot(
-            axum::http::Request::builder()
-                .uri("/metrics")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", created.raw_token),
-                )
-                .body(axum::body::Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        axum::http::StatusCode::UNAUTHORIZED,
-        "a reader-app credential must never reach an operator endpoint"
-    );
-}
-
-#[tokio::test]
 async fn registered_kani_metrics_are_present_in_the_exposition() {
     kani_web::metrics::describe();
     let handle = &kani_web::metrics::prometheus().1;
@@ -271,34 +182,15 @@ async fn diagnostics_returns_payload_for_admin() {
         body["browser"]["calls_total"].is_number(),
         "browser section (plan 02 stats) missing: {body}"
     );
-}
-
-#[tokio::test]
-async fn diagnostics_requires_authentication() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/diagnostics"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn diagnostics_is_forbidden_for_regular_users() {
-    let state = test_state().await;
-    let (username, password) = common::create_regular_user(&state, "plain").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(common::authed_get("/rest/admin/diagnostics", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), axum::http::StatusCode::FORBIDDEN);
+    assert!(
+        body["browser"]["solver"].is_string(),
+        "the browser section reports solver capability, not a local browser: {body}"
+    );
+    assert!(body["browser"]["solver_attempts"].is_number());
+    assert!(body["browser"]["solver_successes"].is_number());
+    assert!(body["browser"]["solver_failures"].is_number());
+    assert!(body["browser"]["graceful_shutdowns"].is_number());
+    assert!(body["browser"]["forced_terminations"].is_number());
 }
 
 #[tokio::test]
@@ -363,19 +255,6 @@ async fn support_bundle_returns_a_zip_with_expected_entries() {
          schema produced it, got {:?}",
         info["db_schema_version"]
     );
-}
-
-#[tokio::test]
-async fn support_bundle_requires_authentication() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/support-bundle"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

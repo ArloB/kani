@@ -224,7 +224,40 @@ impl AppService {
             }
         }
 
+        self.reconcile_tracker_credential_degradation().await;
         Ok(outcome)
+    }
+
+    /// Reports links whose credentials the provider has rejected.
+    ///
+    /// Reconciled from the table rather than raised where the rejection happens:
+    /// re-authentication clears `needs_reauth` through an OAuth path that has no
+    /// registry, so an event-driven entry would never be cleared.
+    async fn reconcile_tracker_credential_degradation(&self) {
+        let Ok(stale) = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM user_tracker_credentials WHERE needs_reauth = TRUE"
+        )
+        .fetch_one(&self.db)
+        .await
+        else {
+            return;
+        };
+
+        if stale > 0 {
+            self.degradations.register(
+                crate::service::degradations::ids::TRACKER_CREDENTIALS,
+                crate::service::degradations::Severity::Warn,
+                "Tracker credentials",
+                format!(
+                    "{stale} tracker link(s) were rejected by their provider, so progress is no \
+                     longer syncing for them."
+                ),
+                "Re-link the affected tracker in Settings -> Trackers.",
+            );
+        } else {
+            self.degradations
+                .clear(crate::service::degradations::ids::TRACKER_CREDENTIALS);
+        }
     }
 }
 

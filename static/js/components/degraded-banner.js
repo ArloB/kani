@@ -12,7 +12,7 @@ const html = htm.bind(h);
 const DISMISS_KEY = 'kani-degraded-dismissed';
 
 /** @param {{ count: number, onDismiss: () => void }} props */
-export function DegradedBanner({ count, onDismiss }) {
+function DegradedBanner({ count, onDismiss }) {
   const [hidden, setHidden] = useState(false);
   if (hidden) return null;
 

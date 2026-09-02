@@ -102,7 +102,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn server_stop(
+pub(super) async fn server_stop(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -122,7 +122,7 @@ pub(crate) async fn server_stop(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn server_restart(
+pub(super) async fn server_restart(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -146,7 +146,7 @@ pub(crate) async fn server_restart(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_list_users(
+pub(super) async fn admin_list_users(
     _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -166,7 +166,7 @@ pub(crate) async fn admin_list_users(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_create_user(
+pub(super) async fn admin_create_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Json(body): Json<AdminCreateUserRequest>,
@@ -210,7 +210,7 @@ pub(crate) async fn admin_create_user(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_update_user(
+pub(super) async fn admin_update_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -257,7 +257,7 @@ pub(crate) async fn admin_update_user(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_delete_user(
+pub(super) async fn admin_delete_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -305,7 +305,7 @@ pub(crate) async fn admin_delete_user(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_grant_role(
+pub(super) async fn admin_grant_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -340,7 +340,7 @@ pub(crate) async fn admin_grant_role(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_revoke_role(
+pub(super) async fn admin_revoke_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path((user_id, role_slug)): Path<(UserId, String)>,
@@ -382,7 +382,7 @@ pub(crate) async fn admin_revoke_role(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_user_activity(
+pub(super) async fn admin_user_activity(
     _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -430,7 +430,7 @@ pub(crate) async fn admin_user_activity(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_list_roles(
+pub(super) async fn admin_list_roles(
     _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -450,7 +450,7 @@ pub(crate) async fn admin_list_roles(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_create_role(
+pub(super) async fn admin_create_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Json(body): Json<AdminCreateRoleRequest>,
@@ -482,7 +482,7 @@ pub(crate) async fn admin_create_role(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_update_role(
+pub(super) async fn admin_update_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -513,7 +513,7 @@ pub(crate) async fn admin_update_role(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_delete_role(
+pub(super) async fn admin_delete_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -536,7 +536,7 @@ pub(crate) async fn admin_delete_role(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn run_maintenance(
+pub(super) async fn run_maintenance(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -563,7 +563,7 @@ pub(crate) async fn run_maintenance(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn trigger_recurring(
+pub(super) async fn trigger_recurring(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
     Path(kind): Path<String>,
@@ -595,7 +595,7 @@ pub(crate) async fn trigger_recurring(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn db_stats(
+pub(super) async fn db_stats(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -629,7 +629,7 @@ pub(crate) async fn db_stats(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn db_analyze(
+pub(super) async fn db_analyze(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -651,7 +651,7 @@ pub(crate) async fn db_analyze(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn db_vacuum(
+pub(super) async fn db_vacuum(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -673,7 +673,7 @@ pub(crate) async fn db_vacuum(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn clear_cache(
+pub(super) async fn clear_cache(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -691,7 +691,7 @@ pub(crate) async fn clear_cache(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn stop_scan(
+pub(super) async fn stop_scan(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -710,7 +710,7 @@ pub(crate) async fn stop_scan(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_send_test_email(
+pub(super) async fn admin_send_test_email(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<SendTestEmailBody>,
@@ -733,7 +733,7 @@ pub(crate) async fn admin_send_test_email(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_trigger_password_reset_handler(
+pub(super) async fn admin_trigger_password_reset_handler(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -754,7 +754,7 @@ pub(crate) async fn admin_trigger_password_reset_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn get_credential_encryption_status_handler(
+pub(super) async fn get_credential_encryption_status_handler(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -772,7 +772,7 @@ pub(crate) async fn get_credential_encryption_status_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn migrate_credentials_handler(
+pub(super) async fn migrate_credentials_handler(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -799,7 +799,7 @@ pub(crate) async fn migrate_credentials_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_logs(
+pub(super) async fn admin_logs(
     _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::LogsQuery>,
@@ -841,7 +841,7 @@ pub(crate) async fn admin_logs(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_logs_stream(
+pub(super) async fn admin_logs_stream(
     _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::LogsQuery>,
@@ -892,7 +892,7 @@ pub(crate) async fn admin_logs_stream(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_logs_download(
+pub(super) async fn admin_logs_download(
     _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::LogsQuery>,
@@ -946,7 +946,7 @@ pub(crate) async fn admin_logs_download(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_purge_logs(
+pub(super) async fn admin_purge_logs(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
@@ -976,7 +976,7 @@ pub(crate) async fn admin_purge_logs(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_audit_log(
+pub(super) async fn admin_audit_log(
     _: AuthGuard<crate::permissions::guards::AdminViewAudit>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::AuditLogQuery>,
@@ -1020,7 +1020,7 @@ pub(crate) async fn admin_audit_log(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_audit_log_download(
+pub(super) async fn admin_audit_log_download(
     _: AuthGuard<crate::permissions::guards::AdminViewAudit>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::AuditLogQuery>,
@@ -1091,7 +1091,7 @@ pub(crate) async fn admin_audit_log_download(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn fs_browse_handler(
+pub(super) async fn fs_browse_handler(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     ValidatedQuery(q): ValidatedQuery<crate::models::FsBrowseQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1118,7 +1118,7 @@ pub(crate) async fn fs_browse_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn fs_mkdir_handler(
+pub(super) async fn fs_mkdir_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::FsMkdirBody>,
@@ -1147,7 +1147,7 @@ pub(crate) async fn fs_mkdir_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn path_migrate_estimate_handler(
+pub(super) async fn path_migrate_estimate_handler(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::PathMigrateBody>,
@@ -1175,7 +1175,7 @@ pub(crate) async fn path_migrate_estimate_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn path_migrate_handler(
+pub(super) async fn path_migrate_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::PathMigrateBody>,
@@ -1209,7 +1209,7 @@ pub(crate) async fn path_migrate_handler(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn system_capabilities(
+pub(super) async fn system_capabilities(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(_state): State<AppState>,
 ) -> impl IntoResponse {
@@ -1230,7 +1230,7 @@ pub(crate) async fn system_capabilities(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn list_blocked_repos_handler(
+pub(super) async fn list_blocked_repos_handler(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1248,7 +1248,7 @@ pub(crate) async fn list_blocked_repos_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn block_repo_handler(
+pub(super) async fn block_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<BlockRepoRequest>,
@@ -1271,7 +1271,7 @@ pub(crate) async fn block_repo_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn delete_blocked_repo_handler(
+pub(super) async fn delete_blocked_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1290,7 +1290,7 @@ pub(crate) async fn delete_blocked_repo_handler(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn proxy_bandwidth_stats(
+pub(super) async fn proxy_bandwidth_stats(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1322,7 +1322,7 @@ pub(crate) async fn proxy_bandwidth_stats(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn list_source_circuits(
+pub(super) async fn list_source_circuits(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1340,7 +1340,7 @@ pub(crate) async fn list_source_circuits(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn reset_source_circuit(
+pub(super) async fn reset_source_circuit(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
     Path(host): Path<String>,
@@ -1359,7 +1359,7 @@ pub(crate) async fn reset_source_circuit(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_get_backup_schedule(
+pub(super) async fn admin_get_backup_schedule(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1381,7 +1381,7 @@ pub(crate) async fn admin_get_backup_schedule(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_put_backup_schedule(
+pub(super) async fn admin_put_backup_schedule(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Json(body): Json<kani_app::service::backup_scheduler::BackupScheduleConfig>,
@@ -1410,7 +1410,7 @@ pub(crate) async fn admin_put_backup_schedule(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_backup_run_now(
+pub(super) async fn admin_backup_run_now(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1435,7 +1435,7 @@ pub(crate) async fn admin_backup_run_now(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_storage_stats(
+pub(super) async fn admin_storage_stats(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1453,7 +1453,7 @@ pub(crate) async fn admin_storage_stats(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_storage_stats_history(
+pub(super) async fn admin_storage_stats_history(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1490,7 +1490,7 @@ pub(crate) async fn admin_storage_stats_history(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct ScrubBody {
+pub(super) struct ScrubBody {
     #[serde(default)]
     pub depth: Option<String>,
     #[serde(default)]
@@ -1508,7 +1508,7 @@ pub(crate) struct ScrubBody {
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_library_scrub(
+pub(super) async fn admin_library_scrub(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Json(body): Json<ScrubBody>,
@@ -1543,7 +1543,7 @@ pub(crate) async fn admin_library_scrub(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_library_scrub_last(
+pub(super) async fn admin_library_scrub_last(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1558,7 +1558,7 @@ pub(crate) async fn admin_library_scrub_last(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct OrphanDeleteBody {
+pub(super) struct OrphanDeleteBody {
     pub paths: Vec<String>,
     #[serde(default = "default_true")]
     pub dry_run: bool,
@@ -1581,7 +1581,7 @@ fn default_true() -> bool {
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_delete_orphans(
+pub(super) async fn admin_delete_orphans(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Json(body): Json<OrphanDeleteBody>,
@@ -1596,7 +1596,7 @@ pub(crate) async fn admin_delete_orphans(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct ArchiveBody {
+pub(super) struct ArchiveBody {
     #[serde(default)]
     pub manga_ids: Option<Vec<i64>>,
     #[serde(default)]
@@ -1616,7 +1616,7 @@ pub(crate) struct ArchiveBody {
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_archive_export(
+pub(super) async fn admin_archive_export(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Json(body): Json<ArchiveBody>,
@@ -1656,7 +1656,7 @@ pub(crate) async fn admin_archive_export(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_archive_download(
+pub(super) async fn admin_archive_download(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     Path(job_id): Path<uuid::Uuid>,
@@ -1706,7 +1706,7 @@ pub(crate) async fn admin_archive_download(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_diagnostics(
+pub(super) async fn admin_diagnostics(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1728,7 +1728,7 @@ pub(crate) async fn admin_diagnostics(
     security(("session" = [])),
     tag = "admin"
 )]
-pub(crate) async fn admin_support_bundle(
+pub(super) async fn admin_support_bundle(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

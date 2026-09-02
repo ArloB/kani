@@ -18,7 +18,7 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
-pub(crate) struct UpsertUiThemeRequest {
+pub(super) struct UpsertUiThemeRequest {
     #[serde(default)]
     pub id: Option<String>,
     pub name: String,
@@ -72,7 +72,7 @@ async fn require_publish(
     security(("session" = [])),
     tag = "ui"
 )]
-pub(crate) async fn list_themes(
+pub(super) async fn list_themes(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -95,7 +95,7 @@ pub(crate) async fn list_themes(
     security(("session" = [])),
     tag = "ui"
 )]
-pub(crate) async fn upsert_theme(
+pub(super) async fn upsert_theme(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     auth: crate::auth::AuthSession,
     State(state): State<AppState>,
@@ -144,7 +144,7 @@ pub(crate) async fn upsert_theme(
     security(("session" = [])),
     tag = "ui"
 )]
-pub(crate) async fn activate_theme(
+pub(super) async fn activate_theme(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -162,7 +162,7 @@ pub(crate) async fn activate_theme(
     security(("session" = [])),
     tag = "ui"
 )]
-pub(crate) async fn deactivate_theme(
+pub(super) async fn deactivate_theme(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -182,7 +182,7 @@ pub(crate) async fn deactivate_theme(
     security(("session" = [])),
     tag = "ui"
 )]
-pub(crate) async fn delete_theme(
+pub(super) async fn delete_theme(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::Authenticated>,
     auth: crate::auth::AuthSession,
     State(state): State<AppState>,

@@ -55,9 +55,15 @@ fn verify_fails_on_a_corrupted_archive() {
     bytes[mid] ^= 0xFF;
     std::fs::write(&victim, &bytes).unwrap();
 
+    // `verify` also errors when the archive cannot be read at all, so asserting
+    // only is_err() would pass if the corruption merely made the CBZ unopenable
+    // and the hash comparison never ran.
+    let error = kani_cli::commands::archive::verify(&archive)
+        .expect_err("a silent pass on a damaged archive is worse than no check at all")
+        .to_string();
     assert!(
-        kani_cli::commands::archive::verify(&archive).is_err(),
-        "a silent pass on a damaged archive is worse than no check at all"
+        error.contains("failed verification"),
+        "the hash comparison must be what rejects it, got: {error}"
     );
 }
 

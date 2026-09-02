@@ -29,8 +29,37 @@ impl SourceRegistry {
         }
     }
 
+    #[cfg(test)]
     pub fn remove(&self, id: i64) {
         self.slots.remove(&id);
+    }
+
+    pub(crate) async fn remove_and_shutdown(&self, id: i64, reason: &str) -> bool {
+        let backend = self.slots.remove(&id).map(|(_, slot)| slot.load_full());
+        if let Some(backend) = backend {
+            backend.retire_v8(reason).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) async fn shutdown_all(&self, reason: &str) {
+        let backends: Vec<_> = self
+            .slots
+            .iter()
+            .map(|entry| entry.value().load_full())
+            .collect();
+        futures::future::join_all(backends.iter().map(|backend| backend.shutdown_v8(reason))).await;
+    }
+
+    pub async fn retire_all(&self, reason: &str) {
+        let backends: Vec<_> = self
+            .slots
+            .iter()
+            .map(|entry| entry.value().load_full())
+            .collect();
+        futures::future::join_all(backends.iter().map(|backend| backend.retire_v8(reason))).await;
     }
 
     pub fn contains_key(&self, id: i64) -> bool {
@@ -59,6 +88,7 @@ impl SourceRegistry {
             if let SourceBackend::Wasm(ref w) = *old {
                 w.drain(DRAIN_TIMEOUT).await;
             }
+            old.retire_v8("source-hot-swap").await;
             slot.store(Arc::new(new_backend));
         } else {
             self.slots
@@ -102,6 +132,15 @@ mod tests {
         reg.insert(1, yaml());
         reg.remove(1);
         assert!(reg.get_backend(1).is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_and_shutdown_deletes_entry() {
+        let reg = SourceRegistry::new();
+        reg.insert(1, yaml());
+        assert!(reg.remove_and_shutdown(1, "test-remove").await);
+        assert!(!reg.contains_key(1));
+        assert!(!reg.remove_and_shutdown(1, "test-remove-again").await);
     }
 
     #[test]

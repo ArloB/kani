@@ -7,7 +7,7 @@ static START: LazyLock<Instant> = LazyLock::new(Instant::now);
 static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
 
 #[derive(Debug, Clone)]
-pub struct BuildInfo {
+pub(crate) struct BuildInfo {
     pub version: String,
     pub git_sha: String,
 }
@@ -21,7 +21,7 @@ pub fn init(version: &str, git_sha: &str) {
 }
 
 fn build_info() -> BuildInfo {
-    BUILD_INFO.get().cloned().unwrap_or(BuildInfo {
+    BUILD_INFO.get().cloned().unwrap_or_else(|| BuildInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         git_sha: String::new(),
     })
@@ -37,10 +37,16 @@ pub fn uptime_secs() -> u64 {
 
 #[derive(Debug, serde::Serialize)]
 pub struct BrowserDiagnostics {
-    pub enabled: bool,
+    /// Solver capability as last established, or "unknown" before the first
+    /// probe. Never triggers one: diagnostics is a read-only surface.
+    pub solver: String,
     pub calls_total: u64,
     pub restarts: u64,
-    pub max_instances: u32,
+    pub graceful_shutdowns: u64,
+    pub forced_terminations: u64,
+    pub solver_attempts: u64,
+    pub solver_successes: u64,
+    pub solver_failures: u64,
     pub max_memory_mb: u32,
     pub idle_timeout_s: u32,
 }
@@ -138,12 +144,18 @@ impl AppService {
 
         let stats = kani_core::v8_process::browser_stats();
         let browser = BrowserDiagnostics {
-            enabled: std::env::var("KANI_BROWSER_ENABLED")
-                .map(|v| v != "false" && v != "0")
-                .unwrap_or(true),
+            solver: self
+                .smart_client
+                .cached_solver_capability()
+                .map_or("unknown", kani_core::http::SolverCapability::as_str)
+                .to_string(),
             calls_total: stats.calls_total,
             restarts: stats.restarts,
-            max_instances: stats.max_instances,
+            graceful_shutdowns: stats.graceful_shutdowns,
+            forced_terminations: stats.forced_terminations,
+            solver_attempts: stats.solver_attempts,
+            solver_successes: stats.solver_successes,
+            solver_failures: stats.solver_failures,
             max_memory_mb: stats.max_memory_mb,
             idle_timeout_s: stats.idle_timeout_s,
         };

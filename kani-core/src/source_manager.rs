@@ -7,7 +7,7 @@ use crate::execute_wasm;
 use crate::wasm::{AllowedHost, HostState, KaniExtensionPre};
 
 /// Manages concurrent access to WASM source extensions via InstancePre.
-pub struct SourceManager {
+pub(crate) struct SourceManager {
     engine: wasmtime::Engine,
     instance_pre: KaniExtensionPre<HostState>,
     semaphore: Arc<Semaphore>,

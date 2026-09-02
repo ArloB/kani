@@ -71,7 +71,7 @@ async fn json_fetch_list_then_detail() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let result = extract_json(&mut state, None, &list_bp).await.unwrap();
 
     let rows = result["rows"].as_array().unwrap();
@@ -133,7 +133,7 @@ async fn html_fetch_sub_blueprint() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let result = extract_html(&mut state, None, &list_bp).await.unwrap();
 
     let rows = result["rows"].as_array().unwrap();
@@ -172,7 +172,7 @@ async fn fetch_disallowed_host_is_rejected() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let err = extract_json(&mut state, None, &list_bp).await.unwrap_err();
     assert!(
         err.contains("blocked") || err.contains("only contact"),
@@ -318,7 +318,7 @@ async fn on_failure_skip_produces_null() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let result = extract_json(&mut state, None, &list_bp).await.unwrap();
     let rows = result["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
@@ -359,7 +359,7 @@ async fn on_failure_fail_propagates_error() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let result = extract_json(&mut state, None, &list_bp).await;
     assert!(result.is_err(), "expected error to propagate");
 }
@@ -397,7 +397,7 @@ async fn on_failure_use_evaluates_fallback() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
     let result = extract_json(&mut state, None, &list_bp).await.unwrap();
     let rows = result["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
@@ -462,7 +462,7 @@ async fn html_sub_fetches_run_concurrently_not_sequentially() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
 
     let started = std::time::Instant::now();
     let result = extract_html(&mut state, None, &list_bp).await.unwrap();
@@ -549,7 +549,7 @@ async fn json_sub_fetches_run_concurrently_not_sequentially() {
         .build();
 
     let base_url = server.uri();
-    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let mut state = make_state(AllowedHost::Restricted(base_url.clone()));
 
     let started = std::time::Instant::now();
     let result = extract_json(&mut state, None, &list_bp).await.unwrap();

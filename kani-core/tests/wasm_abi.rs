@@ -1,10 +1,10 @@
-//! Integration tests that load `kani-test-abi.wasm` through the full WasmRuntime
+//! Integration tests that load `test-abi.wasm` through the full WasmRuntime
 //! stack and call each WIT export to verify host ABI correctness end-to-end.
 //!
 //! These tests are **skipped** (with an explanatory message) when the WASM binary
 //! has not been built yet. Build it first:
 //!
-//!   cargo run -p kani-cli -- build kani-test-abi
+//!   cargo run -p kani-cli -- build --dev
 //!
 //! Then run the tests:
 //!
@@ -26,34 +26,26 @@ fn workspace_root() -> std::path::PathBuf {
     manifest.parent().unwrap().to_path_buf()
 }
 
-fn load_wasm(name: &str) -> Option<Vec<u8>> {
+/// Reads a built extension, failing loudly when it is absent.
+///
+/// Returning `None` and letting each test return early meant a missing artifact
+/// reported passing tests that had executed nothing. CI builds these in the
+/// `test` job, so absence is a broken environment, not a reason to pass.
+fn load_wasm(name: &str) -> Vec<u8> {
     let path = workspace_root()
         .join("wasm_sources")
-        .join(format!("{}.wasm", name));
-    match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(_) => {
-            eprintln!(
-                "\n[SKIP] wasm_sources/{name}.wasm not found.\n\
-                 Build it with: cargo run -p kani-cli -- build {name}\n"
-            );
-            None
-        }
-    }
+        .join(format!("{name}.wasm"));
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "wasm_sources/{name}.wasm is missing ({e}).\n\
+             Build it with: cargo run -p kani-cli -- build --dev"
+        )
+    })
 }
 
 /// A generous tick budget so the epoch watchdog never fires in tests
 /// (no background thread calls engine.increment_epoch()).
 const EPOCH_TICKS: u64 = 50_000;
-
-macro_rules! skip_if_missing {
-    ($name:expr) => {{
-        let Some(bytes) = load_wasm($name) else {
-            return;
-        };
-        bytes
-    }};
-}
 
 async fn make_instance(
     bytes: &[u8],
@@ -72,7 +64,7 @@ async fn make_instance(
 
 #[tokio::test]
 async fn abi_html_imports_return_extracted_attr_and_text() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -91,7 +83,7 @@ async fn abi_html_imports_return_extracted_attr_and_text() {
 
 #[tokio::test]
 async fn abi_json_imports_return_extracted_fields() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -114,7 +106,7 @@ async fn abi_json_imports_return_extracted_fields() {
 
 #[tokio::test]
 async fn abi_utility_imports_return_decoded_string_and_query_param() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -137,7 +129,7 @@ async fn abi_utility_imports_return_decoded_string_and_query_param() {
 
 #[tokio::test]
 async fn abi_prefs_get_value_returns_injected_preferences() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     {
@@ -169,7 +161,7 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
 
 #[tokio::test]
 async fn abi_extract_html_returns_rows_from_blueprint() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -188,7 +180,7 @@ async fn abi_extract_html_returns_rows_from_blueprint() {
 
 #[tokio::test]
 async fn abi_extract_json_returns_rows_from_blueprint() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -207,7 +199,7 @@ async fn abi_extract_json_returns_rows_from_blueprint() {
 
 #[tokio::test]
 async fn abi_invalid_handles_return_errors() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -226,7 +218,7 @@ async fn abi_invalid_handles_return_errors() {
 
 #[tokio::test]
 async fn abi_get_metadata_returns_correct_extension_info() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -247,7 +239,7 @@ async fn abi_get_metadata_returns_correct_extension_info() {
 
 #[tokio::test]
 async fn abi_unknown_page_returns_empty_list() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -262,7 +254,7 @@ async fn abi_unknown_page_returns_empty_list() {
 
 #[tokio::test]
 async fn abi_unknown_query_returns_empty_list() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -277,7 +269,7 @@ async fn abi_unknown_query_returns_empty_list() {
 
 #[tokio::test]
 async fn abi_get_chapter_list_returns_empty() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -293,7 +285,7 @@ async fn abi_get_chapter_list_returns_empty() {
 
 #[tokio::test]
 async fn abi_get_filter_list_returns_empty() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -308,7 +300,7 @@ async fn abi_get_filter_list_returns_empty() {
 
 #[tokio::test]
 async fn abi_get_preferences_returns_empty() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -323,7 +315,7 @@ async fn abi_get_preferences_returns_empty() {
 
 #[tokio::test]
 async fn abi_handles_are_cleaned_up_after_each_call() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -467,7 +459,7 @@ fn ok_chapters(items: Vec<ChapterStreamItem>) -> Vec<ChapterInfo> {
 
 #[tokio::test]
 async fn abi_get_chapter_list_stream_bridge_yields_nothing_for_empty_sync_list() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let chapters = ok_chapters(drain_chapter_list_stream(&mut store, &instance, "any").await);
@@ -480,16 +472,17 @@ async fn abi_get_chapter_list_stream_bridge_yields_nothing_for_empty_sync_list()
 
 #[tokio::test]
 async fn abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let chapters =
         ok_chapters(drain_chapter_list_stream(&mut store, &instance, "paginated-stream").await);
 
+    let ids: Vec<&str> = chapters.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         chapters.len(),
         4,
-        "default bridge should page through get_chapter_list until has_next_page is false"
+        "default bridge should page through get_chapter_list until has_next_page is false, got {ids:?}"
     );
     assert_eq!(
         chapters.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
@@ -500,7 +493,7 @@ async fn abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order() {
 
 #[tokio::test]
 async fn abi_get_chapter_list_stream_native_override_survives_reentrant_host_call() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let chapters =
@@ -517,7 +510,7 @@ async fn abi_get_chapter_list_stream_native_override_survives_reentrant_host_cal
 
 #[tokio::test]
 async fn abi_get_chapter_list_stream_bridge_surfaces_fetch_error_instead_of_swallowing_it() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let items = drain_chapter_list_stream(&mut store, &instance, "error-timeout").await;
@@ -540,7 +533,7 @@ async fn abi_get_chapter_list_stream_bridge_surfaces_fetch_error_instead_of_swal
 
 #[tokio::test]
 async fn abi_get_chapter_list_stream_reader_drop_midstream_does_not_hang_or_leak() {
-    let bytes = skip_if_missing!("kani-test-abi");
+    let bytes = load_wasm("test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let items = tokio::time::timeout(

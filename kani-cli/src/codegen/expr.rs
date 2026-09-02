@@ -1,7 +1,9 @@
 //! Emit Rust builder-chain source code from an `Expr` tree.
 //! The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
 
-use kani_shared::ast::{Blueprint, Expr, IdEncoding, OnFailurePolicy, Op, PadAlign};
+use kani_shared::ast::{
+    Blueprint, Expr, ExprArena, ExprId, IdEncoding, OnFailurePolicy, Op, PadAlign,
+};
 
 pub fn emit_expr(expr: &Expr) -> String {
     match expr {
@@ -267,11 +269,12 @@ pub fn emit_expr(expr: &Expr) -> String {
                 )
             }
         }
+        Expr::Arena { arena, root } => emit_arena(arena, *root),
     }
 }
 
 /// Emit a `BlueprintBuilder::new(...)...build()` expression from a Blueprint struct.
-pub fn emit_blueprint_from_struct(bp: &Blueprint) -> String {
+pub(crate) fn emit_blueprint_from_struct(bp: &Blueprint) -> String {
     let mut lines = Vec::new();
     lines.push(format!(
         "BlueprintBuilder::new(\"{}\")",
@@ -328,6 +331,19 @@ fn e(expr: &Expr) -> String {
 
 fn emit_list(items: &[Expr]) -> String {
     items.iter().map(emit_expr).collect::<Vec<_>>().join(", ")
+}
+
+fn emit_arena(arena: &ExprArena, root: ExprId) -> String {
+    if let Err(error) = arena.validate(root) {
+        return format!("compile_error!({error:?})");
+    }
+    let bytes = postcard::to_allocvec(&(arena, root)).expect("arena serialization");
+    let bytes = bytes
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Expr::arena_from_bytes(&[{bytes}])")
 }
 
 fn emit_float(n: f64) -> String {

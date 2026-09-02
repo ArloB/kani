@@ -392,17 +392,30 @@ fn repo_add_rejects_tampered_artifact() {
     )
     .unwrap();
 
+    // Tamper in a way that leaves the YAML valid. Corrupting arbitrary bytes makes
+    // parsing fail first, which passes this test even with signature verification
+    // removed entirely — the signature has to be the only thing that can object.
     let artifact_path = staging_dir.join("extensions/test-source/1.0.0/extension.yaml");
-    let mut bytes = std::fs::read(&artifact_path).unwrap();
-    bytes[0] ^= 0xFF;
-    std::fs::write(&artifact_path, bytes).unwrap();
+    let text = std::fs::read_to_string(&artifact_path).unwrap();
+    let tampered = text.replace("name: Test Source", "name: Evil Source");
+    assert_ne!(
+        tampered, text,
+        "the tamper must actually change the artifact"
+    );
+    std::fs::write(&artifact_path, &tampered).unwrap();
 
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
     let result =
         kani_cli::commands::repo::run_add(&artifact_path, &author_pub_path, &repo_dir, None, None);
-    assert!(result.is_err(), "add should fail on tampered artifact");
+    let error = result
+        .expect_err("add must fail on a tampered artifact")
+        .to_string();
+    assert!(
+        error.contains("signature"),
+        "the signature must be what rejects it, got: {error}"
+    );
 }
 
 #[test]

@@ -18,7 +18,7 @@ mod helpers {
         Expr::Var(name.into())
     }
 
-    pub fn binop(op: Op, lhs: Expr, rhs: Expr) -> Expr {
+    pub(super) fn binop(op: Op, lhs: Expr, rhs: Expr) -> Expr {
         Expr::BinaryOperation {
             op,
             lhs: Box::new(lhs),
@@ -34,7 +34,7 @@ mod helpers {
         }
     }
 
-    pub fn opt_field(name: &str, expr: Expr) -> FieldDef {
+    pub(super) fn opt_field(name: &str, expr: Expr) -> FieldDef {
         FieldDef {
             name: name.into(),
             expr,
@@ -49,7 +49,7 @@ mod helpers {
         }
     }
 
-    pub async fn json_rows(
+    pub(super) async fn json_rows(
         json: &str,
         container: &str,
         fields: Vec<FieldDef>,
@@ -77,12 +77,12 @@ mod helpers {
         json_rows("{}", "", vec![field("v", expr)], vec![]).await[0]["v"].clone()
     }
 
-    pub async fn json_eval_opt(expr: Expr) -> serde_json::Value {
+    pub(super) async fn json_eval_opt(expr: Expr) -> serde_json::Value {
         json_rows("{}", "", vec![opt_field("v", expr)], vec![]).await[0]["v"].clone()
     }
 
     /// Evaluate and expect an error, returning it.
-    pub async fn json_eval_err(expr: Expr) -> String {
+    pub(super) async fn json_eval_err(expr: Expr) -> String {
         let mut state = HostState::default();
         let doc: serde_json::Value = serde_json::from_str("{}").unwrap();
         state.json_docs.insert(1, doc);
@@ -98,7 +98,7 @@ mod helpers {
         extract_json(&mut state, Some(1), &bp).await.unwrap_err()
     }
 
-    pub async fn html_rows(
+    pub(super) async fn html_rows(
         html: &str,
         container: &str,
         fields: Vec<FieldDef>,
@@ -128,7 +128,7 @@ mod helpers {
         out["rows"].as_array().unwrap().clone()
     }
 
-    pub const MANGA_HTML: &str = r#"
+    pub(super) const MANGA_HTML: &str = r#"
         <html><body>
           <div class="container">
             <article class="manga-card active" data-id="manga-123">
@@ -156,7 +156,7 @@ mod helpers {
         </body></html>
     "#;
 
-    pub const MANGA_JSON: &str = r#"
+    pub(super) const MANGA_JSON: &str = r#"
     {
       "data": [
         {
@@ -635,7 +635,7 @@ mod shared_tests {
             target: Box::new(lit("2024-01-15T12:00:00Z")),
         })
         .await;
-        assert!(v.as_i64().unwrap() > 0);
+        assert_eq!(v.as_i64().unwrap(), 1_705_320_000);
     }
 
     #[tokio::test]

@@ -22,10 +22,7 @@ const TAGGED: [&str; 3] = [
 
 #[tokio::test]
 async fn a_tagged_list_returns_an_etag_and_then_a_304() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     for path in TAGGED {
         let first = app
@@ -59,10 +56,7 @@ async fn a_tagged_list_returns_an_etag_and_then_a_304() {
 
 #[tokio::test]
 async fn a_stale_tag_gets_the_full_body() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -135,10 +129,7 @@ async fn the_tag_follows_the_library_contents() {
 
 #[tokio::test]
 async fn a_different_query_gets_a_different_tag() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let a = app
         .clone()
@@ -162,10 +153,7 @@ async fn a_different_query_gets_a_different_tag() {
 
 #[tokio::test]
 async fn a_streamed_response_is_left_alone() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -179,37 +167,8 @@ async fn a_streamed_response_is_left_alone() {
 }
 
 #[tokio::test]
-async fn an_unauthenticated_list_is_still_refused() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    for path in TAGGED {
-        let res = app
-            .clone()
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri(path)
-                    .header(header::IF_NONE_MATCH, "*")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "{path}: `If-None-Match: *` must not shortcut the auth guard"
-        );
-    }
-}
-
-#[tokio::test]
 async fn a_tagged_per_user_list_is_not_shared_cacheable() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()

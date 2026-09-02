@@ -32,7 +32,7 @@ impl AppService {
                 .unwrap_or_default(),
             default_tracking_enabled: s.default_tracking_enabled,
             http_request_logging: s.http_request_logging,
-            browser_debug_logging: s.browser_debug_logging,
+            v8_debug_logging: s.v8_debug_logging,
             registration_enabled: s.registration_enabled,
             cover_max_dimension: s.cover_max_dimension,
             email_enabled: s.email_enabled,
@@ -74,13 +74,12 @@ impl AppService {
             upgrade_axis_bitrate: s.upgrade_axis_bitrate.clone(),
             upgrade_show_downgrades: s.upgrade_show_downgrades,
             upgrade_auto_replace_reasons: s.upgrade_auto_replace_reasons.clone(),
-            browser_max_memory_mb: s.browser_max_memory_mb,
-            browser_max_instances: s.browser_max_instances,
+            v8_max_memory_mb: s.v8_max_memory_mb,
             update_check_enabled: s.update_check_enabled,
             opds_page_index_zero_based: s.opds_page_index_zero_based,
             scan_barren_page_tolerance: s.scan_barren_page_tolerance,
             global_search_timeout_secs: s.global_search_timeout_secs,
-            browser_idle_timeout_s: s.browser_idle_timeout_s,
+            v8_idle_timeout_s: s.v8_idle_timeout_s,
         }
     }
 
@@ -258,19 +257,14 @@ impl AppService {
                     .await;
             }
             SettingsUpdate::Advanced(s) => {
-                if s.browser_max_memory_mb < 64 || s.browser_max_memory_mb > 8192 {
+                if s.v8_max_memory_mb < 64 || s.v8_max_memory_mb > 8192 {
                     return Err(ServiceError::Validation(
-                        "browser_max_memory_mb must be 64-8192".into(),
+                        "v8_max_memory_mb must be 64-8192".into(),
                     ));
                 }
-                if s.browser_max_instances < 1 || s.browser_max_instances > 16 {
+                if s.v8_idle_timeout_s < 10 || s.v8_idle_timeout_s > 3600 {
                     return Err(ServiceError::Validation(
-                        "browser_max_instances must be 1-16".into(),
-                    ));
-                }
-                if s.browser_idle_timeout_s < 10 || s.browser_idle_timeout_s > 3600 {
-                    return Err(ServiceError::Validation(
-                        "browser_idle_timeout_s must be 10-3600".into(),
+                        "v8_idle_timeout_s must be 10-3600".into(),
                     ));
                 }
                 if !(1..=60).contains(&s.global_search_timeout_secs) {
@@ -280,9 +274,9 @@ impl AppService {
                 }
                 sqlx::query!(
                     "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, \
-                     max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, \
-                     registration_enabled=?, cover_max_dimension=?, browser_max_memory_mb=?, \
-                     browser_max_instances=?, browser_idle_timeout_s=?, \
+                     max_wasm_instances=?, http_request_logging=?, v8_debug_logging=?, \
+                     registration_enabled=?, cover_max_dimension=?, v8_max_memory_mb=?, \
+                     v8_idle_timeout_s=?, \
                      update_check_enabled=?, global_search_timeout_secs=?, \
                      opds_page_index_zero_based=? WHERE id='singleton'",
                     s.flaresolverr_url,
@@ -290,48 +284,53 @@ impl AppService {
                     s.wasm_storage_path,
                     s.max_wasm_instances,
                     s.http_request_logging,
-                    s.browser_debug_logging,
+                    s.v8_debug_logging,
                     s.registration_enabled,
                     s.cover_max_dimension,
-                    s.browser_max_memory_mb,
-                    s.browser_max_instances,
-                    s.browser_idle_timeout_s,
+                    s.v8_max_memory_mb,
+                    s.v8_idle_timeout_s,
                     s.update_check_enabled,
                     s.global_search_timeout_secs,
                     s.opds_page_index_zero_based,
                 )
                 .execute(&self.db)
                 .await?;
-                {
+                let browser_runtime_changed = {
                     let mut settings = self.settings.write().await;
+                    let changed = settings.v8_max_memory_mb != s.v8_max_memory_mb
+                        || settings.v8_idle_timeout_s != s.v8_idle_timeout_s;
                     settings.flaresolverr_url = s.flaresolverr_url.clone();
                     settings.library_path = s.library_path.clone().into();
                     settings.wasm_storage_path = s.wasm_storage_path.clone().into();
                     settings.max_wasm_instances = s.max_wasm_instances;
                     settings.http_request_logging = s.http_request_logging;
-                    settings.browser_debug_logging = s.browser_debug_logging;
+                    settings.v8_debug_logging = s.v8_debug_logging;
                     settings.registration_enabled = s.registration_enabled;
                     settings.cover_max_dimension = s.cover_max_dimension;
-                    settings.browser_max_memory_mb = s.browser_max_memory_mb;
-                    settings.browser_max_instances = s.browser_max_instances;
-                    settings.browser_idle_timeout_s = s.browser_idle_timeout_s;
+                    settings.v8_max_memory_mb = s.v8_max_memory_mb;
+                    settings.v8_idle_timeout_s = s.v8_idle_timeout_s;
                     settings.update_check_enabled = s.update_check_enabled;
                     settings.global_search_timeout_secs = s.global_search_timeout_secs;
                     settings.opds_page_index_zero_based = s.opds_page_index_zero_based;
-                }
-                kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);
+                    changed
+                };
+                kani_core::v8_process::set_v8_debug_logging(s.v8_debug_logging);
                 kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {
-                    max_memory_mb: s.browser_max_memory_mb as u32,
-                    max_instances: s.browser_max_instances as u32,
-                    idle_timeout_s: s.browser_idle_timeout_s as u32,
+                    max_memory_mb: s.v8_max_memory_mb as u32,
+                    idle_timeout_s: s.v8_idle_timeout_s as u32,
                 });
+                if browser_runtime_changed {
+                    self.sources.shutdown_all("browser-settings-change").await;
+                }
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None
                 } else {
                     Some(s.flaresolverr_url)
                 };
-                self.smart_client.update_solver_url(new_solver.clone());
-                self.proxy_client.update_solver_url(new_solver);
+                self.smart_client
+                    .update_solver_url(new_solver.clone())
+                    .await;
+                self.proxy_client.update_solver_url(new_solver).await;
                 self.audit(Some(user_id), "settings.update.advanced", None, None)
                     .await;
             }
@@ -614,7 +613,7 @@ const MASKED_KEYS: &[&str] = &[
 ];
 
 /// Returns a copy of the config JSON with credential values replaced by `PLACEHOLDER`.
-pub(crate) fn mask_email_config(config_json: &str) -> String {
+pub(super) fn mask_email_config(config_json: &str) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(config_json) else {
         return config_json.to_string();
     };

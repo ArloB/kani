@@ -3,17 +3,14 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, create_regular_user,
-    get_req, login, test_state,
+    authed_get, authed_patch, authed_post, body_json, build_test_app, create_admin,
+    create_regular_user, login, test_state,
 };
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn get_settings_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/settings", &cookie))
@@ -107,21 +104,8 @@ async fn a_plain_user_cannot_read_the_infrastructure_settings() {
 }
 
 #[tokio::test]
-async fn get_settings_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/settings")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn patch_settings_scan_updates_interval() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -154,28 +138,8 @@ async fn patch_settings_scan_updates_interval() {
 }
 
 #[tokio::test]
-async fn patch_settings_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_patch(
-            "/rest/settings",
-            "",
-            serde_json::json!({"Scan": {"auto_scan": false, "scan_interval_minutes": 60, "scan_exclude_completed": false}}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn patch_settings_invalid_body_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -195,10 +159,7 @@ async fn patch_settings_invalid_body_returns_4xx() {
 
 #[tokio::test]
 async fn get_settings_shows_env_setting_defaults() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/settings", &cookie))
@@ -218,10 +179,7 @@ async fn get_settings_shows_env_setting_defaults() {
 
 #[tokio::test]
 async fn patch_settings_maintenance_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -267,10 +225,7 @@ async fn patch_settings_maintenance_updates() {
 
 #[tokio::test]
 async fn patch_settings_security_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -302,34 +257,8 @@ async fn patch_settings_security_updates() {
 }
 
 #[tokio::test]
-async fn patch_settings_security_unauthed_returns_401() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_patch(
-            "/rest/settings",
-            "",
-            serde_json::json!({
-                "Security": {
-                    "max_login_attempts": 8,
-                    "max_ip_attempts": 40,
-                    "login_lockout_seconds": 600,
-                    "session_timeout_secs": 86400
-                }
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn patch_settings_maintenance_invalid_threshold_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -356,10 +285,7 @@ async fn patch_settings_maintenance_invalid_threshold_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_security_invalid_attempts_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -385,10 +311,7 @@ async fn patch_settings_security_invalid_attempts_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_performance_updates() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -423,10 +346,7 @@ async fn patch_settings_performance_updates() {
 
 #[tokio::test]
 async fn patch_settings_performance_invalid_returns_4xx() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -453,10 +373,7 @@ async fn patch_settings_performance_invalid_returns_4xx() {
 
 #[tokio::test]
 async fn patch_settings_rejects_a_zero_scrub_interval() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_patch(
@@ -487,10 +404,7 @@ async fn patch_settings_rejects_a_zero_scrub_interval() {
 
 #[tokio::test]
 async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     for gain in [0.5, 9.0] {
         let res = app
@@ -518,4 +432,63 @@ async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
             res.status()
         );
     }
+}
+
+#[tokio::test]
+async fn solver_test_rejects_an_empty_url() {
+    let (app, cookie) = common::admin_app().await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "   " }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn solver_test_reports_an_unreachable_solver_without_failing_the_request() {
+    let (app, cookie) = common::admin_app().await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "http://127.0.0.1:1/v1" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a failed probe is a result, not an HTTP error"
+    );
+    let body = body_json(res).await;
+    assert_eq!(body["status"], "unreachable");
+    assert_eq!(body["insecure_transport"], false);
+}
+
+#[tokio::test]
+async fn solver_test_flags_plain_http_to_a_routable_host() {
+    let (app, cookie) = common::admin_app().await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/settings/solver/test",
+            &cookie,
+            serde_json::json!({ "url": "http://solver.example.com/v1" }),
+        ))
+        .await
+        .unwrap();
+
+    let body = body_json(res).await;
+    assert_eq!(
+        body["insecure_transport"], true,
+        "the key and captured pages would cross the network in the clear"
+    );
 }

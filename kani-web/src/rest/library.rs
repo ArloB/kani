@@ -71,7 +71,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_library_filtered(
+pub(super) async fn get_library_filtered(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<LibraryQuery>,
@@ -149,7 +149,7 @@ pub(crate) async fn get_library_filtered(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn scan_all_library(
+pub(super) async fn scan_all_library(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -172,7 +172,7 @@ pub(crate) async fn scan_all_library(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn scan_manga_multiple(
+pub(super) async fn scan_manga_multiple(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<ScanMangaRequest>,
@@ -199,7 +199,7 @@ pub(crate) async fn scan_manga_multiple(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_continue_reading_shelf(
+pub(super) async fn get_continue_reading_shelf(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Query(q): Query<ContinueReadingShelfQuery>,
@@ -241,7 +241,7 @@ pub(crate) async fn get_continue_reading_shelf(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_library(
+pub(super) async fn get_library(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path((page, order)): Path<(i32, i32)>,
@@ -260,7 +260,7 @@ pub(crate) async fn get_library(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_backup(
+pub(super) async fn library_backup(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     headers: axum::http::HeaderMap,
@@ -304,7 +304,7 @@ pub(crate) async fn library_backup(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_backup_preview(
+pub(super) async fn library_backup_preview(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -352,7 +352,7 @@ pub(crate) async fn library_backup_preview(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_restore(
+pub(super) async fn library_restore(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -457,7 +457,7 @@ pub(crate) async fn library_restore(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_tachiyomi_preview(
+pub(super) async fn library_tachiyomi_preview(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -478,7 +478,7 @@ pub(crate) async fn library_tachiyomi_preview(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_import_tachiyomi(
+pub(super) async fn library_import_tachiyomi(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -553,7 +553,7 @@ pub(crate) async fn library_import_tachiyomi(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_pending_imports(
+pub(super) async fn library_pending_imports(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -571,7 +571,7 @@ pub(crate) async fn library_pending_imports(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_delete_pending_import(
+pub(super) async fn library_delete_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
@@ -592,7 +592,7 @@ pub(crate) async fn library_delete_pending_import(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_resolve_pending_import(
+pub(super) async fn library_resolve_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
@@ -613,7 +613,7 @@ pub(crate) async fn library_resolve_pending_import(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_orphaned(
+pub(super) async fn library_orphaned(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -631,7 +631,7 @@ pub(crate) async fn library_orphaned(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_duplicates(
+pub(super) async fn library_duplicates(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -650,7 +650,7 @@ pub(crate) async fn library_duplicates(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_merge_duplicate(
+pub(super) async fn library_merge_duplicate(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<MergeDuplicateBody>,
@@ -670,7 +670,7 @@ pub(crate) async fn library_merge_duplicate(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_duplicates_scan(
+pub(super) async fn library_duplicates_scan(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -692,7 +692,7 @@ pub(crate) async fn library_duplicates_scan(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn library_dismiss_duplicate(
+pub(super) async fn library_dismiss_duplicate(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     axum::extract::Path(path): axum::extract::Path<DismissDuplicatePath>,
@@ -714,7 +714,7 @@ pub(crate) async fn library_dismiss_duplicate(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_recent_updates(
+pub(super) async fn get_recent_updates(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<PageQuery>,
@@ -751,7 +751,7 @@ pub(crate) async fn get_recent_updates(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn global_search_handler(
+pub(super) async fn global_search_handler(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Query(q): Query<GlobalSearchQuery>,

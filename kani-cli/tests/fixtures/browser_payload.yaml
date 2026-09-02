@@ -15,6 +15,7 @@ endpoints:
     page_url: "https://example.com/manga/$manga_id$"
     script: fetch_popular
     timeout_ms: 15000
+    auto_scroll: false
     container: ":root"
     fields:
       id:

@@ -35,7 +35,7 @@ async fn settings_singleton_exists_with_recent_columns() {
     let pool = fresh_pool().await;
 
     let row: (bool, i64) = sqlx::query_as(
-        "SELECT update_check_enabled, browser_max_instances \
+        "SELECT update_check_enabled, v8_idle_timeout_s \
          FROM settings WHERE id = 'singleton'",
     )
     .fetch_one(&pool)
@@ -43,7 +43,10 @@ async fn settings_singleton_exists_with_recent_columns() {
     .unwrap();
 
     assert!(row.0, "update checking defaults on");
-    assert!(row.1 > 0, "browser_max_instances should have a default");
+    assert_eq!(
+        row.1, 300,
+        "the V8 idle timeout keeps its default across the rename"
+    );
 }
 
 #[tokio::test]
@@ -58,7 +61,7 @@ async fn recurring_job_kinds_can_be_persisted() {
         .await
         .unwrap();
 
-    for expected in ["update_check", "browser_process_reap", "db_maintenance"] {
+    for expected in ["update_check", "v8_process_reap", "db_maintenance"] {
         assert!(
             kinds.iter().any(|k| k == expected),
             "{expected} should be seeded, got {kinds:?}"

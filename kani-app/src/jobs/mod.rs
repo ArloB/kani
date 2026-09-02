@@ -3,7 +3,6 @@
 pub mod archive_export;
 pub mod audit_prune;
 pub mod backup;
-pub mod browser_reap;
 pub mod circuit_breaker;
 pub mod download;
 pub mod error;
@@ -23,6 +22,7 @@ pub mod thumbnail;
 pub mod tracker_sync;
 pub mod trash_purge;
 pub mod update_check;
+pub mod v8_reap;
 pub mod webhook_delivery;
 
 pub use error::{DownloadErrorKind, JobError, RetryPolicy};

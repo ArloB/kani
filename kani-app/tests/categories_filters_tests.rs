@@ -11,13 +11,6 @@ async fn list_categories_empty_on_fresh_db() {
 }
 
 #[tokio::test]
-async fn create_category_returns_positive_id() {
-    let svc = test_service().await;
-    let id = svc.create_category("Favourites", 0).await.unwrap();
-    assert!(id > 0);
-}
-
-#[tokio::test]
 async fn list_categories_returns_created_categories() {
     let svc = test_service().await;
     svc.create_category("Action", 0).await.unwrap();

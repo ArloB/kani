@@ -1,23 +1,24 @@
 use crate::utilities::parse_date_flexible;
 use crate::wasm::{SafeHtml, StoredNode};
 use ego_tree::NodeId;
-use kani_shared::ast::{Expr, Op, PadAlign};
+use kani_shared::ast::{Expr, ExprArena, ExprLeaf, ExprNode, Op, PadAlign};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub const MAX_EVAL_ITERATIONS: u32 = 100_000;
-pub const MAX_EVAL_DEPTH: u32 = 50;
-pub const MAX_LIST_SIZE: usize = 10_000;
+pub(super) const MAX_EVAL_ITERATIONS: u32 = 100_000;
+pub(super) const MAX_EVAL_DEPTH: u32 = 50;
+pub(super) const MAX_LIST_SIZE: usize = 10_000;
 
 /// Marker on an evaluator error that carries an HTTP status the caller should
 /// classify (`__http_status__:429:120`). Canonical definition lives in
 /// `kani_shared` so both backends decode it identically; re-exported here for
 /// the evaluator that produces it.
 pub use kani_shared::extension::HTTP_STATUS_ERR_PREFIX;
-pub const MAX_STRING_LENGTH: usize = 1_000_000;
+pub(super) const MAX_STRING_LENGTH: usize = 1_000_000;
+pub(super) const ARENA_ENV_MARKER: &str = "\0kani:arena";
 
 /// Overridable ceilings for the declarative evaluator. Production uses
 /// [`EvalLimits::default`] (the `MAX_*` consts); tests shrink them via
@@ -53,7 +54,7 @@ impl EvalBudget {
         Self::with_limits(EvalLimits::default())
     }
 
-    pub fn with_limits(limits: EvalLimits) -> Self {
+    pub(crate) fn with_limits(limits: EvalLimits) -> Self {
         Self {
             steps_remaining: AtomicU32::new(limits.max_iterations),
             depth_current: AtomicU32::new(0),
@@ -67,7 +68,7 @@ impl EvalBudget {
         self.depth_current.store(0, Ordering::Relaxed);
     }
 
-    pub fn charge_step(&self) -> Result<(), String> {
+    pub(crate) fn charge_step(&self) -> Result<(), String> {
         let prev = self
             .steps_remaining
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
@@ -83,7 +84,7 @@ impl EvalBudget {
         }
     }
 
-    pub fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
+    pub(crate) fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
         let d = self.depth_current.fetch_add(1, Ordering::Relaxed);
         if d >= self.limits.max_depth {
             self.depth_current.fetch_sub(1, Ordering::Relaxed);
@@ -122,6 +123,115 @@ pub enum Value {
     Json(serde_json::Value),
 }
 
+pub(super) fn eval_flat_arena(
+    arena: &ExprArena,
+    root: kani_shared::ast::ExprId,
+    env: &Env,
+    budget: &Arc<EvalBudget>,
+) -> Option<Result<Value, String>> {
+    let mut reachable = vec![false; arena.nodes.len()];
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        let node = arena.nodes.get(id.0 as usize)?;
+        if std::mem::replace(&mut reachable[id.0 as usize], true) {
+            continue;
+        }
+        pending.extend(node.children());
+    }
+    if arena.nodes.iter().enumerate().any(|(index, node)| {
+        reachable[index]
+            && !matches!(
+                node,
+                ExprNode::Leaf(
+                    ExprLeaf::Literal(_)
+                        | ExprLeaf::Number(_)
+                        | ExprLeaf::Null
+                        | ExprLeaf::Bool(_)
+                        | ExprLeaf::Var(_)
+                ) | ExprNode::Unary {
+                    op: kani_shared::ast::UnaryExprOp::Trim,
+                    ..
+                } | ExprNode::BinaryOperation {
+                    op: Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::Div
+                        | Op::Eq
+                        | Op::Ne
+                        | Op::Lt
+                        | Op::Gt
+                        | Op::Le
+                        | Op::Ge,
+                    ..
+                }
+            )
+    }) {
+        return None;
+    }
+
+    Some((|| {
+        arena.validate(root)?;
+        let mut values = vec![None::<Value>; arena.nodes.len()];
+        for (index, node) in arena.nodes.iter().enumerate() {
+            if !reachable[index] {
+                continue;
+            }
+            budget.charge_step()?;
+            let value = match node {
+                ExprNode::Leaf(ExprLeaf::Literal(value)) => Value::Str(value.clone()),
+                ExprNode::Leaf(ExprLeaf::Number(value)) => Value::Num(*value),
+                ExprNode::Leaf(ExprLeaf::Null) => Value::Null,
+                ExprNode::Leaf(ExprLeaf::Bool(value)) => Value::Bool(*value),
+                ExprNode::Leaf(ExprLeaf::Var(name)) => env
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| format!("Undefined variable '{name}'"))?,
+                ExprNode::Unary {
+                    op: kani_shared::ast::UnaryExprOp::Trim,
+                    target,
+                } => values
+                    .get(target.0 as usize)
+                    .and_then(Option::as_ref)
+                    .cloned()
+                    .ok_or_else(|| "invalid arena trim target".to_string())?
+                    .map_str("trim", |value| Ok(Value::Str(value.trim().to_owned())))?,
+                ExprNode::BinaryOperation { op, lhs, rhs } => {
+                    let lhs = values
+                        .get(lhs.0 as usize)
+                        .and_then(Option::as_ref)
+                        .cloned()
+                        .ok_or_else(|| "invalid arena left operand".to_string())?;
+                    let rhs = values
+                        .get(rhs.0 as usize)
+                        .and_then(Option::as_ref)
+                        .cloned()
+                        .ok_or_else(|| "invalid arena right operand".to_string())?;
+                    match op {
+                        Op::Add
+                        | Op::Sub
+                        | Op::Mul
+                        | Op::Div
+                        | Op::Lt
+                        | Op::Gt
+                        | Op::Le
+                        | Op::Ge => numeric_op(op, lhs, rhs)?,
+                        Op::Eq => Value::Bool(lhs == rhs),
+                        Op::Ne => Value::Bool(lhs != rhs),
+                        Op::And | Op::Or => unreachable!("filtered before evaluation"),
+                    }
+                }
+                _ => unreachable!("filtered before evaluation"),
+            };
+            values[index] = Some(value);
+        }
+        values
+            .get(root.0 as usize)
+            .and_then(Option::as_ref)
+            .cloned()
+            .ok_or_else(|| "expression arena root is missing".to_string())
+    })())
+}
+
 impl Value {
     pub fn to_json(&self) -> Option<serde_json::Value> {
         match self {
@@ -141,7 +251,7 @@ impl Value {
         }
     }
 
-    pub fn into_str(self, op: &str) -> Result<String, String> {
+    pub(crate) fn into_str(self, op: &str) -> Result<String, String> {
         match self {
             Value::Str(s) => Ok(s),
             _ => Err(format!("{}: expected string value", op)),
@@ -150,7 +260,7 @@ impl Value {
 
     /// Apply `f` to the inner string, propagating `Null` as `Null`.
     /// Returns `Err` if the value is neither `Str` nor `Null`.
-    pub fn map_str<F>(self, op: &str, f: F) -> Result<Value, String>
+    pub(crate) fn map_str<F>(self, op: &str, f: F) -> Result<Value, String>
     where
         F: FnOnce(String) -> Result<Value, String>,
     {
@@ -161,7 +271,7 @@ impl Value {
         }
     }
 
-    pub fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
+    pub(crate) fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
         match self {
             Value::List(v) => Ok(v),
             Value::Json(serde_json::Value::Array(arr)) => {
@@ -171,7 +281,7 @@ impl Value {
         }
     }
 
-    pub fn into_json(self, op: &str) -> Result<serde_json::Value, String> {
+    pub(crate) fn into_json(self, op: &str) -> Result<serde_json::Value, String> {
         match self {
             Value::Json(v) => Ok(v),
             Value::Null => Ok(serde_json::Value::Null),
@@ -180,7 +290,7 @@ impl Value {
     }
 
     /// Returns `Ok(Some(StoredNode))` for an HTML element, `Ok(None)` for Null, or an error otherwise.
-    pub fn into_html_element(self, op: &str) -> Result<Option<StoredNode>, String> {
+    pub(crate) fn into_html_element(self, op: &str) -> Result<Option<StoredNode>, String> {
         match self {
             Value::HtmlElement { doc, node_id } => Ok(Some(StoredNode { doc, node_id })),
             Value::Null => Ok(None),
@@ -238,7 +348,7 @@ impl Env {
 ///
 /// `recurse` takes `(&'a Expr, Env)` so callers can move `env` on the final call instead of
 /// always cloning. With the Arc-backed `Env`, all other clones are O(1) regardless.
-pub async fn eval_common_expr<'a, F>(
+pub(super) async fn eval_common_expr<'a, F>(
     expr: &'a Expr,
     env: Env,
     recurse: &F,
@@ -931,7 +1041,7 @@ fn compare_sort_key(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 
 /// Fetch a URL and return the response body as a String.
-pub async fn fetch_body(
+pub(super) async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
@@ -958,6 +1068,7 @@ pub async fn fetch_body(
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
                 v8_process: Some(state.v8_process.clone()),
+                http: Some(state.http_client.clone()),
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
             };
@@ -1040,6 +1151,7 @@ pub async fn fetch_body(
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
                 v8_process: Some(state.v8_process.clone()),
+                http: Some(state.http_client.clone()),
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
             };
@@ -1147,7 +1259,7 @@ fn expr_has_fetch(expr: &kani_shared::ast::Expr) -> bool {
     }
 }
 
-pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
+pub(super) fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
     bp.fields.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.scalars.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.bindings.iter().any(|b| expr_has_fetch(&b.expr))
@@ -1156,7 +1268,7 @@ pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
 /// Charges the io/host-allowlist budget and builds a `RequestDef` without sending it. Only
 /// valid when `state.hook_registry` is `None`, since hooks can retry/rewrite a request after
 /// seeing the response — see [`send_prepared_request`].
-pub fn charge_fetch_request(
+pub(super) fn charge_fetch_request(
     state: &mut crate::wasm::HostState,
     url: &str,
     method: &kani_shared::ast::HttpMethod,
@@ -1186,7 +1298,7 @@ pub fn charge_fetch_request(
 /// `Clone`-cheap `SmartClient` instead of `&mut HostState` so callers can run several of these
 /// concurrently; the per-domain rate limiter/semaphore in `SmartClient::send_request` still
 /// applies. Mirrors `fetch_body`'s no-hooks path exactly.
-pub async fn send_prepared_request(
+pub(super) async fn send_prepared_request(
     client: crate::http::SmartClient,
     req: kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
@@ -1225,7 +1337,7 @@ pub async fn send_prepared_request(
     String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string())
 }
 
-pub async fn eval_fetch_field(
+pub(super) async fn eval_fetch_field(
     state: &mut crate::wasm::HostState,
     url: &str,
     method: &kani_shared::ast::HttpMethod,
@@ -1334,6 +1446,49 @@ fn numeric_op(op: &Op, l: Value, r: Value) -> Result<Value, String> {
         Op::Le => Ok(Value::Bool(a <= b)),
         Op::Ge => Ok(Value::Bool(a >= b)),
         _ => Err(format!("{:?}: not a numeric operator", op)),
+    }
+}
+
+/// Inserts a field's evaluated value into a row, enforcing the string limit and
+/// the field's own optionality.
+///
+/// A `None` value means the expression produced nothing: optional fields record
+/// that as JSON null, required fields are an error naming the field. Shared by the
+/// HTML and JSON evaluators so both enforce the same rule.
+pub(super) fn insert_field_value(
+    row: &mut serde_json::Map<String, serde_json::Value>,
+    field_name: &str,
+    optional: bool,
+    val: Value,
+    max_string_length: usize,
+) -> Result<(), String> {
+    match val.to_json() {
+        Some(v) => {
+            if let serde_json::Value::String(s) = &v
+                && s.len() > max_string_length
+            {
+                return Err(format!("limit:max_string_length:{max_string_length}"));
+            }
+            row.insert(field_name.to_string(), v);
+            Ok(())
+        }
+        None if optional => {
+            row.insert(field_name.to_string(), serde_json::Value::Null);
+            Ok(())
+        }
+        None => Err(format!("Required field '{field_name}' produced null")),
+    }
+}
+
+/// Coerces an evaluated header key/value pair to strings.
+///
+/// A header whose key or value evaluated to a non-string is a blueprint error
+/// rather than something to stringify, because the coercion would be silent and
+/// the resulting request would not be the one the extension described.
+pub(super) fn header_pair(key: Value, value: Value) -> Result<(String, String), String> {
+    match (key, value) {
+        (Value::Str(k), Value::Str(v)) => Ok((k, v)),
+        _ => Err("Fetch: header keys and values must be strings".into()),
     }
 }
 
@@ -1466,6 +1621,33 @@ mod tests {
         budget.charge_step().unwrap();
     }
 
+    #[test]
+    fn flat_arena_evaluates_ten_thousand_nodes_without_depth_budget() {
+        use super::{Env, EvalBudget, Value, eval_flat_arena};
+        use kani_shared::ast::{ExprArena, ExprId, ExprLeaf, ExprNode, Op};
+        use std::sync::Arc;
+
+        let mut nodes = vec![ExprNode::Leaf(ExprLeaf::Number(1.0))];
+        let mut root = ExprId(0);
+        for _ in 0..4_999 {
+            let rhs = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::Leaf(ExprLeaf::Number(1.0)));
+            let next = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::BinaryOperation {
+                op: Op::Add,
+                lhs: root,
+                rhs,
+            });
+            root = next;
+        }
+        let arena = ExprArena { nodes };
+        let budget = Arc::new(EvalBudget::new());
+        let value = eval_flat_arena(&arena, root, &Env::new(), &budget)
+            .expect("supported flat expression")
+            .expect("evaluation succeeds");
+        assert_eq!(value, Value::Num(5_000.0));
+    }
+
     #[tokio::test]
     async fn json_eval_depth_limit() {
         use super::MAX_EVAL_DEPTH;
@@ -1490,5 +1672,175 @@ mod tests {
             err.contains("limit:max_depth"),
             "expected depth-limit sentinel, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn arena_structure_does_not_consume_legacy_depth_budget() {
+        use crate::evaluator::json_eval;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{
+            BlueprintBuilder, Expr, ExprArena, ExprId, ExprLeaf, ExprNode, UnaryExprOp,
+        };
+        use std::sync::Arc;
+
+        let mut nodes = vec![ExprNode::Leaf(ExprLeaf::Literal(" value ".into()))];
+        let mut root = ExprId(0);
+        for _ in 0..100 {
+            let next = ExprId(nodes.len() as u32);
+            nodes.push(ExprNode::Unary {
+                op: UnaryExprOp::Trim,
+                target: root,
+            });
+            root = next;
+        }
+        let expression = Expr::Arena {
+            arena: Arc::new(ExprArena { nodes }),
+            root,
+        };
+        let blueprint = BlueprintBuilder::new("/items")
+            .field("value", expression)
+            .build();
+        let mut state = HostState::default();
+        let result = json_eval::extract_json_str(
+            &mut state,
+            &serde_json::json!({ "items": [{}] }).to_string(),
+            &blueprint,
+        )
+        .await
+        .expect("arena evaluation");
+        assert_eq!(result["rows"][0]["value"], "value");
+    }
+
+    #[tokio::test]
+    async fn complex_comix_arena_preserves_control_flow_and_collections() {
+        use crate::evaluator::json_eval;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{BlueprintBuilder, Expr};
+
+        let source = r#"let $synopsis = self.ptr("/synopsis").str().fallback("");
+let $alts = if pref("alt_titles_in_description") == "true"
+  then self.ptr("/altTitles").map($item.str()).join("\n").fallback("")
+  else "";
+let $facts = if pref("extra_info_in_description") == "true"
+  then merge([
+    [format("Year: {}", self.ptr("/year").int().to_string())],
+    [format("Rating: {} from {} ratings",
+            self.ptr("/ratedAvg").float().to_string(),
+            self.ptr("/ratedCount").int().to_string())],
+    [format("Followed by: {}", self.ptr("/followsTotal").int().to_string())]
+  ]).join("\n")
+  else "";
+merge([
+  [$synopsis],
+  [if $alts == "" then "" else format("Alternative names:\n{}", $alts)],
+  [$facts]
+]).filter($item != "").join("\n\n")"#;
+        let parsed = kani_yaml::dsl::parse(source).expect("parse Comix expression");
+        let expression = Expr::try_from(parsed).expect("lower Comix expression");
+        assert!(matches!(expression, Expr::Arena { .. }));
+        let blueprint = BlueprintBuilder::new("/items")
+            .field("description", expression)
+            .build();
+        let document = serde_json::json!({
+            "items": [{
+                "synopsis": "Summary",
+                "altTitles": ["Alternative"],
+                "year": 2024,
+                "ratedAvg": 4.5,
+                "ratedCount": 12,
+                "followsTotal": 99
+            }]
+        });
+        let mut state = HostState::default();
+        state
+            .preferences
+            .insert("alt_titles_in_description".into(), "true".into());
+        state
+            .preferences
+            .insert("extra_info_in_description".into(), "true".into());
+        let result = json_eval::extract_json_str(&mut state, &document.to_string(), &blueprint)
+            .await
+            .expect("evaluate Comix arena");
+        let description = result["rows"][0]["description"].as_str().unwrap();
+        assert!(description.contains("Summary"));
+        assert!(description.contains("Alternative names:\nAlternative"));
+        assert!(description.contains("Year: 2024"));
+        assert!(description.contains("Rating: 4.5 from 12 ratings"));
+    }
+}
+
+#[cfg(test)]
+mod field_insertion_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn row() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+
+    #[test]
+    fn a_string_at_the_limit_is_accepted_and_one_over_is_not() {
+        let mut r = row();
+        insert_field_value(&mut r, "t", false, Value::Str("abcd".into()), 4).unwrap();
+        assert_eq!(r["t"], "abcd", "a string of exactly the limit must pass");
+
+        insert_field_value(&mut r, "t", false, Value::Str("abc".into()), 4).unwrap();
+        assert_eq!(r["t"], "abc");
+
+        let error =
+            insert_field_value(&mut r, "t", false, Value::Str("abcde".into()), 4).unwrap_err();
+        assert_eq!(
+            error, "limit:max_string_length:4",
+            "one character over the limit must be refused, and the error carries the limit"
+        );
+        assert_eq!(r["t"], "abc", "a refused value must not land in the row");
+    }
+
+    #[test]
+    fn the_limit_applies_to_strings_alone() {
+        let mut r = row();
+        // A long non-string carries no length the limit could describe.
+        insert_field_value(&mut r, "n", false, Value::Int(1_234_567_890), 2).unwrap();
+        assert_eq!(r["n"], 1_234_567_890_i64);
+    }
+
+    #[test]
+    fn an_absent_optional_field_becomes_null_and_an_absent_required_one_is_an_error() {
+        let mut r = row();
+        insert_field_value(&mut r, "maybe", true, Value::Null, 100).unwrap();
+        assert!(
+            r.contains_key("maybe") && r["maybe"].is_null(),
+            "an optional field must be present as null, not missing: {r:?}"
+        );
+
+        let error = insert_field_value(&mut r, "must", false, Value::Null, 100).unwrap_err();
+        assert!(
+            error.contains("must"),
+            "the error must name the field that produced nothing, got: {error}"
+        );
+        assert!(
+            !r.contains_key("must"),
+            "a required field that produced nothing must not be inserted"
+        );
+    }
+
+    #[test]
+    fn header_pairs_must_be_strings_on_both_sides() {
+        assert_eq!(
+            header_pair(Value::Str("Referer".into()), Value::Str("https://x".into())).unwrap(),
+            ("Referer".to_string(), "https://x".to_string())
+        );
+
+        for (key, value) in [
+            (Value::Int(1), Value::Str("v".into())),
+            (Value::Str("k".into()), Value::Int(1)),
+            (Value::Null, Value::Null),
+        ] {
+            let error = header_pair(key, value).unwrap_err();
+            assert!(
+                error.contains("must be strings"),
+                "a non-string header part must be refused rather than coerced, got: {error}"
+            );
+        }
     }
 }

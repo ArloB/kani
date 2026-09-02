@@ -262,10 +262,3 @@ export function openCommandPalette() {
   render(h(CommandPalette, { onClose: close }), _container);
 }
 
-export function closeCommandPalette() {
-  if (_container) {
-    render(null, _container);
-    _container.remove();
-    _container = null;
-  }
-}

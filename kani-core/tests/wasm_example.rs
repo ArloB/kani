@@ -19,39 +19,33 @@ fn workspace_root() -> std::path::PathBuf {
     manifest.parent().unwrap().to_path_buf()
 }
 
-fn load_wasm(name: &str) -> Option<Vec<u8>> {
+/// Reads a built extension, failing loudly when it is absent.
+///
+/// This used to return `None` and let each test return early, which meant a
+/// missing artifact reported twelve passing tests that had executed nothing —
+/// and it did, because the tests asked for `kani-example.wasm` while the build
+/// emits `example.wasm`. CI builds these in the `test` job, so absence is a
+/// broken environment, not a reason to pass.
+fn load_wasm(name: &str) -> Vec<u8> {
     let path = workspace_root()
         .join("wasm_sources")
-        .join(format!("{}.wasm", name));
-    match std::fs::read(&path) {
-        Ok(bytes) => Some(bytes),
-        Err(_) => {
-            eprintln!(
-                "\n[SKIP] wasm_sources/{name}.wasm not found.\n\
-                 Build it with: cargo run -p kani-cli -- build {name}\n"
-            );
-            None
-        }
-    }
+        .join(format!("{name}.wasm"));
+    std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "wasm_sources/{name}.wasm is missing ({e}).\n\
+             Build it with: cargo run -p kani-cli -- build --dev"
+        )
+    })
 }
 
 const EPOCH_TICKS: u64 = 50_000;
-
-macro_rules! skip_if_missing {
-    ($name:expr) => {{
-        let Some(bytes) = load_wasm($name) else {
-            return;
-        };
-        bytes
-    }};
-}
 
 async fn example_instance() -> (
     WasmRuntime,
     wasmtime::Store<kani_core::wasm::HostState>,
     kani_core::wasm::KaniExtension,
 ) {
-    let bytes = load_wasm("kani-example").expect("kani-example.wasm must exist for this helper");
+    let bytes = load_wasm("example");
     let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let mut store = rt.create_store();
@@ -62,7 +56,7 @@ async fn example_instance() -> (
 
 #[tokio::test]
 async fn example_wasm_compiles_and_instantiates() {
-    let bytes = skip_if_missing!("kani-example");
+    let bytes = load_wasm("example");
     let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let mut store = rt.create_store();
@@ -72,9 +66,6 @@ async fn example_wasm_compiles_and_instantiates() {
 
 #[tokio::test]
 async fn example_get_metadata_returns_correct_fields() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -96,9 +87,6 @@ async fn example_get_metadata_returns_correct_fields() {
 
 #[tokio::test]
 async fn example_get_popular_manga_returns_empty_list() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -115,9 +103,6 @@ async fn example_get_popular_manga_returns_empty_list() {
 
 #[tokio::test]
 async fn example_search_manga_returns_empty_list() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -133,9 +118,6 @@ async fn example_search_manga_returns_empty_list() {
 
 #[tokio::test]
 async fn example_get_manga_details_returns_hardcoded_info() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -159,9 +141,6 @@ async fn example_get_manga_details_returns_hardcoded_info() {
 
 #[tokio::test]
 async fn example_get_chapter_list_returns_empty() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -177,9 +156,6 @@ async fn example_get_chapter_list_returns_empty() {
 
 #[tokio::test]
 async fn example_get_pages_returns_empty_chapter() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -194,9 +170,6 @@ async fn example_get_pages_returns_empty_chapter() {
 
 #[tokio::test]
 async fn example_get_filter_list_returns_empty() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -211,9 +184,6 @@ async fn example_get_filter_list_returns_empty() {
 
 #[tokio::test]
 async fn example_get_preferences_returns_empty() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -228,9 +198,6 @@ async fn example_get_preferences_returns_empty() {
 
 #[tokio::test]
 async fn example_get_url_returns_default_not_implemented_error() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -253,9 +220,6 @@ async fn example_get_url_returns_default_not_implemented_error() {
 
 #[tokio::test]
 async fn example_get_chapter_sort_list_returns_empty() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
@@ -270,10 +234,7 @@ async fn example_get_chapter_sort_list_returns_empty() {
 
 #[tokio::test]
 async fn example_instantiate_pre_and_call() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
-    let bytes = load_wasm("kani-example").unwrap();
+    let bytes = load_wasm("example");
     let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let pre = rt.instantiate_pre(&component).unwrap();
@@ -300,9 +261,6 @@ async fn example_instantiate_pre_and_call() {
 
 #[tokio::test]
 async fn example_no_handles_allocated_for_any_call() {
-    if load_wasm("kani-example").is_none() {
-        return;
-    }
     let (_rt, mut store, instance) = example_instance().await;
     let provider = instance.kani_extension_manga_provider();
 

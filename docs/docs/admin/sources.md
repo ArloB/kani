@@ -27,7 +27,8 @@ WASM prevents arbitrary filesystem access, but granted host functions still perf
 cache, parsing, and scripting work on the extension's behalf.
 
 An extension with `unrestricted_http` can request hosts beyond its base URL. A browser-based source
-can persist a Chromium profile and requires Chromium in the server image.
+sends its capture script to the configured solver, which runs it in a browser holding a profile
+kept for that source.
 
 ## Configure a source
 

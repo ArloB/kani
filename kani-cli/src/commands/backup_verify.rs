@@ -7,17 +7,17 @@ use crate::error::CliError;
 /// Backup archive format this binary understands. A backup written by a newer
 /// Kani may contain fields this build would silently drop, so restoring one is
 /// refused rather than attempted.
-pub const SUPPORTED_BACKUP_VERSION: u32 = 1;
+pub(crate) const SUPPORTED_BACKUP_VERSION: u32 = 1;
 
 #[derive(Debug, PartialEq, Eq)]
 /// Compatibility result for a backup's declared format version.
-pub enum VersionCheck {
+pub(crate) enum VersionCheck {
     Compatible(u32),
     TooNew { found: u32, supported: u32 },
     Unreadable(String),
 }
 
-pub fn check_backup_version(raw: &str) -> VersionCheck {
+pub(crate) fn check_backup_version(raw: &str) -> VersionCheck {
     match raw.trim().parse::<u32>() {
         Ok(v) if v <= SUPPORTED_BACKUP_VERSION => VersionCheck::Compatible(v),
         Ok(v) => VersionCheck::TooNew {

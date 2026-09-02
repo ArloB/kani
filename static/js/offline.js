@@ -50,22 +50,6 @@ export async function getCachedChapterIds() {
 }
 
 /**
- * Returns true if a specific chapter has at least one page cached.
- * @param {number} chapterId
- * @returns {Promise<boolean>}
- */
-export async function isChapterCached(chapterId) {
-  if (!('caches' in window)) return false;
-  try {
-    const cache = await caches.open('kani-pages-v1');
-    const keys = await cache.keys();
-    return keys.some(r => r.url.includes(`/chapter/${chapterId}/page/`));
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Listen for CHAPTER_CACHED messages from the service worker.
  * @param {(chapterId: number) => void} cb
  * @returns {() => void} unsubscribe

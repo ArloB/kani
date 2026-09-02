@@ -359,3 +359,99 @@ async fn the_smtp_password_never_reaches_the_backup_file() {
         "the backup archive contains the SMTP password"
     );
 }
+
+/// Rewrites `backup.json` inside a backup zip, leaving every other entry intact.
+fn rewrite_settings_json(zip_bytes: &[u8], edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
+    let mut reader = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
+    let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+    for i in 0..reader.len() {
+        let mut f = reader.by_index(i).unwrap();
+        let name = f.name().to_string();
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut buf).unwrap();
+        entries.push((name, buf));
+    }
+
+    for entry in &mut entries {
+        if entry.0 == "backup.json" {
+            let mut v: serde_json::Value = serde_json::from_slice(&entry.1).unwrap();
+            edit(&mut v["settings"]);
+            entry.1 = serde_json::to_vec(&v).unwrap();
+            break;
+        }
+    }
+
+    let out = std::io::Cursor::new(Vec::new());
+    let mut writer = zip::ZipWriter::new(out);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        writer.start_file(&name, opts).unwrap();
+        std::io::Write::write_all(&mut writer, &bytes).unwrap();
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+async fn advanced_of(svc: &kani_app::AppService) -> kani_shared::types::AdvancedSettings {
+    let s = svc.get_settings().await;
+    kani_shared::types::AdvancedSettings {
+        flaresolverr_url: s.flaresolverr_url.clone(),
+        library_path: s.library_path.clone(),
+        wasm_storage_path: s.wasm_storage_path.clone(),
+        max_wasm_instances: s.max_wasm_instances,
+        http_request_logging: s.http_request_logging,
+        v8_debug_logging: s.v8_debug_logging,
+        registration_enabled: s.registration_enabled,
+        cover_max_dimension: s.cover_max_dimension,
+        v8_max_memory_mb: s.v8_max_memory_mb,
+        v8_idle_timeout_s: s.v8_idle_timeout_s,
+        update_check_enabled: s.update_check_enabled,
+        opds_page_index_zero_based: s.opds_page_index_zero_based,
+        global_search_timeout_secs: s.global_search_timeout_secs,
+    }
+}
+
+/// A backup written before the `browser_*` settings were renamed must still
+/// restore. The renamed fields are required rather than optional, so without the
+/// serde aliases every pre-rename backup fails to deserialise on a missing field,
+/// and `browser_max_instances` has no field left to land in at all.
+#[tokio::test]
+async fn a_backup_written_before_the_v8_rename_still_restores() {
+    let svc = test_service().await;
+
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
+    let aged = rewrite_settings_json(&zip, |settings| {
+        let advanced = settings["advanced"].as_object_mut().unwrap();
+        let memory = advanced.remove("v8_max_memory_mb").unwrap();
+        let idle = advanced.remove("v8_idle_timeout_s").unwrap();
+        let logging = advanced.remove("v8_debug_logging").unwrap();
+        advanced.insert("browser_max_memory_mb".into(), memory);
+        advanced.insert("browser_idle_timeout_s".into(), idle);
+        advanced.insert("browser_debug_logging".into(), logging);
+        advanced.insert("browser_max_instances".into(), serde_json::json!(4));
+    });
+
+    svc.update_settings(
+        SettingsUpdate::Advanced(kani_shared::types::AdvancedSettings {
+            v8_max_memory_mb: 999,
+            ..advanced_of(&svc).await
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let opts = RestoreOptions {
+        import_settings: true,
+        ..RestoreOptions::default()
+    };
+    svc.restore_backup(UserId(1), &aged, opts, None)
+        .await
+        .expect("a pre-rename backup must restore, not fail on a missing field");
+
+    let after = svc.get_settings().await;
+    assert_eq!(
+        after.v8_max_memory_mb, 512,
+        "the old browser_max_memory_mb value must land in the renamed column"
+    );
+}

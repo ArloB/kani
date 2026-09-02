@@ -62,6 +62,7 @@ nav:
     - Users & roles: admin/users-roles.md
     - Security hardening: admin/security-hardening.md
     - Observability: admin/observability.md
+    - Support bundle: admin/support-bundle.md
     - Jobs & maintenance: admin/jobs-maintenance.md
     - Storage: admin/storage.md
     - Upgrades: admin/upgrade.md
@@ -72,6 +73,7 @@ nav:
     - Email / SMTP: admin/email-smtp.md
     - Webhooks: admin/webhooks.md
   - Extension Authoring:
+    - Quickstart: extension-authoring/quickstart.md
     - YAML schema: extension-authoring/yaml-schema.md
     - DSL grammar: extension-authoring/dsl-grammar.md
     - Rhai hooks: extension-authoring/rhai-hooks.md
@@ -83,6 +85,7 @@ nav:
     - Crate map: developer/crate-map.md
     - Request flow: developer/request-flow.md
     - Local development: developer/local-dev.md
+    - Migrations: developer/migrations.md
     - Test conventions: developer/test-conventions.md
     - API stability: developer/api-stability.md
     - Engineering constraints: developer/engineering-constraints.md

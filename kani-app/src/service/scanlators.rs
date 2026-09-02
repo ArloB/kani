@@ -199,7 +199,7 @@ impl AppService {
     }
 
     /// Returns the scanlator mode for a manga, defaulting to `'priority'`.
-    pub async fn get_scanlator_mode(&self, manga_id: MangaId) -> Result<String> {
+    pub(crate) async fn get_scanlator_mode(&self, manga_id: MangaId) -> Result<String> {
         let mode = sqlx::query_scalar!(
             "SELECT COALESCE(scanlator_mode, 'priority') FROM manga WHERE id = ?",
             manga_id

@@ -698,8 +698,8 @@ function ScanAllGroup() {
   const scanAll = () =>
     run(async () => {
       const ok = await showConfirm(t('library.scan_all.confirm'), {
-        title: t('library.scan_all'),
-        confirmLabel: t('library.scan_all'),
+        title: t('library.scan_all.label'),
+        confirmLabel: t('library.scan_all.label'),
       });
       if (!ok) return;
       try {
@@ -712,7 +712,7 @@ function ScanAllGroup() {
 
   return html`
     <${SettingsGroup} label=${t('library.scan_all.group')}>
-      <${SettingsRow} label=${t('library.scan_all')} description=${t('library.scan_all.desc')}>
+      <${SettingsRow} label=${t('library.scan_all.label')} description=${t('library.scan_all.desc')}>
         <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${scanAll}>
           ${t('library.scan_all.action')}
         </button>

@@ -15,7 +15,7 @@ use kani_shared::types::{
 };
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupData {
+pub(crate) struct BackupData {
     pub version: u32,
     pub exported_at: String,
     pub manga: Vec<BackupManga>,
@@ -28,7 +28,7 @@ pub struct BackupData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupRepo {
+pub(crate) struct BackupRepo {
     pub url: String,
     pub name: String,
     pub maintainer_key: String,
@@ -38,13 +38,13 @@ pub struct BackupRepo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupBlockedRepo {
+pub(crate) struct BackupBlockedRepo {
     pub url: String,
     pub reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupManga {
+pub(crate) struct BackupManga {
     pub source_name: SourceId,
     pub source_manga_id: String,
     pub name: String,
@@ -59,26 +59,26 @@ pub struct BackupManga {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupMangaTracking {
+pub(crate) struct BackupMangaTracking {
     pub status: i64,
     pub score: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupChapterProgress {
+pub(crate) struct BackupChapterProgress {
     pub source_chapter_id: String,
     pub is_read: bool,
     pub last_page_read: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupDownloadRule {
+pub(crate) struct BackupDownloadRule {
     pub rule_type: String,
     pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BackupCategory {
+pub(crate) struct BackupCategory {
     pub name: String,
     pub sort_order: i64,
 }
@@ -96,7 +96,7 @@ pub struct BackupCategory {
 /// carried only the three flat fields — restore exactly as it always did
 /// instead of resetting the other fifty-eight to defaults.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct BackupSettings {
+pub(crate) struct BackupSettings {
     /// Written by versions that predate the group payloads, and still written
     /// today so a backup taken here can be restored by one of those versions
     /// rather than failing to deserialise.
@@ -206,7 +206,7 @@ fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 32]> {
     Ok(key)
 }
 
-pub fn encrypt_backup(zip: &[u8], passphrase: &str) -> Result<Vec<u8>> {
+pub(crate) fn encrypt_backup(zip: &[u8], passphrase: &str) -> Result<Vec<u8>> {
     let salt: [u8; 16] = rand::random();
     let nonce_bytes: [u8; 12] = rand::random();
     let key = derive_key(passphrase, &salt)?;
@@ -223,7 +223,7 @@ pub fn encrypt_backup(zip: &[u8], passphrase: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn decrypt_backup(data: &[u8], passphrase: &str) -> Result<Vec<u8>> {
+pub(crate) fn decrypt_backup(data: &[u8], passphrase: &str) -> Result<Vec<u8>> {
     if !data.starts_with(BACKUP_V2_MAGIC) {
         return Err(ServiceError::Validation(
             "Not an encrypted backup (missing magic header)".into(),
@@ -509,12 +509,11 @@ impl AppService {
                 wasm_storage_path: s.wasm_storage_path.clone(),
                 max_wasm_instances: s.max_wasm_instances,
                 http_request_logging: s.http_request_logging,
-                browser_debug_logging: s.browser_debug_logging,
+                v8_debug_logging: s.v8_debug_logging,
                 registration_enabled: s.registration_enabled,
                 cover_max_dimension: s.cover_max_dimension,
-                browser_max_memory_mb: s.browser_max_memory_mb,
-                browser_max_instances: s.browser_max_instances,
-                browser_idle_timeout_s: s.browser_idle_timeout_s,
+                v8_max_memory_mb: s.v8_max_memory_mb,
+                v8_idle_timeout_s: s.v8_idle_timeout_s,
                 update_check_enabled: s.update_check_enabled,
                 opds_page_index_zero_based: s.opds_page_index_zero_based,
                 global_search_timeout_secs: s.global_search_timeout_secs,
@@ -1014,7 +1013,7 @@ impl AppService {
     }
 
     /// Save a manga that couldn't be matched to the pending imports queue.
-    pub async fn save_pending_import_for_user(
+    pub(crate) async fn save_pending_import_for_user(
         &self,
         user_id: UserId,
         origin: &str,

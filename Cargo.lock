@@ -3159,7 +3159,7 @@ dependencies = [
 
 [[package]]
 name = "kani-app"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3224,16 +3224,14 @@ dependencies = [
 
 [[package]]
 name = "kani-cli"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "ariadne",
  "base64",
- "chumsky",
  "clap",
  "ed25519-dalek",
  "flate2",
  "getrandom 0.2.17",
- "hex",
  "insta",
  "kani-core",
  "kani-shared",
@@ -3242,7 +3240,6 @@ dependencies = [
  "regex",
  "reqwest",
  "resvg",
- "rhai",
  "semver",
  "serde",
  "serde_json",
@@ -3257,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "kani-core"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3268,14 +3265,17 @@ dependencies = [
  "criterion",
  "dashmap",
  "dunce",
+ "ed25519-dalek",
  "ego-tree",
  "futures",
  "governor 0.10.4",
+ "hex",
  "hickory-resolver",
  "http-body-util",
  "image",
  "imagesize",
  "kani-shared",
+ "kani-yaml",
  "postcard",
  "publicsuffix",
  "quick-xml",
@@ -3286,6 +3286,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "stacker",
  "tempfile",
  "thiserror 2.0.18",
  "time",
@@ -3297,7 +3298,6 @@ dependencies = [
  "urlencoding",
  "wasmtime",
  "wiremock",
- "wit-bindgen 0.58.0",
  "wreq",
  "wreq-util",
  "zip 7.2.0",
@@ -3326,14 +3326,14 @@ dependencies = [
 
 [[package]]
 name = "kani-lease"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "loom",
 ]
 
 [[package]]
 name = "kani-shared"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "base64",
  "hex",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "kani-shared-test"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "image",
  "kani-app",
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "kani-web"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "ammonia",
  "argon2",
@@ -3378,7 +3378,6 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "dashmap",
- "dirs",
  "ed25519-dalek",
  "futures",
  "garde",
@@ -3386,7 +3385,6 @@ dependencies = [
  "hmac",
  "http-body-util",
  "image",
- "indexmap",
  "kani-app",
  "kani-core",
  "kani-shared",
@@ -3395,14 +3393,11 @@ dependencies = [
  "metrics",
  "mime_guess",
  "moka",
- "ordered-float",
- "paste",
  "pulldown-cmark",
  "quick-xml",
  "rand 0.10.0",
  "rust-embed",
  "secrecy",
- "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3425,13 +3420,12 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "wreq",
- "xxhash-rust",
  "zip 7.2.0",
 ]
 
 [[package]]
 name = "kani-yaml"
-version = "0.9.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "base64",
  "chumsky",
@@ -3439,10 +3433,8 @@ dependencies = [
  "rhai",
  "semver",
  "serde",
- "serde_json",
  "serde_yaml",
  "thiserror 2.0.18",
- "urlencoding",
 ]
 
 [[package]]
@@ -8381,12 +8373,6 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yansi"

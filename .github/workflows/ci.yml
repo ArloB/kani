@@ -90,6 +90,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
+      # Reads test sources only, so it belongs with the Rust checks but needs no build.
+      - name: Endpoint tests assert more than a status code
+        run: node scripts/check-test-assertions.mjs
+
+      - name: Unused dependencies
+        uses: bnjbvr/cargo-machete@main
+
       - name: Restore asset toolchain
         uses: actions/cache/restore@v5
         id: tools-cache
@@ -241,8 +248,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check JS syntax
-        run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check
+      # Bundling parses as ESM and resolves every specifier, neither of which
+      # `node --check` does — it reads these as CommonJS. Vendors are external, so
+      # this needs no asset toolchain.
+      - name: Check JS parses as modules and every import resolves
+        run: |
+          npx --yes esbuild@0.28.1 static/js/app.js static/js/dev-debug.js \
+            --bundle --format=esm --define:__KANI_DEV__=false \
+            --external:preact --external:preact/hooks --external:htm \
+            --external:@preact/signals --external:@preact/signals-core \
+            --external:preact/compat \
+            --outdir="$(mktemp -d)"
 
       - name: Unit tests (pure JS modules)
         run: node --test "static/js/**/*.test.js"
@@ -252,6 +268,21 @@ jobs:
 
       - name: Test the audit scanner itself
         run: node --test scripts/audit-tokens.test.mjs
+
+      - name: Dead module and export check
+        run: node scripts/check-dead-js.mjs
+
+      - name: Showcase manifest is current
+        run: node scripts/generate-showcase-manifest.mjs --check
+
+      - name: Unreferenced CSS selector check
+        run: node scripts/audit-tokens.mjs --unused-css
+
+      # Reports only: the tracer cannot see SELECT *, out-of-window select
+      # lists, or filter-only columns, so its leads are reviewed by hand.
+      - name: Signal-chain leads
+        continue-on-error: true
+        run: node scripts/audit-signal-chain.mjs
 
   docs:
     name: Docs & i18n

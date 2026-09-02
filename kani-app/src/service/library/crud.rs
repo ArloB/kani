@@ -659,7 +659,7 @@ impl AppService {
         Ok(count)
     }
 
-    pub async fn purge_expired_trash(&self, days: u32) -> crate::error::Result<u64> {
+    pub(crate) async fn purge_expired_trash(&self, days: u32) -> crate::error::Result<u64> {
         let days_i64 = days as i64;
         let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(days_i64);
         let count = sqlx::query_scalar!(

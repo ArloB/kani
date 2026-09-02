@@ -166,7 +166,7 @@ pub(crate) async fn run_chapter_download(
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ChapterDownloadJob {
+pub(crate) struct ChapterDownloadJob {
     id: JobId,
     pub chapter_id: i64,
     pub manga_id: i64,
@@ -405,7 +405,7 @@ impl BackgroundJob for MangaDownloadAllJob {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SourceScanJob {
+pub(crate) struct SourceScanJob {
     id: JobId,
     pub manga_id: i64,
     pub manga_title: String,
@@ -458,7 +458,7 @@ impl BackgroundJob for SourceScanJob {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LibraryScanJob {
+pub(crate) struct LibraryScanJob {
     id: JobId,
     pub manga_ids: Vec<i64>,
     pub trigger: String,
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn transient_extension_error_trips_circuit_but_not_found_does_not() {
-        let mut cb = CircuitBreaker::new(1);
+        let mut cb = CircuitBreaker::new();
         let transient = classify_download_error(ext(ExtensionErrorKind::Updating));
         for _ in 0..5 {
             cb.record_failure(&transient, 0);
@@ -696,7 +696,7 @@ mod tests {
             "repeated transient extension failures should open the circuit"
         );
 
-        let mut cb2 = CircuitBreaker::new(2);
+        let mut cb2 = CircuitBreaker::new();
         let permanent = classify_download_error(ext(ExtensionErrorKind::NotFound));
         for _ in 0..10 {
             cb2.record_failure(&permanent, 0);

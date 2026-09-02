@@ -33,7 +33,7 @@ impl AppService {
         self.reload_preferences(source_id).await
     }
 
-    pub async fn reload_preferences(&self, source_id: i64) -> Result<()> {
+    pub(crate) async fn reload_preferences(&self, source_id: i64) -> Result<()> {
         let prefs = self.load_pref_map(source_id).await?;
         if let Some(backend) = self.sources.get_backend(source_id) {
             backend.update_preferences(prefs);
@@ -41,7 +41,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn load_pref_map(&self, source_id: i64) -> Result<HashMap<String, String>> {
+    pub(crate) async fn load_pref_map(&self, source_id: i64) -> Result<HashMap<String, String>> {
         Self::load_pref_map_static(&self.db, source_id).await
     }
 

@@ -32,7 +32,7 @@ pub fn run_init(repo_dir: &Path, name: &str, maintainer_key_path: &Path) -> Resu
     Ok(())
 }
 
-pub fn run_show_fingerprint(key_path: &Path) -> Result<(), CliError> {
+pub(crate) fn run_show_fingerprint(key_path: &Path) -> Result<(), CliError> {
     let (key_bytes, _) = signing::load_verifying_key(key_path)?;
     let fp = signing::key_fingerprint(&key_bytes);
     println!("{fp}");

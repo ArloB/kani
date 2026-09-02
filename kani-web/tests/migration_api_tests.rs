@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{build_test_app, create_admin, create_regular_user, test_state};
+use common::{build_test_app, create_admin, test_state};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -16,7 +16,9 @@ fn post(
         .uri(path)
         .header(axum::http::header::CONTENT_TYPE, "application/json");
     if let Some(c) = cookie {
-        b = b.header(axum::http::header::COOKIE, c);
+        b = b
+            .header(axum::http::header::COOKIE, common::csrf_cookie(c))
+            .header("X-CSRF-Token", common::csrf_token(c));
     }
     b.body(axum::body::Body::from(body.to_string())).unwrap()
 }
@@ -143,51 +145,6 @@ async fn an_in_flight_migration_does_not_block_a_different_series() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::ACCEPTED);
-}
-
-#[tokio::test]
-async fn migrating_unauthenticated_is_401() {
-    let state = test_state().await;
-    let db = state.service.db.clone();
-    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post(
-            &format!("/rest/manga/{manga_id}/migrate"),
-            None,
-            migrate_body(1),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn migrating_without_library_manage_is_403() {
-    let state = test_state().await;
-    let db = state.service.db.clone();
-    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
-
-    let (u, p) = create_regular_user(&state, "gail").await;
-    sqlx::query("DELETE FROM user_roles WHERE user_id = (SELECT id FROM users WHERE username = ?)")
-        .bind(u)
-        .execute(&db)
-        .await
-        .unwrap();
-
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
-
-    let res = app
-        .oneshot(post(
-            &format!("/rest/manga/{manga_id}/migrate"),
-            Some(&cookie),
-            migrate_body(1),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

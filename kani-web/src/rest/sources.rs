@@ -96,7 +96,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn list_sources(
+pub(super) async fn list_sources(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -114,7 +114,7 @@ pub(crate) async fn list_sources(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn add_source(
+pub(super) async fn add_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     ValidatedJson(payload): ValidatedJson<CreateSource>,
@@ -132,7 +132,7 @@ pub(crate) async fn add_source(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_sources_health(
+pub(super) async fn get_sources_health(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -148,7 +148,7 @@ pub(crate) async fn get_sources_health(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_active_source_ids(
+pub(super) async fn get_active_source_ids(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -165,7 +165,7 @@ pub(crate) async fn get_active_source_ids(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn list_metadata_providers(
+pub(super) async fn list_metadata_providers(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -192,7 +192,7 @@ struct SourceDetail {
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_source(
+pub(super) async fn get_source(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -231,7 +231,7 @@ pub(crate) async fn get_source(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn update_source(
+pub(super) async fn update_source(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -245,7 +245,7 @@ pub(crate) async fn update_source(
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
-pub(crate) struct SetDownloadConcurrencyRequest {
+pub(super) struct SetDownloadConcurrencyRequest {
     pub value: Option<i64>,
 }
 
@@ -261,7 +261,7 @@ pub(crate) struct SetDownloadConcurrencyRequest {
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn set_download_concurrency(
+pub(super) async fn set_download_concurrency(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -272,7 +272,7 @@ pub(crate) async fn set_download_concurrency(
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
-pub(crate) struct SetBrowserEnabledRequest {
+pub(super) struct SetBrowserEnabledRequest {
     pub enabled: bool,
 }
 
@@ -288,7 +288,7 @@ pub(crate) struct SetBrowserEnabledRequest {
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn set_browser_enabled(
+pub(super) async fn set_browser_enabled(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -309,7 +309,7 @@ pub(crate) async fn set_browser_enabled(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn delete_source(
+pub(super) async fn delete_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceDelete>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -328,7 +328,7 @@ pub(crate) async fn delete_source(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_metadata(
+pub(super) async fn get_metadata(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -349,7 +349,7 @@ pub(crate) async fn get_metadata(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn upload_wasm(
+pub(super) async fn upload_wasm(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -399,7 +399,7 @@ pub(crate) async fn upload_wasm(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn fetch_wasm(
+pub(super) async fn fetch_wasm(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -435,7 +435,7 @@ pub(crate) async fn fetch_wasm(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn install_yaml(
+pub(super) async fn install_yaml(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<InstallYamlRequest>,
@@ -463,7 +463,7 @@ pub(crate) async fn install_yaml(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn fetch_yaml(
+pub(super) async fn fetch_yaml(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<FetchYamlRequest>,
@@ -490,7 +490,7 @@ pub(crate) async fn fetch_yaml(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn reload_source_handler(
+pub(super) async fn reload_source_handler(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -513,7 +513,7 @@ pub(crate) async fn reload_source_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_popular_manga(
+pub(super) async fn get_popular_manga(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page, page_size)): Path<(i64, i32, i32)>,
@@ -547,7 +547,7 @@ pub(crate) async fn get_popular_manga(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn search_manga(
+pub(super) async fn search_manga(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page, page_size)): Path<(i64, i32, i32)>,
@@ -557,7 +557,7 @@ pub(crate) async fn search_manga(
     let json_str = state
         .search_manga(
             id,
-            &payload.query.unwrap_or("".to_string()),
+            &payload.query.unwrap_or_default(),
             page,
             page_size,
             payload.filters,
@@ -585,7 +585,7 @@ pub(crate) async fn search_manga(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_manga_details(
+pub(super) async fn get_manga_details(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
@@ -616,7 +616,7 @@ pub(crate) async fn get_manga_details(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_source_manga_url(
+pub(super) async fn get_source_manga_url(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id)): Path<(i64, String)>,
@@ -640,7 +640,7 @@ pub(crate) async fn get_source_manga_url(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn save_to_library(
+pub(super) async fn save_to_library(
     _: AuthGuard<crate::permissions::guards::LibraryAdd>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
@@ -668,7 +668,7 @@ pub(crate) async fn save_to_library(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_chapter_list(
+pub(super) async fn get_chapter_list(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id, page, page_size)): Path<(i64, String, i32, i32)>,
@@ -694,7 +694,7 @@ pub(crate) async fn get_chapter_list(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_chapter_sort_list(
+pub(super) async fn get_chapter_sort_list(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, _manga_id)): Path<(i64, String)>,
@@ -717,7 +717,7 @@ pub(crate) async fn get_chapter_sort_list(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_pages(
+pub(super) async fn get_pages(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
@@ -744,12 +744,12 @@ pub(crate) async fn get_pages(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn check_in_library(
+pub(super) async fn check_in_library(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path((source_id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let decoded = crate::utils::decode_manga_id(&manga_id);
+    let decoded = kani_shared::decode_manga_id(&manga_id);
     let db_id = state.check_in_library(source_id, &decoded).await?;
     Ok(Json(json!({ "db_id": db_id })))
 }
@@ -766,7 +766,7 @@ pub(crate) async fn check_in_library(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn toggle_source_enabled(
+pub(super) async fn toggle_source_enabled(
     _: AuthGuard<crate::permissions::guards::SourceToggleEnabled>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
@@ -787,7 +787,7 @@ pub(crate) async fn toggle_source_enabled(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn toggle_source_favourite(
+pub(super) async fn toggle_source_favourite(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
@@ -808,7 +808,7 @@ pub(crate) async fn toggle_source_favourite(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_source_filters(
+pub(super) async fn get_source_filters(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -828,7 +828,7 @@ pub(crate) async fn get_source_filters(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_pref_schema(
+pub(super) async fn get_pref_schema(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
@@ -848,7 +848,7 @@ pub(crate) async fn get_pref_schema(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_source_preferences(
+pub(super) async fn get_source_preferences(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
@@ -877,7 +877,7 @@ pub(crate) async fn get_source_preferences(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn set_source_preference(
+pub(super) async fn set_source_preference(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
@@ -902,7 +902,7 @@ pub(crate) async fn set_source_preference(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn append_pref_list_item(
+pub(super) async fn append_pref_list_item(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
@@ -928,7 +928,7 @@ pub(crate) async fn append_pref_list_item(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn remove_pref_list_item(
+pub(super) async fn remove_pref_list_item(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
@@ -954,7 +954,7 @@ pub(crate) async fn remove_pref_list_item(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn toggle_pref_select_item(
+pub(super) async fn toggle_pref_select_item(
     _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
@@ -988,7 +988,7 @@ struct SourceCapabilityEntry {
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_capabilities(
+pub(super) async fn get_capabilities(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1022,7 +1022,7 @@ pub(crate) async fn get_capabilities(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_all_capabilities(
+pub(super) async fn get_all_capabilities(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1056,7 +1056,7 @@ pub(crate) async fn get_all_capabilities(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn list_repos_handler(
+pub(super) async fn list_repos_handler(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1076,7 +1076,7 @@ pub(crate) async fn list_repos_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn add_repo_handler(
+pub(super) async fn add_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoAdd>,
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1138,7 +1138,7 @@ pub(crate) async fn add_repo_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn get_repo_handler(
+pub(super) async fn get_repo_handler(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1158,7 +1158,7 @@ pub(crate) async fn get_repo_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn refresh_repo_handler(
+pub(super) async fn refresh_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoRefresh>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1179,7 +1179,7 @@ pub(crate) async fn refresh_repo_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn remove_repo_handler(
+pub(super) async fn remove_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoRemove>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1200,7 +1200,7 @@ pub(crate) async fn remove_repo_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn list_repo_extensions_handler(
+pub(super) async fn list_repo_extensions_handler(
     _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -1220,7 +1220,7 @@ pub(crate) async fn list_repo_extensions_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn install_from_repo_handler(
+pub(super) async fn install_from_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Json(payload): Json<InstallFromRepoRequest>,
@@ -1249,7 +1249,7 @@ pub(crate) async fn install_from_repo_handler(
     security(("session" = [])),
     tag = "sources"
 )]
-pub(crate) async fn update_from_repo_handler(
+pub(super) async fn update_from_repo_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(source_id): Path<i64>,

@@ -63,6 +63,7 @@ fn test_command_counts_rows() {
         &fixture("repl-test.har"),
         "popular",
         3,
+        None,
     )
     .unwrap();
 }
@@ -74,6 +75,7 @@ fn test_command_wrong_count_fails() {
         &fixture("repl-test.har"),
         "popular",
         99,
+        None,
     );
     assert!(result.is_err(), "should fail with wrong expected count");
 }
@@ -85,6 +87,7 @@ fn replay_matches_expected() {
         &fixture("repl-test.har"),
         "popular",
         &fixture("expected-popular.json"),
+        None,
     )
     .unwrap();
 }

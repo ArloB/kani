@@ -18,7 +18,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn reading_stats(
+pub(super) async fn reading_stats(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::StatsQuery>,

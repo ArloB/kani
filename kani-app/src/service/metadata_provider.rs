@@ -17,13 +17,6 @@ pub struct FullMetadata {
     pub external_ids: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-/// Provider-attributed metadata result.
-pub struct MetadataResult {
-    pub provider: String,
-    pub metadata: FullMetadata,
-}
-
 #[async_trait::async_trait]
 /// External metadata lookup implemented by each registered provider.
 /// `Ok(None)` means the provider found no match rather than failing.
@@ -40,7 +33,11 @@ pub struct MetadataProviderRegistry {
 
 impl MetadataProviderRegistry {
     pub fn new() -> Self {
+        #[allow(unused_mut)]
         let mut providers: HashMap<String, Box<dyn MetadataProvider>> = HashMap::new();
+        // The stub fabricates a description and enrichment writes it to the manga
+        // row, so a release build must not offer it.
+        #[cfg(debug_assertions)]
         providers.insert(StubProvider.id().to_string(), Box::new(StubProvider));
         Self { providers }
     }
@@ -55,7 +52,11 @@ impl MetadataProviderRegistry {
             .collect()
     }
 
-    pub async fn fetch_from(&self, provider_id: &str, title: &str) -> Result<Option<FullMetadata>> {
+    pub(crate) async fn fetch_from(
+        &self,
+        provider_id: &str,
+        title: &str,
+    ) -> Result<Option<FullMetadata>> {
         let provider = self
             .providers
             .get(provider_id)
@@ -77,8 +78,10 @@ pub struct ProviderInfo {
     pub name: String,
 }
 
+#[cfg(debug_assertions)]
 struct StubProvider;
 
+#[cfg(debug_assertions)]
 #[async_trait::async_trait]
 impl MetadataProvider for StubProvider {
     fn id(&self) -> &'static str {
@@ -175,5 +178,31 @@ impl super::AppService {
         }
 
         Ok(EnrichResult { fields_updated })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stub is compiled out of release builds, so the meaningful half of this
+    /// only runs under `cargo test --release`, which nothing does today. It is here
+    /// so that a future release-profile run reports the regression rather than
+    /// shipping fabricated metadata quietly.
+    #[test]
+    fn the_stub_provider_is_absent_from_a_release_build() {
+        let registry = MetadataProviderRegistry::new();
+        if cfg!(debug_assertions) {
+            assert_eq!(
+                registry.list().len(),
+                1,
+                "the stub stays available for development"
+            );
+        } else {
+            assert!(
+                registry.list().is_empty(),
+                "the stub fabricates descriptions that enrichment writes to the manga row"
+            );
+        }
     }
 }

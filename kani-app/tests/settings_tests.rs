@@ -46,12 +46,11 @@ fn advanced_settings() -> AdvancedSettings {
         wasm_storage_path: "/data/wasm".into(),
         max_wasm_instances: 4,
         http_request_logging: false,
-        browser_debug_logging: false,
+        v8_debug_logging: false,
         registration_enabled: true,
         cover_max_dimension: Some(512),
-        browser_max_memory_mb: 512,
-        browser_max_instances: 2,
-        browser_idle_timeout_s: 300,
+        v8_max_memory_mb: 512,
+        v8_idle_timeout_s: 300,
         update_check_enabled: true,
         opds_page_index_zero_based: false,
         global_search_timeout_secs: 6,
@@ -59,14 +58,13 @@ fn advanced_settings() -> AdvancedSettings {
 }
 
 #[tokio::test]
-async fn update_advanced_settings_round_trips_browser_caps() {
+async fn update_advanced_settings_round_trips_v8_caps() {
     let svc = test_service().await;
 
     svc.update_settings(
         SettingsUpdate::Advanced(AdvancedSettings {
-            browser_max_memory_mb: 1024,
-            browser_max_instances: 4,
-            browser_idle_timeout_s: 120,
+            v8_max_memory_mb: 1024,
+            v8_idle_timeout_s: 120,
             ..advanced_settings()
         }),
         UserId(1),
@@ -75,19 +73,18 @@ async fn update_advanced_settings_round_trips_browser_caps() {
     .unwrap();
 
     let s = svc.get_settings().await;
-    assert_eq!(s.browser_max_memory_mb, 1024);
-    assert_eq!(s.browser_max_instances, 4);
-    assert_eq!(s.browser_idle_timeout_s, 120);
+    assert_eq!(s.v8_max_memory_mb, 1024);
+    assert_eq!(s.v8_idle_timeout_s, 120);
 }
 
 #[tokio::test]
-async fn update_advanced_settings_rejects_invalid_browser_caps() {
+async fn update_advanced_settings_rejects_an_out_of_range_v8_idle_timeout() {
     let svc = test_service().await;
 
     let result = svc
         .update_settings(
             SettingsUpdate::Advanced(AdvancedSettings {
-                browser_max_instances: 0,
+                v8_idle_timeout_s: 5,
                 ..advanced_settings()
             }),
             UserId(1),

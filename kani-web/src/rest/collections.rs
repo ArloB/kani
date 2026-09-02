@@ -15,7 +15,7 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct CollectionBody {
+pub(super) struct CollectionBody {
     pub name: String,
     pub rule: SmartCollectionRule,
     #[serde(default)]
@@ -32,7 +32,7 @@ pub(crate) struct CollectionBody {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn list_collections(
+pub(super) async fn list_collections(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -51,7 +51,7 @@ pub(crate) async fn list_collections(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn create_collection(
+pub(super) async fn create_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Json(body): Json<CollectionBody>,
@@ -76,7 +76,7 @@ pub(crate) async fn create_collection(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn update_collection(
+pub(super) async fn update_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -100,7 +100,7 @@ pub(crate) async fn update_collection(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn delete_collection(
+pub(super) async fn delete_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -121,7 +121,7 @@ pub(crate) async fn delete_collection(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_collection_manga(
+pub(super) async fn get_collection_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<i64>,

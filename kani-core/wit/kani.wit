@@ -320,30 +320,10 @@ interface scripting {
     /// Drops the named V8 context.
     v8-context-drop: func(name: string);
 
-    record capture-url-param-opts {
-        url-pattern: string,
-        /// Extract from the named query-string parameter. Mutually exclusive with header-name.
-        param-name: option<string>,
-        /// Extract from the named request header (case-insensitive). Mutually exclusive with param-name.
-        header-name: option<string>,
-        timeout-ms: u32,
-        force-refresh: bool,
-        /// Cache TTL in milliseconds. None = no expiry.
-        cache-ttl-ms: option<u32>,
-        /// Extra HTTP headers to set on the page request before navigation.
-        extra-headers: list<tuple<string, string>>,
-    }
-
-    /// Loads page-url in a headless Chromium instance (via puppeteer-core), intercepts
-    /// outgoing network requests whose URL contains opts.url-pattern, and returns the
-    /// value of the named query-string parameter or request header from the first match.
-    /// Exactly one of param-name or header-name must be set.
-    capture-url-param: func(page-url: string, opts: capture-url-param-opts) -> result<string, string>;
-
-    /// Loads page-url in a headless Chromium instance, runs init-script via
-    /// evaluateOnNewDocument (so it executes before any page JS), and waits for the
-    /// page's script to call the host-injected `passPayload(string)` function.
-    /// Returns the string passed to passPayload. timeout-ms is the deadline.
+    /// Loads page-url in the configured solver's cleared browser, runs init-script
+    /// before any page JS, and waits for the page's script to call the host-injected
+    /// `passPayload(string)` function. Returns the string passed to passPayload.
+    /// timeout-ms is the deadline.
     capture-page-payload: func(page-url: string, init-script: string, timeout-ms: u32) -> result<string, string>;
 }
 

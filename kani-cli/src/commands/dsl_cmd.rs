@@ -1,6 +1,5 @@
-use crate::dsl::parser;
-use crate::error::{CliError, report_custom_error, report_errors};
-use chumsky::Parser;
+use crate::dsl::parse;
+use crate::error::{CliError, report_custom_error, report_dsl_errors};
 use kani_shared::ast::Expr;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,19 +7,12 @@ use std::path::Path;
 pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError> {
     let pure_scripts = load_pure_scripts(scripts_path)?;
 
-    let result = parser().parse(expression);
+    let parse_ast = parse(expression).map_err(|errors| {
+        report_dsl_errors("<stdin>", expression, None, &errors);
+        CliError::Other("DSL parsing failed (see above)".to_string())
+    })?;
 
-    if result.has_errors() {
-        let errs: Vec<_> = result.errors().cloned().collect();
-        report_errors("<stdin>", expression, errs);
-        return Err(CliError::Other(
-            "DSL parsing failed (see above)".to_string(),
-        ));
-    }
-
-    let parse_ast = result.into_result().expect("checked has_errors() above");
-
-    let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.clone().try_into();
+    let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.try_into();
 
     if let Err(item) = ast_raw {
         for error in item {
@@ -28,7 +20,12 @@ pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError
                 kani_yaml::YamlError::DslConversion { message, span } => {
                     report_custom_error("<stdin>", expression, &message, span);
                 }
-                e => println!("err when validating: {}", e),
+                kani_yaml::YamlError::DslParse {
+                    field_path,
+                    expression,
+                    errors,
+                } => report_dsl_errors("<stdin>", &expression, Some(&field_path), &errors),
+                e => eprintln!("error when validating: {e}"),
             }
         }
         return Err(CliError::Other("Validation Error (see above)".to_string()));
@@ -225,6 +222,13 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
             for (k, v) in headers {
                 collect_user_fn_names(k, out);
                 collect_user_fn_names(v, out);
+            }
+        }
+        Expr::Arena { arena, .. } => {
+            for node in &arena.nodes {
+                if let kani_shared::ast::ExprNode::UserFn { name, .. } = node {
+                    out.push(name.clone());
+                }
             }
         }
         Expr::SelfRef

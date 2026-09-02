@@ -24,7 +24,7 @@ use axum::{
 
 use crate::{auth::AuthSession, state::AppState};
 
-pub const IDEMPOTENCY_KEY: HeaderName = HeaderName::from_static("idempotency-key");
+pub(crate) const IDEMPOTENCY_KEY: HeaderName = HeaderName::from_static("idempotency-key");
 const REPLAYED: HeaderName = HeaderName::from_static("x-idempotent-replay");
 
 /// How long a key is honoured. Long enough to cover a client's timeout and
@@ -125,7 +125,7 @@ fn replay(rec: &Recorded) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-pub async fn idempotency_middleware(
+pub(crate) async fn idempotency_middleware(
     State(state): State<AppState>,
     auth: AuthSession,
     req: Request,

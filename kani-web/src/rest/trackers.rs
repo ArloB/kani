@@ -41,7 +41,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_manga_tracking_handler(
+pub(super) async fn get_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -61,7 +61,7 @@ pub(crate) async fn get_manga_tracking_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_manga_tracking_handler(
+pub(super) async fn set_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -103,7 +103,7 @@ pub(crate) async fn set_manga_tracking_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn list_trackers(
+pub(super) async fn list_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -136,7 +136,7 @@ pub(crate) async fn list_trackers(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_tracker_auth_url(
+pub(super) async fn get_tracker_auth_url(
     _: AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -162,7 +162,7 @@ pub(crate) async fn get_tracker_auth_url(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn tracker_oauth_callback(
+pub(super) async fn tracker_oauth_callback(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -186,7 +186,7 @@ pub(crate) async fn tracker_oauth_callback(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn unlink_tracker(
+pub(super) async fn unlink_tracker(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -208,7 +208,7 @@ pub(crate) async fn unlink_tracker(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn search_tracker_manga(
+pub(super) async fn search_tracker_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -231,7 +231,7 @@ pub(crate) async fn search_tracker_manga(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_tracker_config(
+pub(super) async fn get_tracker_config(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -261,7 +261,7 @@ pub(crate) async fn get_tracker_config(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_tracker_config(
+pub(super) async fn set_tracker_config(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -284,7 +284,7 @@ pub(crate) async fn set_tracker_config(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_tracker_config(
+pub(super) async fn delete_tracker_config(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -303,7 +303,7 @@ pub(crate) async fn delete_tracker_config(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_tracker_mappings(
+pub(super) async fn get_tracker_mappings(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -339,7 +339,7 @@ pub(crate) async fn get_tracker_mappings(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_tracker_mapping(
+pub(super) async fn set_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -363,7 +363,7 @@ pub(crate) async fn set_tracker_mapping(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_tracker_mapping(
+pub(super) async fn delete_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path((manga_id, tracker_id)): Path<(MangaId, i64)>,
@@ -382,7 +382,7 @@ pub(crate) async fn delete_tracker_mapping(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn sync_all_trackers(
+pub(super) async fn sync_all_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -400,7 +400,7 @@ pub(crate) async fn sync_all_trackers(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn sync_manga_trackers(
+pub(super) async fn sync_manga_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,

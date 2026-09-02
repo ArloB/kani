@@ -99,7 +99,7 @@ pub async fn delete_yaml_file(wasm_storage_path: &str, name: &str) -> Result<()>
 }
 
 /// Validates that the bytes start with WASM magic bytes.
-pub fn validate_wasm_magic(bytes: &[u8]) -> bool {
+pub(crate) fn validate_wasm_magic(bytes: &[u8]) -> bool {
     bytes.len() >= 4 && bytes[..4] == WASM_MAGIC
 }
 

@@ -1,1 +1,0 @@
-ALTER TABLE sources ADD COLUMN streaming_chapters INTEGER NOT NULL DEFAULT 0;

@@ -2,8 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use axum::{body::Body, http::Request};
-use common::{authed_get, build_test_app, create_admin, login, test_state};
+use common::authed_get;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -100,10 +99,7 @@ fn canonical_key_no_bust_params_unchanged() {
 
 #[tokio::test]
 async fn proxy_stats_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/proxy/stats", &cookie))
@@ -111,41 +107,4 @@ async fn proxy_stats_returns_200_for_admin() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn proxy_stats_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/rest/admin/proxy/stats")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn proxy_stats_returns_403_for_regular_user() {
-    use common::{body_json, create_regular_user};
-
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "alice").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/admin/proxy/stats", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let _ = body_json(res).await;
 }

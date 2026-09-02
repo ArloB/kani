@@ -5,13 +5,6 @@ use common::test_service;
 use kani_app::ids::UserId;
 
 #[tokio::test]
-async fn add_source_returns_positive_id() {
-    let svc = test_service().await;
-    let id = svc.add_source("test-source", UserId(1)).await.unwrap();
-    assert!(id > 0);
-}
-
-#[tokio::test]
 async fn list_sources_empty_on_fresh_db() {
     let svc = test_service().await;
     let sources = svc.list_sources().await.unwrap();

@@ -12,8 +12,9 @@ pub fn run_test(
     har_path: &str,
     endpoint: &str,
     expected_count: usize,
+    url_contains: Option<&str>,
 ) -> Result<(), CliError> {
-    let actual = evaluate_endpoint_count(file, har_path, endpoint)?;
+    let actual = evaluate_endpoint_count(file, har_path, endpoint, url_contains)?;
     if actual == expected_count {
         println!("ok — {actual} row(s)");
         Ok(())
@@ -29,10 +30,11 @@ pub fn run_replay(
     har_path: &str,
     endpoint: &str,
     expected_path: &str,
+    url_contains: Option<&str>,
 ) -> Result<(), CliError> {
     let ep = load_endpoint(file, endpoint)?;
     let har = har::load(har_path)?;
-    let body = find_response_body(&har, file, endpoint)?;
+    let body = find_response_body(&har, &ep, url_contains)?;
     let actual = extract_rows(&ep, &body)?;
 
     let expected_src = std::fs::read_to_string(expected_path)?;
@@ -57,10 +59,15 @@ pub fn run_replay(
     }
 }
 
-fn evaluate_endpoint_count(file: &str, har_path: &str, endpoint: &str) -> Result<usize, CliError> {
+fn evaluate_endpoint_count(
+    file: &str,
+    har_path: &str,
+    endpoint: &str,
+    url_contains: Option<&str>,
+) -> Result<usize, CliError> {
     let ep = load_endpoint(file, endpoint)?;
     let har = har::load(har_path)?;
-    let body = find_response_body(&har, file, endpoint)?;
+    let body = find_response_body(&har, &ep, url_contains)?;
     let rows = extract_rows(&ep, &body)?;
     match rows {
         serde_json::Value::Array(arr) => Ok(arr.len()),
@@ -68,7 +75,7 @@ fn evaluate_endpoint_count(file: &str, har_path: &str, endpoint: &str) -> Result
     }
 }
 
-pub fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, CliError> {
+pub(crate) fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, CliError> {
     let path = Path::new(file);
     let src = std::fs::read_to_string(path)?;
     let ext: YamlExtension = serde_yaml::from_str(&src)
@@ -104,13 +111,78 @@ pub fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, Cl
     }
 }
 
-fn find_response_body(har: &har::Har, _file: &str, _endpoint: &str) -> Result<String, CliError> {
-    har.log
-        .entries
-        .iter()
-        .find(|e| e.response.status < 400)
-        .and_then(|e| e.response.content.text.clone())
-        .ok_or_else(|| CliError::Other("no successful response found in HAR".into()))
+/// The literal parts of a route, in order, with `$placeholder$` spans removed.
+/// `/manga/$manga_id$/chapters` yields `["/manga/", "/chapters"]`.
+fn route_literals(route: &str) -> Vec<&str> {
+    let mut literals = Vec::new();
+    let mut rest = route;
+    while let Some(open) = rest.find('$') {
+        if !rest[..open].is_empty() {
+            literals.push(&rest[..open]);
+        }
+        let Some(close) = rest[open + 1..].find('$') else {
+            return literals;
+        };
+        rest = &rest[open + 1 + close + 1..];
+    }
+    if !rest.is_empty() {
+        literals.push(rest);
+    }
+    literals
+}
+
+/// Whether `url` contains every literal of the route, in order.
+fn matches_route(url: &str, route: &str) -> bool {
+    let mut cursor = 0;
+    for literal in route_literals(route) {
+        match url[cursor..].find(literal) {
+            Some(at) => cursor += at + literal.len(),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Picks the HAR entry belonging to this endpoint.
+///
+/// A HAR recorded by `kani-cli repl record` holds one entry, but one exported from
+/// a browser holds every request the page made — where the first successful
+/// response is usually a stylesheet. Matching on the route rather than taking the
+/// first success is what tells those apart, and no match is an error rather than a
+/// guess.
+fn find_response_body(
+    har: &har::Har,
+    ep: &ValidatedEndpoint,
+    url_contains: Option<&str>,
+) -> Result<String, CliError> {
+    let entry = match url_contains {
+        Some(fragment) => har::find_entry(har, fragment).ok_or_else(|| {
+            CliError::Other(format!(
+                "no HAR entry URL contains {fragment:?} ({} entries searched)",
+                har.log.entries.len()
+            ))
+        })?,
+        None => har
+            .log
+            .entries
+            .iter()
+            .find(|e| e.response.status < 400 && matches_route(&e.request.url, &ep.route))
+            .ok_or_else(|| {
+                CliError::Other(format!(
+                    "no successful HAR entry matches route {:?} ({} entries searched); \
+                     pass --url-contains <fragment> to name the entry directly",
+                    ep.route,
+                    har.log.entries.len()
+                ))
+            })?,
+    };
+
+    entry.response.content.text.clone().ok_or_else(|| {
+        CliError::Other(format!(
+            "HAR entry {} has no response body",
+            entry.request.url
+        ))
+    })
 }
 
 fn extract_rows(ep: &ValidatedEndpoint, body: &str) -> Result<serde_json::Value, CliError> {
@@ -161,4 +233,146 @@ fn extract_json_rows(ep: &ValidatedEndpoint, body: &str) -> Result<serde_json::V
         .collect();
 
     Ok(serde_json::Value::Array(rows))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn entry(url: &str, status: u16, body: &str) -> har::HarEntry {
+        har::HarEntry {
+            request: har::HarRequest {
+                method: "GET".into(),
+                url: url.into(),
+            },
+            response: har::HarResponse {
+                status,
+                content: har::HarContent {
+                    mime_type: "application/json".into(),
+                    text: Some(body.into()),
+                },
+            },
+        }
+    }
+
+    fn har_of(entries: Vec<har::HarEntry>) -> har::Har {
+        har::Har {
+            log: har::HarLog { entries },
+        }
+    }
+
+    /// A browser export: the first successful response is a stylesheet, and the
+    /// endpoint's own response is buried among the page's other requests.
+    fn browser_har() -> har::Har {
+        har_of(vec![
+            entry("https://ex.com/assets/app.css", 200, "body{}"),
+            entry("https://ex.com/manga/8813", 200, r#"{"title":"wrong"}"#),
+            entry("https://ex.com/manga/8813/chapters", 200, r#"["right"]"#),
+        ])
+    }
+
+    /// A real validated endpoint with its route swapped, so matching is exercised
+    /// against the same type the commands pass in.
+    fn route_ep(route: &str) -> ValidatedEndpoint {
+        let mut ep = load_endpoint("tests/fixtures/chapter_list.yaml", "chapter_list").unwrap();
+        ep.route = route.to_string();
+        ep
+    }
+
+    #[test]
+    fn route_literals_drop_the_placeholder_spans() {
+        assert_eq!(
+            route_literals("/manga/$manga_id$/chapters"),
+            vec!["/manga/", "/chapters"]
+        );
+        assert_eq!(route_literals("/popular"), vec!["/popular"]);
+        assert_eq!(route_literals("$id$"), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_route_matches_only_when_every_literal_appears_in_order() {
+        assert!(matches_route(
+            "https://ex.com/manga/8813/chapters",
+            "/manga/$id$/chapters"
+        ));
+        // Present but reversed: the trailing literal must follow the leading one.
+        assert!(!matches_route(
+            "https://ex.com/chapters/8813/manga/",
+            "/manga/$id$/chapters"
+        ));
+        assert!(!matches_route(
+            "https://ex.com/manga/8813",
+            "/manga/$id$/chapters"
+        ));
+        assert!(!matches_route("https://ex.com/assets/app.css", "/popular"));
+    }
+
+    #[test]
+    fn the_entry_matching_the_route_is_chosen_over_earlier_successes() {
+        let body = find_response_body(
+            &browser_har(),
+            &route_ep("/manga/$manga_id$/chapters"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            body, r#"["right"]"#,
+            "the stylesheet and the details response both precede the chapter list"
+        );
+    }
+
+    #[test]
+    fn no_matching_entry_is_an_error_naming_the_route() {
+        let error = find_response_body(&browser_har(), &route_ep("/search"), None).unwrap_err();
+
+        let message = error.to_string();
+        assert!(
+            message.contains("/search") && message.contains("3 entries"),
+            "the error must name the route and how many entries were searched, got: {message}"
+        );
+        assert!(
+            message.contains("--url-contains"),
+            "the error must point at the escape hatch, got: {message}"
+        );
+    }
+
+    #[test]
+    fn an_explicit_fragment_overrides_route_matching() {
+        let body = find_response_body(
+            &browser_har(),
+            &route_ep("/search"),
+            Some("/manga/8813/chapters"),
+        )
+        .unwrap();
+
+        assert_eq!(body, r#"["right"]"#);
+    }
+
+    #[test]
+    fn a_single_entry_recording_still_matches_its_own_route() {
+        let har = har_of(vec![entry(
+            "https://ex.com/manga/8813/chapters?page=1",
+            200,
+            r#"["ok"]"#,
+        )]);
+
+        let body = find_response_body(&har, &route_ep("/manga/$manga_id$/chapters"), None).unwrap();
+
+        assert_eq!(
+            body, r#"["ok"]"#,
+            "record writes base_url + route, so a recorded HAR always matches"
+        );
+    }
+
+    #[test]
+    fn a_failed_response_is_not_replayed() {
+        let har = har_of(vec![entry("https://ex.com/manga/1/chapters", 503, "nope")]);
+
+        let error =
+            find_response_body(&har, &route_ep("/manga/$manga_id$/chapters"), None).unwrap_err();
+
+        assert!(error.to_string().contains("no successful HAR entry"));
+    }
 }

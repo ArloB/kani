@@ -6,7 +6,7 @@
 /** @typedef {{ w: number, h: number }} Dims */
 
 /** Landscape threshold: width/height at or above this reads as a wide spread. */
-export const WIDE_RATIO = 1.2;
+const WIDE_RATIO = 1.2;
 
 /**
  * True if a page is a pre-combined wide spread (landscape). When the server has
@@ -54,7 +54,7 @@ export function spreadPairVerdict(a, b, { hasServerAnalysis = false, isServerDou
 }
 
 /** Rec. 601 luma of an 8-bit RGB pixel. */
-export function luma(r, g, b) {
+function luma(r, g, b) {
   return (r * 299 + g * 587 + b * 114) / 1000;
 }
 

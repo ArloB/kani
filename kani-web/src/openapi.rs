@@ -6,7 +6,7 @@ use utoipa::{Modify, OpenApi};
 /// may gain optional fields but may not remove or repurpose existing ones, change status codes, or
 /// move. `Unstable` operations carry no such promise and may change in any release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Stability {
+pub(crate) enum Stability {
     Stable,
     Unstable,
 }
@@ -47,7 +47,7 @@ fn covers(prefix: &str, path: &str) -> bool {
 }
 
 /// Compatibility tier for a documented path. Unlisted paths are [`Stability::Stable`].
-pub fn stability_for(path: &str) -> Stability {
+pub(crate) fn stability_for(path: &str) -> Stability {
     if UNSTABLE_PREFIXES.iter().any(|p| covers(p, path)) {
         Stability::Unstable
     } else {
@@ -56,11 +56,11 @@ pub fn stability_for(path: &str) -> Stability {
 }
 
 /// Stamps every operation with its `x-stability` tier so the published document carries it.
-pub struct StabilityAddon;
+pub(crate) struct StabilityAddon;
 
 impl Modify for StabilityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        for (path, item) in openapi.paths.paths.iter_mut() {
+        for (path, item) in &mut openapi.paths.paths {
             let tier = stability_for(path);
             let operations = [
                 &mut item.get,
@@ -134,6 +134,7 @@ impl Modify for StabilityAddon {
         crate::rest::settings::start_refresh_all_rest,
         crate::rest::settings::get_refresh_status,
         crate::rest::settings::update_settings,
+        crate::rest::settings::test_solver,
         // library
         crate::rest::library::get_library_filtered,
         crate::rest::library::get_library,
@@ -453,6 +454,7 @@ impl Modify for StabilityAddon {
             crate::models::PasswordResetRequestBody,
             crate::models::PasswordResetConfirmBody,
             crate::models::SendTestEmailBody,
+        crate::models::SolverTestBody,
             crate::rest::TotpCodeRequest,
             crate::rest::RegisterRequest,
         )

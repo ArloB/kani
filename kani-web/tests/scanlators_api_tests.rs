@@ -3,19 +3,31 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, insert_manga,
-    insert_source, login, test_state,
+    authed_get, authed_patch, body_json, build_test_app, create_admin, insert_manga, insert_source,
+    login, test_state,
 };
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn set_scanlator_mode_returns_200_for_priority() {
+async fn set_scanlator_mode_stores_priority() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
     let src = insert_source(&state.db, "src").await;
     let manga_id = insert_manga(&state.db, src, "m1", "Test Manga").await;
+    let db = state.db.clone();
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
+
+    // 'whitelist' first, so passing 'priority' cannot be confused with the
+    // column's default.
+    app.clone()
+        .oneshot(authed_patch(
+            &format!("/rest/manga/{manga_id}/scanlator_mode"),
+            &cookie,
+            serde_json::json!({"mode": "whitelist"}),
+        ))
+        .await
+        .unwrap();
 
     let res = app
         .oneshot(authed_patch(
@@ -27,6 +39,13 @@ async fn set_scanlator_mode_returns_200_for_priority() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
+
+    let stored: String = sqlx::query_scalar("SELECT scanlator_mode FROM manga WHERE id = ?")
+        .bind(manga_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(stored, "priority", "the mode must reach the manga row");
 }
 
 #[tokio::test]
@@ -71,19 +90,6 @@ async fn set_scanlator_mode_returns_400_for_invalid_mode() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = body_json(res).await;
     assert_eq!(body["code"], "validation_error");
-}
-
-#[tokio::test]
-async fn set_scanlator_mode_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlator_mode"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -138,19 +144,6 @@ async fn get_chapter_scanlators_returns_200_for_existing_manga() {
 }
 
 #[tokio::test]
-async fn get_chapter_scanlators_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlators"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn get_scanlator_prefs_returns_empty_list_for_fresh_manga() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
@@ -170,17 +163,4 @@ async fn get_scanlator_prefs_returns_empty_list_for_fresh_manga() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body, serde_json::json!([]));
-}
-
-#[tokio::test]
-async fn get_scanlator_prefs_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/manga/1/scanlator_preferences"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

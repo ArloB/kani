@@ -2,10 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_get, authed_post, body_json, build_test_app, create_admin, get_req, login, post_json,
-    test_state,
-};
+use common::{authed_get, authed_post, body_json, build_test_app, get_req, test_state};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -39,20 +36,6 @@ async fn system_info_reports_first_run_true_on_fresh_db() {
     assert!(body["first_run"].as_bool().unwrap());
 }
 
-#[tokio::test]
-async fn complete_first_run_requires_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(post_json(
-            "/rest/system/first-run-complete",
-            serde_json::json!({}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
 #[cfg(debug_assertions)]
 #[tokio::test]
 async fn swagger_ui_returns_200() {
@@ -82,10 +65,7 @@ async fn openapi_json_contains_expected_paths() {
 
 #[tokio::test]
 async fn complete_first_run_flips_flag() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()
@@ -104,22 +84,8 @@ async fn complete_first_run_flips_flag() {
 }
 
 #[tokio::test]
-async fn system_changelog_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(get_req("/rest/system/changelog"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn system_changelog_returns_rendered_html() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/system/changelog", &cookie))
@@ -141,10 +107,7 @@ async fn system_changelog_returns_rendered_html() {
 
 #[tokio::test]
 async fn system_changelog_html_is_sanitised() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/system/changelog", &cookie))

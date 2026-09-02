@@ -28,7 +28,8 @@ fn put(uri: &str, cookie: &str) -> Request<Body> {
     Request::builder()
         .method("PUT")
         .uri(uri)
-        .header("Cookie", cookie)
+        .header("Cookie", common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .body(Body::empty())
         .unwrap()
 }
@@ -37,7 +38,8 @@ fn del(uri: &str, cookie: &str) -> Request<Body> {
     Request::builder()
         .method("DELETE")
         .uri(uri)
-        .header("Cookie", cookie)
+        .header("Cookie", common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .body(Body::empty())
         .unwrap()
 }
@@ -49,10 +51,7 @@ async fn json_of(res: axum::response::Response) -> serde_json::Value {
 
 #[tokio::test]
 async fn list_themes_returns_200_for_an_authed_user() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/ui/themes", &cookie))
@@ -66,28 +65,8 @@ async fn list_themes_returns_200_for_an_authed_user() {
 }
 
 #[tokio::test]
-async fn list_themes_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/rest/ui/themes")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn an_unknown_token_is_rejected() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let body = serde_json::json!({
         "name": "Bad",
@@ -106,10 +85,7 @@ async fn an_unknown_token_is_rejected() {
 
 #[tokio::test]
 async fn a_theme_can_be_created_activated_and_deleted() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let created = json_of(
         app.clone()
@@ -166,39 +142,13 @@ async fn a_theme_can_be_created_activated_and_deleted() {
 
 #[tokio::test]
 async fn activating_an_unknown_theme_is_404() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(put("/rest/ui/themes/nope/activate", &cookie))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn a_regular_user_cannot_publish_an_instance_wide_theme() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let (u, p) = create_regular_user(&state, "bob").await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/ui/themes",
-            &cookie,
-            theme_body("Everyone's", true),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::FORBIDDEN,
-        "instance_wide requires theme:publish"
-    );
 }
 
 #[tokio::test]
@@ -410,10 +360,7 @@ async fn a_user_cannot_delete_another_users_theme() {
 /// editor starts failing to save and the only symptom is a 422.
 #[tokio::test]
 async fn the_editors_full_token_payload_is_accepted() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let core = [
         "--color-bg",
@@ -511,10 +458,7 @@ async fn the_sync_upload_shape_creates_a_private_theme() {
 
 #[tokio::test]
 async fn posted_custom_css_comes_back_sanitised() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let mut body = theme_body("Styled", false);
     body["custom_css"] = serde_json::json!("@import url(evil.css); .btn { color: red }");

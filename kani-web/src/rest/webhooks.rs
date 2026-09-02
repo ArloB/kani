@@ -27,7 +27,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn list_webhooks(
+pub(super) async fn list_webhooks(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -46,7 +46,7 @@ pub(crate) async fn list_webhooks(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn create_webhook(
+pub(super) async fn create_webhook(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<kani_app::service::webhooks::CreateWebhookBody>,
@@ -66,7 +66,7 @@ pub(crate) async fn create_webhook(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn update_webhook(
+pub(super) async fn update_webhook(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -86,7 +86,7 @@ pub(crate) async fn update_webhook(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn delete_webhook(
+pub(super) async fn delete_webhook(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -105,7 +105,7 @@ pub(crate) async fn delete_webhook(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn test_webhook(
+pub(super) async fn test_webhook(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -126,7 +126,7 @@ pub(crate) async fn test_webhook(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn list_webhook_deliveries(
+pub(super) async fn list_webhook_deliveries(
     _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -145,7 +145,7 @@ pub(crate) async fn list_webhook_deliveries(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_manga_webhook_notify(
+pub(super) async fn get_manga_webhook_notify(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
@@ -164,7 +164,7 @@ pub(crate) async fn get_manga_webhook_notify(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_manga_webhook_notify(
+pub(super) async fn set_manga_webhook_notify(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,

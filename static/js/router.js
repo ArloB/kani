@@ -31,10 +31,14 @@ const _routes = [
   { path: '/upgrades',                  load: () => import('./pages/upgrades.js') },
   { path: '/stats',                     load: () => import('./pages/stats.js') },
   { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
-  { path: '/admin/ui-showcase',         load: () => import('./pages/admin/ui-showcase.js') },
   { path: '/jobs',                      load: () => import('./pages/admin/jobs.js') },
   { path: '/onboarding',               load: () => import('./pages/onboarding.js') },
   { path: '/',                          load: () => import('./pages/library.js') },
+  // Component gallery: development only. The bundle defines __KANI_DEV__ as
+  // false, so neither the route nor its chunk reaches a release build.
+  ...(__KANI_DEV__
+    ? [{ path: '/admin/ui-showcase', load: () => import('./pages/admin/ui-showcase.js') }]
+    : []),
 ].map(({ path, load }) => ({ re: _pathToRegex(path), keys: _extractKeys(path), load }));
 
 /** @type {HTMLElement | null} */
@@ -122,11 +126,6 @@ export function consumeIntendedDestination() {
   } catch {
     return null;
   }
-}
-
-/** @returns {Record<string, string>} A snapshot of the current route parameters. */
-export function getCurrentParams() {
-  return { ..._currentParams };
 }
 
 /** Scrolls the page content container back to the top (instant). */

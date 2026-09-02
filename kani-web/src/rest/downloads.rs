@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_download_history(
+pub(super) async fn get_download_history(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Query(q): Query<DownloadHistoryQuery>,
@@ -45,7 +45,7 @@ pub(crate) async fn get_download_history(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn start_download(
+pub(super) async fn start_download(
     _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
@@ -68,7 +68,7 @@ pub(crate) async fn start_download(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn retry_download(
+pub(super) async fn retry_download(
     _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
@@ -90,7 +90,7 @@ pub(crate) async fn retry_download(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn get_manga_download_status(
+pub(super) async fn get_manga_download_status(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<MangaId>,
@@ -109,7 +109,7 @@ pub(crate) async fn get_manga_download_status(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn delete_downloaded(
+pub(super) async fn delete_downloaded(
     _: AuthGuard<crate::permissions::guards::ChapterDelete>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
@@ -128,7 +128,7 @@ pub(crate) async fn delete_downloaded(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn cancel_download(
+pub(super) async fn cancel_download(
     _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -147,7 +147,7 @@ pub(crate) async fn cancel_download(
     security(("session" = [])),
     tag = "chapters"
 )]
-pub(crate) async fn cancel_all_global_downloads(
+pub(super) async fn cancel_all_global_downloads(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(svc): State<Arc<dyn DownloadDomain>>,
 ) -> Result<impl IntoResponse, AppError> {

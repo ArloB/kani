@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use sha2::{Digest, Sha384};
 use sqlx::migrate::Migrator;
 use sqlx::{Row, SqlitePool};
@@ -6,150 +8,314 @@ use crate::error::{Result, ServiceError};
 
 pub(super) static MIGRATOR: Migrator = sqlx::migrate!("../migrations");
 
-struct Transition {
-    version: i64,
-    legacy: &'static str,
-    current: &'static str,
-    semantic: &'static str,
-}
+/// The squash that replaced the pre-1.0 migration history.
+///
+/// Deliberately a version no installation ever applied: a database that reaches
+/// `MIGRATOR` without being adopted first fails with an unrecognised-history
+/// error rather than comparing the baseline's checksum against a row recording a
+/// different migration.
+const BASELINE_VERSION: i64 = 20260818000002;
 
-const TRANSITIONS: &[Transition] = &[
-    Transition {
-        version: 20260519000000,
-        legacy: "253b7eebcc89cfe2ec4fc97395d0655722297656656bfcb319dcc3b67819c828d6634b049ef3ab473abe0b4156e0d98e",
-        current: "32cf4ace237f881df414f6152ebb45684d4f6e0d0bc7b3a3b771f1ca290cc3ce722ba61444971c97237f0da6c0c17c20",
-        semantic: "5a5ccd0603c81adedfe79804b58ddceca06b6b944a522621ff534ce192baab85638b78fa7634d6bba47106a11bf3f979",
-    },
-    Transition {
-        version: 20260604000005,
-        legacy: "77f6ba83e42af3f24daffc90daa46251d6674158da7c800542b1f31cba5b76bf08d95637153c543803bd7ccc6d199643",
-        current: "89b675ea8e95448a152389eb8b57f4a69ae3fd11a6b07de09a7e6e89aac8a9407588e837d5c17c633a6205914d12bbcd",
-        semantic: "c7655d00b49fea907a4afefb7fb40d6a719da7c34dbf4e8845f4244f7308e9529472cf36147c67799f3c6218659b74d0",
-    },
-    Transition {
-        version: 20260621000001,
-        legacy: "1efe727a8a9d35042afbd0c2dad6a4845fd86c8b41cffb162ed42d8fd1bae4d6d95c227deae699abc1a5c629f32baf66",
-        current: "99db346ca732312fc07ef957445e45350755b4e230b0a35ac76a17ea3147a92af83e7cd227bce22c8e57f7478fbecbfc",
-        semantic: "feceac6ff6598209563943b570318c63509e17915f38d8215a6eb6167e90cdf545158300f47660f9da6f8b1684c6afd6",
-    },
-    Transition {
-        version: 20260721000003,
-        legacy: "9328879d43527e4d8106db0e653166d8c08e3ee9a6bda48813573a6fbdbc80f63abf300d76dc1990e5f55326fbda4879",
-        current: "8e39b4a5b80d09e60f0a4030c1a27cbec3f49c89cdb06c454cc08a62104e8ad7ff9b66d5fdb54e585e120092ee9aec4f",
-        semantic: "97c0deb1762658bb71b1a7d1fc429adbe4f550c257ad49b3d6fe55a1e092681e3eb8e5746c3eadb3a867694a7e006221",
-    },
-    Transition {
-        version: 20260721000004,
-        legacy: "007594de2938a19fda180f68781200ea486aa5c660244676e4e2325f91c88d9b58d85ec15f5c2c000cac18a9c6c0570a",
-        current: "882d8d173282530ddeeba60420f5a5a9efbdb4cb34fe7f479ba35d56969030dc0e320dfe07cf49ccdd8e36e364161c30",
-        semantic: "bed1d916923a0d6fe7c95c468eacf7329501dad960d5e60ffad5fce1ee0dd6f45c9de64974d26a790361ff2a91662ea3",
-    },
-    Transition {
-        version: 20260722000004,
-        legacy: "4cf8bfbe850fb8b569c614ef6a8d75b79dcf6f7837aed492629009c6c6da404c2ecd7490bcda78cfe678ccd084260a3f",
-        current: "fc8c8c434cac393889906879e9353966d513d33c5b5b759af2b9ed3712d0b4d417994adcd2bae0be7ae4b31897f70730",
-        semantic: "6ec74ee332f3fe35e0169afbd6959699819deb29ce33cd22f7e804d975513133596c035c6cd22e92bef7eeda6aa78c4e",
-    },
-    Transition {
-        version: 20260722000005,
-        legacy: "dc74e347120e10063b334cfe620bbb7c2eaeda7f77ece8f58a05dad61bd22bc459696682e8b35d0adfee8f6635ca6191",
-        current: "db1f79932db805fc4bc888e10b1498a15ae544f3ba01a83bd8f5c57899f4dda8f0bdabc8d05fe016c4da23b3f1cba590",
-        semantic: "3301d88a8334915e5a528ac198cc334641a683d2517e2bdbf97b75256c9d418da35761c2011940b193e7be896ea91088",
-    },
-    Transition {
-        version: 20260722000006,
-        legacy: "ddf7e4e1345becd369dcccd704b13eb014d6c4ceea5d99818efae7d883b2972973d6bc96639fd8adb2d7cd09ca3bcf62",
-        current: "ef04ebfa05f68a8cab526b35ef1de3c25537ab6b2d78846e66572dc20f4503213d661ebdc7897736b2bbe6d6e550fd73",
-        semantic: "74b53e81a844262e58967f0fd3e548f94275b21edd0cbcee211626367cd4db93044ca9f386fc9d6e68514b0eb0d3deb0",
-    },
-    Transition {
-        version: 20260722000007,
-        legacy: "ea6e6b246f3cda82fdcd115af74f1a00d5e50df6542baca17271bed556b6ef2f679d604f56dc3e4a485fc6e8b03d4143",
-        current: "87114df37eeca513e9197ac653ddefeb97047ec4bc53a2d5782c1377d652f50c8708f4beab4c4d2d22b2bdd2c6105c36",
-        semantic: "cf0e3c31b1e4ff8cdb3c63f81bde679e77dabce94c73fe86adff0a39f09d170b9a1a51cf0fcd4ccb5363e91bddf559cd",
-    },
-    Transition {
-        version: 20260722000008,
-        legacy: "aa2b85f6e5f1543f8b6e13ae19a0c3b0699c74785c5e6ad274424afa10ddbb44e38d9c771d2d09a75865fdd287c30502",
-        current: "efdd0541dccd889259f7f26a0a603138a63b4818227624397b1e1760204c21e93d92c5d47896814cf75573eb5453f053",
-        semantic: "db5427b005b7b24bd627d85e35a693af5e0c7595f0411ef0b506a59888bd4ceec0709ddc18a812646cbe94d35146cbb5",
-    },
-    Transition {
-        version: 20260722000009,
-        legacy: "884f6f250c9551130db58d571250cd171910e7f6d25037b89f92b3a9c592ba141165141b79cda69fa4ab08072e6b2c02",
-        current: "6c4da97acf2f7eddc69e5b1ebe5e4fb376ff2ce1eb7868f187b8b0ce99f622d3a76e73f8b58a562ee5e3459a5ead9586",
-        semantic: "68bd81a783e5521a6703e225dd54c068670ba584737d0e17ad36db2cbc348bf3ece1181e3abb4d1f3dd9001eb4f03c45",
-    },
-    Transition {
-        version: 20260722000010,
-        legacy: "77c32805a9db2e32be106fe2d03c92420e5d8bb284d4c1c7a581dbc5e041430d4a1600b7f87c905915460f4adb547d22",
-        current: "3e9baae6b2a925b72388e7dc338b6b47d72a4a1aef7bd54d05f1a5908aabdbb27a99917b3988269e4567ab0520bde5c9",
-        semantic: "7a12c8142763b287e7770994c60e3d322fb2171ce47c2ac243a9adfa56ffe584e5fe39be871ab6f9262d040b223ae53e",
-    },
-    Transition {
-        version: 20260722000011,
-        legacy: "a71710fe0b5d2850ffcd4493d57b271a6f12b5124d1e95d3f9651abc2a57d1645ad727ae6c9e75e21e68673da255739a",
-        current: "53bdd3a1d902912174b73cd4e3996ec95a07b9e94aa1c74b237480f6c5af251024073fac5e221d0fff9eeef5dcdc82ce",
-        semantic: "dd3922484a4cdb2003bf9a58740b3bfd3bccbc3271424de54cc6612159ac822e22d8ef58cf14e2b6f9fe5ac5498544dc",
-    },
-    Transition {
-        version: 20260722000012,
-        legacy: "28d6d1307734e4a0fa08c5d51424d91d21298c0b2ecea7d6fa98d29d45f8c89d3fced5aa870bf8e5b082764d645f6b28",
-        current: "c9936ffbe8ad15e0abf9d15b0ffbc7a4b5a68c594196ece7d6cb59cd9d795eda3272f2f0b16f49cc698a90b9adf09b9d",
-        semantic: "0e619d3e387bdf1accd4b89f5b0e4a0b5621ea8f47162183ef805bdc17ab43de05bc7f57e0dc4c89ca4980229ee1895c",
-    },
-    Transition {
-        version: 20260727000001,
-        legacy: "ff81ad604cd355637df002fedf5533f154e2fb4036980abdd57f48f736fc4ec56800254ad5e38317a6642606cea161fd",
-        current: "fcf74ab8a721cd8034f3e359616bceed601b15feec235e5845b0bfc6f2b6ace8402afa555b4c8b5c12bf5c5846286a2a",
-        semantic: "82b1bd82dd3fff02ae389d6e57b161c2353e4f55a116c8bb8cfecae7e901031e656e9cbb0ef191ee8bac811ee89885c4",
-    },
-    Transition {
-        version: 20260728000001,
-        legacy: "6a36017806ef5af4b3decb3589bb4c06a136c1eb25bfef098b66cdf563f5cc03125b435cab465568c7c5212fa81225cb",
-        current: "a84267985ccad8a088bc0e579a65b16674a38c273d12517df92c66fa91c507625c5e20e082b2292ac715133358ef0d56",
-        semantic: "7aeec10a946ace5dc6c539d21367bb0d37982fc4ba5f5568cf377010a771ef37b9ce8d1bf49f59becba8f2705425538a",
-    },
-    Transition {
-        version: 20260729000001,
-        legacy: "7463e4747f6ceff5a8256aaacce4f3b8e6124818e3fc2b147c7ff2ed3b30aea034d4421651418e8f2c01e3b6835e8ea0",
-        current: "e92916a2eed7732feb2e28a1e916f559fd35f91a0c7f44285a18a2002d107566404c9213d48e25a0f65756e018b47eee",
-        semantic: "1445164e14e4ac93080d2e7f5d886b6b680d2f6a7d9ca5880ab6a60f9d0885f32bb895e1a4deef8965069d03bcfe6820",
-    },
-    Transition {
-        version: 20260729000002,
-        legacy: "3280d90adafcdb3f082c9b881e3bc91c7e906fc465f5acccc21508ee2cc6e3146f3edc28f40353967ac9dd45342fd6fd",
-        current: "22f08fd4d9c3501218f0e21d8c923c0af6958539065455f827447f6ad1bafdf559a63c0cf00f1f858d47ed2958fff3a9",
-        semantic: "3fecef24ecda3081b6b9f748709004c0889b98aff91f943fcd778cb2e7a68320ed2873643f44852dc4ad6d75c942a5f8",
-    },
-    Transition {
-        version: 20260731000001,
-        legacy: "50431adf76ca30931b95009ce3b475f8a123d913721b9bcfec49e8b7bea1ea9aabb2ccef278d3937af364fc75a44cae6",
-        current: "20dad3b392cd1a17ebc685cb7ebd2cfe42fef15144507d567293c470fabd925cc3a4eb5e5ada107530bf8cc4ae55cf81",
-        semantic: "4ed112bf54a8041d45fdeac9b57c632062378929a7e042e219e2c72d213bb100426e56292e7e3c293dc97035c767ec94",
-    },
-    Transition {
-        version: 20260731000002,
-        legacy: "9e6d747ae653dcfa1395ee64a273c61298fd65a231a352d2159a9868cb1411f4f06d55d15f252b04fe36d6adc06f0577",
-        current: "c415cd08c89211821d4c7d96f9af7454b5d54b593ff424e3200b7119cf4c1d7ed3ed97e222c9b181f9aeac1647208ac3",
-        semantic: "38588b03a2a041d2065d86b7f20e85d12c12c6b1d0b43f8b9d5f1855a9a1c21b2f7596a3036079715df4c26a38051943",
-    },
+/// Every version the baseline folded in, as recorded by a pre-squash install.
+///
+/// Adoption demands this set exactly, so a database missing any of them is
+/// refused rather than stamped at a schema it does not have.
+const FOLDED_VERSIONS: &[i64] = &[
+    20260204111500,
+    20260204111742,
+    20260204111832,
+    20260204112719,
+    20260204120000,
+    20260204120100,
+    20260219143715,
+    20260310061948,
+    20260310135015,
+    20260310135117,
+    20260310135349,
+    20260318095636,
+    20260319023827,
+    20260321034417,
+    20260321070250,
+    20260322121106,
+    20260325000000,
+    20260326000000,
+    20260404144845,
+    20260405120208,
+    20260407000001,
+    20260408000001,
+    20260408000002,
+    20260408000003,
+    20260414000001,
+    20260414000002,
+    20260416000001,
+    20260429000001,
+    20260429000002,
+    20260505000001,
+    20260505000002,
+    20260505000003,
+    20260505000004,
+    20260505000005,
+    20260505000006,
+    20260506000001,
+    20260506000002,
+    20260506000003,
+    20260506000004,
+    20260507000001,
+    20260507000002,
+    20260507000003,
+    20260507000004,
+    20260511000001,
+    20260512000001,
+    20260512000002,
+    20260512000003,
+    20260519000000,
+    20260520000001,
+    20260522000001,
+    20260603000001,
+    20260604000001,
+    20260604000002,
+    20260604000003,
+    20260604000004,
+    20260604000005,
+    20260613000001,
+    20260613000002,
+    20260613000003,
+    20260614000001,
+    20260614000002,
+    20260614000003,
+    20260614000004,
+    20260614000005,
+    20260615000001,
+    20260615000002,
+    20260615000003,
+    20260616233000,
+    20260620000001,
+    20260620000002,
+    20260620000003,
+    20260621000001,
+    20260621000002,
+    20260622000001,
+    20260625000001,
+    20260626000001,
+    20260626000002,
+    20260626000003,
+    20260626000004,
+    20260626000005,
+    20260626000006,
+    20260626000007,
+    20260626000008,
+    20260630000001,
+    20260630000002,
+    20260630000003,
+    20260630000004,
+    20260709000001,
+    20260720000001,
+    20260720000002,
+    20260721000001,
+    20260721000002,
+    20260721000003,
+    20260721000004,
+    20260722000001,
+    20260722000002,
+    20260722000003,
+    20260722000004,
+    20260722000005,
+    20260722000006,
+    20260722000007,
+    20260722000008,
+    20260722000009,
+    20260722000010,
+    20260722000011,
+    20260722000012,
+    20260727000001,
+    20260728000001,
+    20260729000001,
+    20260729000002,
+    20260731000001,
+    20260731000002,
+    20260818000001,
 ];
 
+/// A migration edited in place after release, proven comment-only by `semantic`.
+struct Transition<'a> {
+    version: i64,
+    legacy: &'a str,
+    current: &'a str,
+    semantic: &'a str,
+}
+
+/// Empty since the squash: every recorded transition applied to a migration the
+/// baseline folded in. The next in-place edit to a post-baseline migration adds
+/// an entry here rather than reviving the mechanism.
+const TRANSITIONS: &[Transition<'static>] = &[];
+
 pub(super) async fn run(pool: &SqlitePool) -> Result<()> {
-    reconcile(pool).await?;
+    adopt_baseline(pool).await?;
+    reconcile(pool, TRANSITIONS).await?;
     MIGRATOR.run(pool).await?;
     Ok(())
 }
 
-async fn reconcile(pool: &SqlitePool) -> Result<u64> {
-    validate_transitions()?;
+async fn migrations_table_exists(pool: &SqlitePool) -> Result<bool> {
     let exists: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
     )
     .fetch_one(pool)
     .await?;
-    if exists == 0 {
+    Ok(exists == 1)
+}
+
+/// Replaces a complete pre-squash history with the single baseline row.
+///
+/// Checksum-blind by design: the rows being deleted record migrations that no
+/// longer exist, so only their versions and success carry meaning. Any history
+/// that is not exactly the folded set is refused, because stamping the baseline
+/// onto a database missing one of them would claim a schema it does not have.
+async fn adopt_baseline(pool: &SqlitePool) -> Result<bool> {
+    validate_baseline()?;
+    let Some(replacing) = plan_adoption(pool).await? else {
+        return Ok(false);
+    };
+    apply_adoption(pool, replacing).await?;
+    tracing::info!(
+        folded = replacing,
+        "Adopted the squashed migration baseline"
+    );
+    Ok(true)
+}
+
+/// Decides whether the recorded history is the one the baseline replaced.
+///
+/// Returns the number of rows adoption expects to remove, or `None` when there is
+/// nothing to adopt. Every state that is not exactly the folded set is an error,
+/// because stamping the baseline onto a database missing one of those migrations
+/// would claim a schema it does not have.
+async fn plan_adoption(pool: &SqlitePool) -> Result<Option<usize>> {
+    if !migrations_table_exists(pool).await? {
+        return Ok(None);
+    }
+    let rows = sqlx::query("SELECT version, success FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let applied: BTreeSet<i64> = rows.iter().map(|row| row.get("version")).collect();
+    if applied.contains(&BASELINE_VERSION) {
+        return Ok(None);
+    }
+
+    let folded: BTreeSet<i64> = FOLDED_VERSIONS.iter().copied().collect();
+    let missing: Vec<i64> = folded.difference(&applied).copied().collect();
+    let unknown: Vec<i64> = applied.difference(&folded).copied().collect();
+    if !missing.is_empty() || !unknown.is_empty() {
+        return Err(ServiceError::Internal(format!(
+            "this database predates the {BASELINE_VERSION} baseline but its migration history is \
+             not the one the baseline replaced, so it cannot be adopted: {} of {} folded \
+             migrations were never applied (first missing: {}), and {} unrecognised version(s) \
+             are present (first: {}). Restore a backup taken before the interrupted upgrade.",
+            missing.len(),
+            FOLDED_VERSIONS.len(),
+            missing
+                .first()
+                .map_or_else(|| "none".to_owned(), i64::to_string),
+            unknown.len(),
+            unknown
+                .first()
+                .map_or_else(|| "none".to_owned(), i64::to_string),
+        )));
+    }
+    if let Some(row) = rows.iter().find(|row| !row.get::<bool, _>("success")) {
+        return Err(ServiceError::Internal(format!(
+            "migration {} is recorded as failed, so the pre-{BASELINE_VERSION} history is \
+             incomplete and cannot be adopted into the baseline",
+            row.get::<i64, _>("version"),
+        )));
+    }
+
+    Ok(Some(rows.len()))
+}
+
+/// Swaps the planned history for the baseline row, or fails if the history moved
+/// since it was planned. `replacing` is what the plan counted: a different number
+/// here means a concurrent writer, and overwriting it would discard rows nothing
+/// has inspected.
+async fn apply_adoption(pool: &SqlitePool, replacing: usize) -> Result<()> {
+    let baseline = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == BASELINE_VERSION)
+        .ok_or_else(|| {
+            ServiceError::Internal(format!("baseline migration {BASELINE_VERSION} is missing"))
+        })?;
+
+    let mut tx = pool.begin().await?;
+    let deleted = sqlx::query("DELETE FROM _sqlx_migrations")
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if deleted != replacing as u64 {
+        return Err(ServiceError::Internal(format!(
+            "baseline adoption raced: expected to replace {replacing} migration rows, found {deleted}"
+        )));
+    }
+
+    let inserted = sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+         VALUES (?, ?, TRUE, ?, 0)",
+    )
+    .bind(BASELINE_VERSION)
+    .bind(baseline.description.as_ref())
+    .bind(baseline.checksum.as_ref())
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if inserted != 1 {
+        return Err(ServiceError::Internal(
+            "baseline adoption raced: the baseline row was not written".to_owned(),
+        ));
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Rejects a baseline that no longer covers the versions it claims to have folded in.
+fn validate_baseline() -> Result<()> {
+    if !MIGRATOR
+        .iter()
+        .any(|migration| migration.version == BASELINE_VERSION)
+    {
+        return Err(ServiceError::Internal(format!(
+            "baseline migration {BASELINE_VERSION} is missing from the embedded migrations"
+        )));
+    }
+    let folded: BTreeSet<i64> = FOLDED_VERSIONS.iter().copied().collect();
+    if folded.len() != FOLDED_VERSIONS.len() {
+        return Err(ServiceError::Internal(
+            "the folded version list contains a duplicate".to_owned(),
+        ));
+    }
+    if let Some(migration) = MIGRATOR
+        .iter()
+        .find(|migration| folded.contains(&migration.version))
+    {
+        return Err(ServiceError::Internal(format!(
+            "migration {} is both folded into the baseline and still present as a file",
+            migration.version
+        )));
+    }
+    if folded.last().is_some_and(|last| *last >= BASELINE_VERSION) {
+        return Err(ServiceError::Internal(format!(
+            "a folded version sorts at or after the baseline {BASELINE_VERSION}"
+        )));
+    }
+    Ok(())
+}
+
+async fn reconcile(pool: &SqlitePool, transitions: &[Transition<'_>]) -> Result<u64> {
+    validate_transitions(transitions)?;
+    if !migrations_table_exists(pool).await? {
         return Ok(0);
     }
 
@@ -158,7 +324,7 @@ async fn reconcile(pool: &SqlitePool) -> Result<u64> {
         .fetch_all(&mut *tx)
         .await?;
     let mut changed = 0;
-    for transition in TRANSITIONS {
+    for transition in transitions {
         let Some(row) = rows
             .iter()
             .find(|row| row.get::<i64, _>("version") == transition.version)
@@ -196,8 +362,8 @@ async fn reconcile(pool: &SqlitePool) -> Result<u64> {
     Ok(changed)
 }
 
-fn validate_transitions() -> Result<()> {
-    for transition in TRANSITIONS {
+fn validate_transitions(transitions: &[Transition<'_>]) -> Result<()> {
+    for transition in transitions {
         let migration = MIGRATOR
             .iter()
             .find(|migration| migration.version == transition.version)
@@ -327,9 +493,55 @@ mod tests {
             .unwrap()
     }
 
+    /// A database as a pre-squash installation left it: the baseline's schema,
+    /// because that is what applying all of the folded migrations produced, and a
+    /// history of exactly those versions. The checksums are deliberately junk —
+    /// adoption must not depend on them, since the migrations they record are gone.
+    async fn pre_squash_pool() -> SqlitePool {
+        let pool = pool().await;
+        MIGRATOR.run(&pool).await.unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (index, version) in FOLDED_VERSIONS.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+                 VALUES (?, 'legacy', TRUE, ?, 0)",
+            )
+            .bind(version)
+            .bind(vec![u8::try_from(index % 256).unwrap(); 48])
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool
+    }
+
+    /// Every version a fully migrated database should record: the baseline plus
+    /// each migration added after it. Derived from `MIGRATOR` so a new migration
+    /// does not require editing these tests.
+    fn expected_history() -> Vec<i64> {
+        let mut versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
+        versions.sort_unstable();
+        versions
+    }
+
+    async fn history(pool: &SqlitePool) -> Vec<i64> {
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn baseline_manifest_matches_embedded_migrations() {
+        validate_baseline().unwrap();
+    }
+
     #[test]
     fn transition_manifest_matches_embedded_migrations() {
-        validate_transitions().unwrap();
+        validate_transitions(TRANSITIONS).unwrap();
     }
 
     #[test]
@@ -341,54 +553,213 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_checksums_are_reconciled_before_validation() {
-        let pool = pool().await;
-        MIGRATOR.run(&pool).await.unwrap();
-        for transition in TRANSITIONS {
-            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
-                .bind(decode(transition.legacy).unwrap())
-                .bind(transition.version)
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
+    async fn a_complete_pre_squash_history_becomes_the_baseline_row() {
+        let pool = pre_squash_pool().await;
 
         run(&pool).await.unwrap();
 
-        for transition in TRANSITIONS {
-            let checksum: Vec<u8> =
-                sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
-                    .bind(transition.version)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
-            assert_eq!(checksum, decode(transition.current).unwrap());
-        }
+        assert_eq!(history(&pool).await, expected_history());
+        let checksum: Vec<u8> =
+            sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
+                .bind(BASELINE_VERSION)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let baseline = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == BASELINE_VERSION)
+            .unwrap();
+        assert_eq!(
+            checksum,
+            baseline.checksum.as_ref(),
+            "the stamped row must carry the baseline's own checksum, or the next \
+             startup reruns it"
+        );
     }
 
     #[tokio::test]
-    async fn unknown_checksum_still_fails_closed() {
-        let pool = pool().await;
-        MIGRATOR.run(&pool).await.unwrap();
-        let version = TRANSITIONS[0].version;
-        sqlx::query("UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = ?")
-            .bind(version)
+    async fn adopting_an_already_adopted_database_changes_nothing() {
+        let pool = pre_squash_pool().await;
+        run(&pool).await.unwrap();
+
+        assert!(!adopt_baseline(&pool).await.unwrap());
+        run(&pool).await.unwrap();
+
+        assert_eq!(history(&pool).await, expected_history());
+    }
+
+    #[tokio::test]
+    async fn a_partially_applied_history_is_refused_without_touching_it() {
+        let pool = pre_squash_pool().await;
+        let dropped = FOLDED_VERSIONS[FOLDED_VERSIONS.len() - 2];
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+            .bind(dropped)
             .execute(&pool)
             .await
             .unwrap();
 
         let error = run(&pool).await.unwrap_err();
-        assert!(matches!(
-            error,
-            ServiceError::Migration(sqlx::migrate::MigrateError::VersionMismatch(found))
-                if found == version
-        ));
+
+        let message = error.to_string();
+        assert!(
+            message.contains(&dropped.to_string()),
+            "the error must name the migration that is missing, got: {message}"
+        );
+        assert_eq!(
+            history(&pool).await.len(),
+            FOLDED_VERSIONS.len() - 1,
+            "a refused adoption must leave the history exactly as it found it"
+        );
     }
 
     #[tokio::test]
-    async fn fresh_database_needs_no_reconciliation() {
+    async fn an_unrecognised_version_is_refused() {
+        let pool = pre_squash_pool().await;
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+             VALUES (20260101000000, 'stranger', TRUE, zeroblob(48), 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let error = run(&pool).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains("20260101000000"),
+            "the error must name the version it did not recognise, got: {error}"
+        );
+        assert_eq!(history(&pool).await.len(), FOLDED_VERSIONS.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_migration_row_is_refused() {
+        let pool = pre_squash_pool().await;
+        let failed = FOLDED_VERSIONS[0];
+        sqlx::query("UPDATE _sqlx_migrations SET success = FALSE WHERE version = ?")
+            .bind(failed)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let error = run(&pool).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains(&failed.to_string()),
+            "the error must name the migration recorded as failed, got: {error}"
+        );
+        assert_eq!(history(&pool).await.len(), FOLDED_VERSIONS.len());
+    }
+
+    #[tokio::test]
+    async fn a_history_that_moves_after_planning_is_not_overwritten() {
+        let pool = pre_squash_pool().await;
+        let replacing = plan_adoption(&pool).await.unwrap().unwrap();
+
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+            .bind(FOLDED_VERSIONS[0])
+            .execute(&pool)
+            .await
+            .unwrap();
+        let error = apply_adoption(&pool, replacing).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains("raced"),
+            "a history that changed after planning must not be replaced, got: {error}"
+        );
+        assert_eq!(history(&pool).await.len(), FOLDED_VERSIONS.len() - 1);
+    }
+
+    #[tokio::test]
+    async fn fresh_database_runs_only_the_baseline() {
         let pool = pool().await;
-        assert_eq!(reconcile(&pool).await.unwrap(), 0);
+        assert!(!adopt_baseline(&pool).await.unwrap());
+
         run(&pool).await.unwrap();
+
+        assert_eq!(history(&pool).await, expected_history());
+    }
+
+    #[tokio::test]
+    async fn an_unknown_checksum_still_fails_closed() {
+        let pool = pool().await;
+        run(&pool).await.unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = ?")
+            .bind(BASELINE_VERSION)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let error = run(&pool).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            ServiceError::Migration(sqlx::migrate::MigrateError::VersionMismatch(found))
+                if found == BASELINE_VERSION
+        ));
+    }
+
+    /// The transition table is empty after the squash, so the mechanism is exercised
+    /// against a synthetic entry for the baseline itself. Without this the next
+    /// comment-only edit would be the first thing to test it.
+    #[tokio::test]
+    async fn a_legacy_checksum_is_reconciled_before_validation() {
+        let baseline = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == BASELINE_VERSION)
+            .unwrap();
+        let current = hex::encode(baseline.checksum.as_ref());
+        let semantic = hex::encode(Sha384::digest(normalize_sql(&baseline.sql).as_bytes()));
+        let transitions = &[Transition {
+            version: BASELINE_VERSION,
+            legacy: "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\
+                     00112233445566778899aabbccddeeff",
+            current: &current,
+            semantic: &semantic,
+        }];
+
+        let pool = pool().await;
+        run(&pool).await.unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(decode(transitions[0].legacy).unwrap())
+            .bind(BASELINE_VERSION)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(reconcile(&pool, transitions).await.unwrap(), 1);
+
+        let checksum: Vec<u8> =
+            sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?")
+                .bind(BASELINE_VERSION)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(checksum, baseline.checksum.as_ref());
+        MIGRATOR.run(&pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_transition_claiming_an_executable_change_is_rejected() {
+        let baseline = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == BASELINE_VERSION)
+            .unwrap();
+        let zeroes = hex::encode([0u8; 48]);
+        let current = hex::encode(baseline.checksum.as_ref());
+        let transitions = &[Transition {
+            version: BASELINE_VERSION,
+            legacy: &zeroes,
+            current: &current,
+            semantic: &zeroes,
+        }];
+
+        let pool = pool().await;
+        let error = reconcile(&pool, transitions).await.unwrap_err();
+
+        assert!(
+            error.to_string().contains("executable change"),
+            "a wrong semantic hash must be rejected, got: {error}"
+        );
     }
 }

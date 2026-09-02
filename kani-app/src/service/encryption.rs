@@ -9,7 +9,7 @@ pub struct CredentialCipher {
 
 impl CredentialCipher {
     /// Decode a 64-char lowercase hex string into a 32-byte key.
-    pub fn from_hex(hex: &str) -> Result<Self, String> {
+    pub(crate) fn from_hex(hex: &str) -> Result<Self, String> {
         let bytes = hex::decode(hex.trim()).map_err(|e| format!("Invalid key hex: {e}"))?;
         if bytes.len() != 32 {
             return Err(format!(
@@ -60,7 +60,7 @@ impl CredentialCipher {
 }
 
 /// Encrypt if cipher is Some, else pass through unchanged.
-pub fn maybe_encrypt(cipher: Option<&CredentialCipher>, value: &str) -> String {
+pub(crate) fn maybe_encrypt(cipher: Option<&CredentialCipher>, value: &str) -> String {
     match cipher {
         Some(c) => c.encrypt(value),
         None => value.to_string(),
@@ -68,7 +68,10 @@ pub fn maybe_encrypt(cipher: Option<&CredentialCipher>, value: &str) -> String {
 }
 
 /// Decrypt if cipher is Some, else pass through unchanged.
-pub fn maybe_decrypt(cipher: Option<&CredentialCipher>, stored: &str) -> Result<String, String> {
+pub(crate) fn maybe_decrypt(
+    cipher: Option<&CredentialCipher>,
+    stored: &str,
+) -> Result<String, String> {
     match cipher {
         Some(c) => c.decrypt(stored),
         None => Ok(stored.to_string()),

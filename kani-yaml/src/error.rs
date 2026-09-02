@@ -6,6 +6,12 @@ pub enum YamlError {
         message: String,
         span: std::ops::Range<usize>,
     },
+    #[error("DSL parse failed in {field_path}")]
+    DslParse {
+        field_path: String,
+        expression: String,
+        errors: Vec<crate::dsl::DslParseError>,
+    },
     #[error("{0}")]
     Validation(String),
 }

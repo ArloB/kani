@@ -106,7 +106,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn run_scheduled_backup(&self) -> Result<()> {
+    pub(crate) async fn run_scheduled_backup(&self) -> Result<()> {
         let config = self.get_backup_schedule().await?;
         if !config.enabled {
             return Ok(());

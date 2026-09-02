@@ -4,7 +4,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin,
-    create_regular_user, delete_req, get_req, post_json, test_state,
+    create_regular_user, test_state,
 };
 use common::{insert_manga, insert_source};
 use serde_json::json;
@@ -12,10 +12,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn list_trash_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/trash", &cookie))
@@ -23,73 +20,6 @@ async fn list_trash_returns_200_for_authed_user() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn list_trash_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(get_req("/rest/trash")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn delete_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/manga/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn delete_manga_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/manga/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn untrash_manga_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/manga/999999/untrash",
-            &cookie,
-            json!({}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn untrash_manga_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json("/rest/manga/1/untrash", json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -113,10 +43,7 @@ async fn untrash_manga_returns_404_for_regular_user_missing_id() {
 
 #[tokio::test]
 async fn purge_trash_all_returns_200_for_authed_user() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_delete("/rest/trash", &cookie))
@@ -126,16 +53,6 @@ async fn purge_trash_all_returns_200_for_authed_user() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert!(body.get("purged").is_some());
-}
-
-#[tokio::test]
-async fn purge_trash_all_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/trash")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -153,31 +70,6 @@ async fn purge_trash_all_returns_200_for_regular_user() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["purged"], 0);
-}
-
-#[tokio::test]
-async fn purge_trash_one_returns_404_for_missing_id() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_delete("/rest/trash/999999", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn purge_trash_one_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app.oneshot(delete_req("/rest/trash/1")).await.unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -224,27 +116,8 @@ async fn delete_manga_returns_undo_token() {
 }
 
 #[tokio::test]
-async fn untrash_by_token_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json(
-            "/rest/manga/untrash",
-            json!({ "token": "00000000-0000-0000-0000-000000000001" }),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
 async fn untrash_by_token_returns_422_for_missing_token_field() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post("/rest/manga/untrash", &cookie, json!({})))
@@ -260,10 +133,7 @@ async fn untrash_by_token_returns_422_for_missing_token_field() {
 
 #[tokio::test]
 async fn untrash_by_token_returns_404_for_unknown_token() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

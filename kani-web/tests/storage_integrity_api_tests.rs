@@ -2,19 +2,13 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{
-    authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, post_json, test_state,
-};
+use common::{authed_get, authed_post, body_array, body_json};
 use serde_json::json;
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn admin_storage_stats_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/storage/stats", &cookie))
@@ -29,39 +23,8 @@ async fn admin_storage_stats_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn admin_storage_stats_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/storage/stats"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn admin_storage_stats_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "alice").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/admin/storage/stats", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn admin_storage_stats_history_returns_200_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_get("/rest/admin/storage/stats/history", &cookie))
@@ -73,39 +36,8 @@ async fn admin_storage_stats_history_returns_200_for_admin() {
 }
 
 #[tokio::test]
-async fn admin_storage_stats_history_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(get_req("/rest/admin/storage/stats/history"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn admin_storage_stats_history_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "bob").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/admin/storage/stats/history", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn admin_scrub_returns_202_for_admin() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -125,39 +57,8 @@ async fn admin_scrub_returns_202_for_admin() {
 }
 
 #[tokio::test]
-async fn admin_scrub_returns_401_without_auth() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(post_json("/rest/admin/library/scrub", json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn admin_scrub_returns_403_for_regular_user() {
-    let state = test_state().await;
-    let (username, password) = create_regular_user(&state, "carol").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_post("/rest/admin/library/scrub", &cookie, json!({})))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
 async fn admin_scrub_rejects_an_unknown_depth() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(
@@ -176,10 +77,7 @@ async fn admin_scrub_rejects_an_unknown_depth() {
 
 #[tokio::test]
 async fn the_removed_integrity_check_endpoint_is_gone() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(authed_post(

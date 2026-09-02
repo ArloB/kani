@@ -33,10 +33,24 @@ impl SourceBackend {
 
     /// Kills this source's browser subprocess if it has been idle for at least
     /// `idle_for`. Returns `true` when a process was reaped.
-    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+    pub(crate) async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
         match self {
             Self::Wasm(w) => w.reap_idle_v8(idle_for).await,
             Self::Yaml(y) => y.reap_idle_v8(idle_for).await,
+        }
+    }
+
+    pub(crate) async fn shutdown_v8(&self, reason: &str) -> bool {
+        match self {
+            Self::Wasm(w) => w.shutdown_v8(reason).await,
+            Self::Yaml(y) => y.shutdown_v8(reason).await,
+        }
+    }
+
+    pub(crate) async fn retire_v8(&self, reason: &str) -> bool {
+        match self {
+            Self::Wasm(w) => w.retire_v8(reason).await,
+            Self::Yaml(y) => y.retire_v8(reason).await,
         }
     }
 

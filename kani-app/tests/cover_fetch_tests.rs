@@ -64,6 +64,7 @@ fn wire_cover_source(svc: &AppService, source_id: i64, origin: &TestOrigin) {
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     };
     let ext = ValidatedExtension {
         id: "cover-source".into(),
@@ -95,6 +96,20 @@ async fn cover_path(svc: &AppService, manga: kani_app::ids::MangaId) -> Option<S
         .fetch_one(&svc.db)
         .await
         .unwrap()
+}
+
+/// Reads the bytes the recorded cover path points at.
+///
+/// The row is set after the write, so a non-null path usually implies a file —
+/// but "is stored" is a claim about the library, and only this checks it.
+async fn cover_bytes(svc: &AppService, manga: kani_app::ids::MangaId) -> Vec<u8> {
+    let relative = cover_path(svc, manga)
+        .await
+        .expect("a stored cover must record its path");
+    let root = svc.settings.read().await.library_path.clone();
+    tokio::fs::read(std::path::Path::new(&root).join(&relative))
+        .await
+        .unwrap_or_else(|e| panic!("cover recorded at {relative} is not on disk: {e}"))
 }
 
 #[tokio::test]
@@ -134,8 +149,9 @@ async fn a_cover_served_as_octet_stream_is_still_stored() {
 
     let manga = svc.save_to_library(source_id, "m1", false).await.unwrap();
 
+    let bytes = cover_bytes(&svc, manga).await;
     assert!(
-        cover_path(&svc, manga).await.is_some(),
+        bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
         "a real JPEG must be judged on its bytes, not on a generic Content-Type"
     );
 }
@@ -227,8 +243,11 @@ async fn a_valid_image_cover_is_stored() {
 
     let manga = svc.save_to_library(source_id, "m1", false).await.unwrap();
 
+    let bytes = cover_bytes(&svc, manga).await;
     assert!(
-        cover_path(&svc, manga).await.is_some(),
-        "a genuine image cover passes the gate and is stored"
+        bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "the stored cover must be the JPEG that was fetched, got {} bytes starting {:?}",
+        bytes.len(),
+        &bytes[..bytes.len().min(4)]
     );
 }

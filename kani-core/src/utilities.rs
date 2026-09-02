@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 /// Parse a date string using a format pattern, falling back from datetime to date-only.
 /// Returns a Unix timestamp in seconds.
-pub fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64, String> {
+pub(crate) fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64, String> {
     let fmt = time::format_description::parse_borrowed::<1>(format)
         .map_err(|e| format!("Invalid format string: {}", e))?;
     if let Ok(dt) = time::PrimitiveDateTime::parse(date, &fmt) {
@@ -232,13 +232,16 @@ mod tests {
             "[year]-[month]-[day] [hour]:[minute]:[second]",
         )
         .unwrap();
-        assert!(ts > 0);
+        assert_eq!(
+            ts, 1_705_314_600,
+            "the time of day must be parsed, not dropped"
+        );
     }
 
     #[test]
     fn parse_date_date_only_format() {
         let ts = parse_date_flexible("2024-06-01", "[year]-[month]-[day]").unwrap();
-        assert!(ts > 0);
+        assert_eq!(ts, 1_717_200_000);
     }
 
     #[test]

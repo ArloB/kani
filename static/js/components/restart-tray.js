@@ -29,7 +29,7 @@ export function addPendingFields(fields) {
   setLocal(KEY_FIELDS, JSON.stringify([...existing]));
 }
 
-export function clearPendingFields() {
+function clearPendingFields() {
   setLocal(KEY_NEEDED, '');
   setLocal(KEY_FIELDS, JSON.stringify([]));
 }
@@ -81,20 +81,3 @@ export function RestartTray({ currentBootId, onRestart }) {
   `;
 }
 
-/**
- * Mount RestartTray into a DOM element.
- * @param {HTMLElement} el
- * @param {{ currentBootId?: string | null, onRestart?: () => void }} props
- * @returns {{ update: (p: object) => void, unmount: () => void }}
- */
-export function mountRestartTray(el, props) {
-  let currentProps = props;
-  function doRender() {
-    render(html`<${RestartTray} ...${currentProps} />`, el);
-  }
-  doRender();
-  return {
-    update(p) { currentProps = { ...currentProps, ...p }; doRender(); },
-    unmount() { render(null, el); },
-  };
-}

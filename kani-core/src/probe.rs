@@ -235,7 +235,7 @@ fn jpeg_segments(b: &[u8]) -> Vec<(u8, &[u8])> {
 pub use crate::quality::ColourProfile;
 
 /// Classifies a chapter from the colour flags of the pages actually probed.
-pub fn colour_profile(probes: &[PageProbe]) -> ColourProfile {
+pub(crate) fn colour_profile(probes: &[PageProbe]) -> ColourProfile {
     crate::quality::colour_profile_from_flags(probes.iter().filter_map(|p| p.colour))
 }
 

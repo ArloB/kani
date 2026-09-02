@@ -16,7 +16,7 @@ pub struct CapturedManifest {
 
 /// The stored form of a `ColourProfile`. Matches its serde representation so
 /// the two cannot drift apart silently.
-pub fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
+pub(crate) fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
     use kani_core::quality::ColourProfile::*;
     match c {
         Monochrome => "monochrome",
@@ -27,7 +27,7 @@ pub fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
     .to_string()
 }
 
-pub fn colour_from_column(s: &str) -> kani_core::quality::ColourProfile {
+pub(crate) fn colour_from_column(s: &str) -> kani_core::quality::ColourProfile {
     use kani_core::quality::ColourProfile::*;
     match s {
         "monochrome" => Monochrome,
@@ -91,6 +91,15 @@ impl AppService {
         };
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let page_count = i64::from(captured.manifest.page_count);
+        // Read before the update: a re-download whose split differs moves every
+        // reader's saved position, and the old count is the only way to place it.
+        let previous_page_count: Option<i64> =
+            sqlx::query_scalar!("SELECT page_count FROM chapters WHERE id = ?", chapter_id)
+                .fetch_optional(&self.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
         let archive_hash = captured.manifest.archive_hash.clone();
 
         if let Err(e) = sqlx::query!(
@@ -113,6 +122,52 @@ impl AppService {
         .await
         {
             tracing::warn!("failed to persist manifest for chapter {chapter_id}: {e}");
+            return;
+        }
+
+        if let Some(old_count) = previous_page_count
+            && old_count > 0
+            && old_count != page_count
+        {
+            self.remap_reading_progress(chapter_id, old_count, page_count)
+                .await;
+        }
+    }
+
+    /// Moves every saved reading position onto a chapter's new page count.
+    ///
+    /// A re-download can split the same chapter differently, which would
+    /// otherwise leave a reader on a page that no longer holds what they read,
+    /// or past the end. Best-effort, like the manifest write it follows.
+    async fn remap_reading_progress(&self, chapter_id: ChapterId, old_count: i64, new_count: i64) {
+        let Ok(rows) = sqlx::query!(
+            "SELECT user_id, last_page_read FROM user_chapter_tracking \
+             WHERE chapter_id = ? AND last_page_read > 0",
+            chapter_id
+        )
+        .fetch_all(&self.db)
+        .await
+        else {
+            return;
+        };
+
+        for row in rows {
+            let remapped = super::quality::remap_progress(row.last_page_read, old_count, new_count);
+            if remapped == row.last_page_read {
+                continue;
+            }
+            if let Err(e) = sqlx::query!(
+                "UPDATE user_chapter_tracking SET last_page_read = ? \
+                 WHERE user_id = ? AND chapter_id = ?",
+                remapped,
+                row.user_id,
+                chapter_id
+            )
+            .execute(&self.db)
+            .await
+            {
+                tracing::warn!("failed to remap reading position for chapter {chapter_id}: {e}");
+            }
         }
     }
 

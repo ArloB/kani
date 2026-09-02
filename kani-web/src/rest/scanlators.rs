@@ -32,7 +32,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_scanlator_prefs(
+pub(super) async fn get_scanlator_prefs(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -51,7 +51,7 @@ pub(crate) async fn get_scanlator_prefs(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_scanlator_pref(
+pub(super) async fn set_scanlator_pref(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -72,7 +72,7 @@ pub(crate) async fn set_scanlator_pref(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn delete_scanlator_pref(
+pub(super) async fn delete_scanlator_pref(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(pref_id): Path<i64>,
@@ -92,7 +92,7 @@ pub(crate) async fn delete_scanlator_pref(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_scanlator_mode_handler(
+pub(super) async fn set_scanlator_mode_handler(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -112,7 +112,7 @@ pub(crate) async fn set_scanlator_mode_handler(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_chapter_scanlators(
+pub(super) async fn get_chapter_scanlators(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -130,7 +130,7 @@ pub(crate) async fn get_chapter_scanlators(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_chapter_languages(
+pub(super) async fn get_chapter_languages(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -225,7 +225,7 @@ mod tests {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_global_prefs(
+pub(super) async fn get_global_prefs(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -233,7 +233,7 @@ pub(crate) async fn get_global_prefs(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct GlobalPrefBody {
+pub(super) struct GlobalPrefBody {
     pub scanlator: String,
     #[serde(default)]
     pub priority: i64,
@@ -252,7 +252,7 @@ pub(crate) struct GlobalPrefBody {
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn set_global_pref(
+pub(super) async fn set_global_pref(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Json(body): Json<GlobalPrefBody>,
@@ -276,7 +276,7 @@ pub(crate) async fn set_global_pref(
     security(("session" = [])),
     tag = "manga"
 )]
-pub(crate) async fn get_known_scanlators(
+pub(super) async fn get_known_scanlators(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

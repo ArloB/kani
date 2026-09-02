@@ -245,6 +245,7 @@ function _handleEvent(data) {
     setState('refreshState', { type: 'done', total: data.total, failed: data.failed });
     setState('scanningMangaIds', new Set());
     // Increment library invalidation so pages re-fetch
+    api.clearSWRCache('library:');
     updateState('libraryInvalidation', (n) => n + 1);
     // Return to idle after 5s
     setTimeout(() => setState('refreshState', { type: 'idle' }), 5000);
@@ -252,6 +253,9 @@ function _handleEvent(data) {
   }
 
   if (type === 'library_invalidated') {
+    // The subscriber refetches through getLibrary, which reads the SWR cache.
+    // Leaving it populated serves the pre-invalidation page for the TTL.
+    api.clearSWRCache('library:');
     updateState('libraryInvalidation', (n) => n + 1);
     return;
   }

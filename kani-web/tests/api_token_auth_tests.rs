@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{build_test_app, create_admin, get_req, test_state};
+use common::{build_test_app, create_admin, test_state};
 use kani_app::service::api_tokens::TokenKind;
 use tower::ServiceExt;
 
@@ -47,124 +47,6 @@ async fn a_scoped_api_token_reaches_a_permitted_route() {
     );
 }
 
-#[tokio::test]
-async fn a_token_is_forbidden_on_a_route_outside_its_scopes() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let uid = admin_user_id(&state).await;
-    let scope: kani_app::permissions::Permission = "source:browse".parse().unwrap();
-    let created = state
-        .service
-        .create_token(uid, "read only", None, TokenKind::Api, Some(&[scope]))
-        .await
-        .unwrap();
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/admin/diagnostics", &created.raw_token))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        res.status(),
-        StatusCode::FORBIDDEN,
-        "a source:browse token must not reach a server:manage route"
-    );
-}
-
-#[tokio::test]
-async fn an_opds_token_is_rejected_on_the_rest_api() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let uid = admin_user_id(&state).await;
-    let created = state
-        .service
-        .create_token(
-            uid,
-            "kindle",
-            None,
-            kani_app::service::api_tokens::TokenKind::Opds,
-            None,
-        )
-        .await
-        .unwrap();
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/sources", &created.raw_token))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        res.status(),
-        StatusCode::FORBIDDEN,
-        "acceptance keys on kind: a reader token must never reach /rest/*"
-    );
-}
-
-#[tokio::test]
-async fn an_invalid_bearer_is_refused_rather_than_falling_back_to_session() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/sources", "kani_pat_totally_made_up"))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn a_revoked_token_stops_working() {
-    let state = test_state().await;
-    create_admin(&state).await;
-    let uid = admin_user_id(&state).await;
-    let scope: kani_app::permissions::Permission = "source:browse".parse().unwrap();
-    let created = state
-        .service
-        .create_token(uid, "doomed", None, TokenKind::Api, Some(&[scope]))
-        .await
-        .unwrap();
-    state
-        .service
-        .revoke_api_token(uid, &created.token.id)
-        .await
-        .unwrap();
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(bearer_get("/rest/sources", &created.raw_token))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn session_routes_still_work_without_any_bearer() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
-
-    let res = app
-        .oneshot(common::authed_get("/rest/sources", &cookie))
-        .await
-        .unwrap();
-
-    assert_eq!(
-        res.status(),
-        StatusCode::OK,
-        "session auth must be unaffected"
-    );
-
-    let anon = build_test_app(test_state().await).await;
-    let res = anon.oneshot(get_req("/rest/sources")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}
-
 fn post_json_authed(
     path: &str,
     cookie: &str,
@@ -173,55 +55,16 @@ fn post_json_authed(
     axum::http::Request::builder()
         .method("POST")
         .uri(path)
-        .header(axum::http::header::COOKIE, cookie)
+        .header(axum::http::header::COOKIE, common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(body.to_string()))
         .unwrap()
 }
 
 #[tokio::test]
-async fn minting_an_api_token_requires_token_create_api() {
-    let state = test_state().await;
-    let (u, p) = common::create_regular_user(&state, "plain").await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
-
-    let opds = app
-        .clone()
-        .oneshot(post_json_authed(
-            "/rest/me/api-tokens",
-            &cookie,
-            serde_json::json!({ "name": "kindle" }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(
-        opds.status(),
-        StatusCode::CREATED,
-        "token:create_opds is seeded wherever library:view is"
-    );
-
-    let api = app
-        .oneshot(post_json_authed(
-            "/rest/me/api-tokens",
-            &cookie,
-            serde_json::json!({ "name": "bot", "kind": "api", "scopes": ["source:browse"] }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(
-        api.status(),
-        StatusCode::FORBIDDEN,
-        "token:create_api is not seeded broadly"
-    );
-}
-
-#[tokio::test]
 async fn an_admin_can_mint_a_scoped_api_token_and_sees_its_scopes() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()

@@ -5,7 +5,7 @@
 //! FlareSolverr envelope. The 503/403 paths are used deliberately: neither status
 //! is retryable, so these never hit the 5 s×2^n retry backoff.
 
-use kani_core::http::{SmartClient, Timings};
+use kani_core::http::{SmartClient, SolverCaptureError, Timings};
 use kani_shared_test::origin::{Body, Response, TestOrigin};
 use std::time::Duration;
 
@@ -22,6 +22,10 @@ fn solver_envelope(rendered: &str) -> String {
     })
     .to_string()
 }
+
+/// A solver index advertising scripted capture. The capability probe reads this
+/// before dispatching, so a mock that serves only /v1 reads as unreachable.
+const CAPABLE_INDEX: &str = r#"{"msg":"ready","capabilities":["kani.capture/1","kani.capture/2"]}"#;
 
 #[tokio::test]
 async fn a_challenge_page_triggers_the_solver_and_replays() {
@@ -216,4 +220,181 @@ async fn without_a_solver_a_challenge_is_passed_through() {
         503,
         "the raw challenge status is returned"
     );
+}
+
+/// A `kani.capture` success envelope, as the Kani-compatible solver image
+/// returns it after solving, injecting, reloading, and polling `passPayload`.
+fn capture_envelope(payload: &str) -> String {
+    serde_json::json!({
+        "status": "ok",
+        "message": "Challenge solved!",
+        "solution": {
+            "userAgent": "FlareUA/1.0",
+            "cookies": [{ "name": "cf_clearance", "value": "TOKEN123" }],
+            "payload": payload,
+        },
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn a_capture_returns_the_payload_the_solver_browser_collected() {
+    let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
+    solver.set(
+        "/v1",
+        Response::json(&capture_envelope(r#"{"items":[1,2]}"#)),
+    );
+
+    let client = SmartClient::new(Some(solver.url("/v1"))).unwrap();
+    let payload = client
+        .solver_capture(
+            "https://site.test/browse",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(payload, r#"{"items":[1,2]}"#);
+    assert!(solver.hits("/v1") >= 1, "the solver was invoked");
+}
+
+#[tokio::test]
+async fn a_stock_solver_is_reported_as_unsupported_not_as_a_failure() {
+    let solver = TestOrigin::start().await;
+    solver.set(
+        "/",
+        Response::json(r#"{"msg":"FlareSolverr is ready!","version":"3.5.0"}"#),
+    );
+    solver.set("/v1", Response::json(r#"{"status":"ok","sessions":[]}"#));
+
+    let client = SmartClient::new(Some(solver.url("/v1"))).unwrap();
+    let error = client
+        .solver_capture(
+            "https://site.test/browse",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .expect_err("a stock solver cannot capture");
+
+    assert!(
+        matches!(error, SolverCaptureError::Unsupported),
+        "an index without a capabilities array identifies a stock solver, got: {error:?}"
+    );
+    assert!(
+        error.to_string().contains("kani.capture"),
+        "the message names the missing command, got: {error}"
+    );
+
+    let hits_after_probe = solver.hits("/v1");
+    let second = client
+        .solver_capture(
+            "https://site.test/second",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .expect_err("the cached capability result rejects another capture");
+    assert!(matches!(second, SolverCaptureError::Unsupported));
+    assert_eq!(
+        solver.hits("/v1"),
+        hits_after_probe,
+        "the cached result must not cost another round trip"
+    );
+}
+
+#[tokio::test]
+async fn a_solver_that_rejects_the_key_is_reported_as_unauthorized() {
+    let solver = TestOrigin::start().await;
+    solver.set(
+        "/",
+        Response::json(r#"{"msg":"ready","capabilities":["kani.capture/2"]}"#),
+    );
+    solver.set("/v1", Response::status(401));
+
+    let client = SmartClient::new(Some(solver.url("/v1"))).unwrap();
+    let error = client
+        .solver_capture(
+            "https://site.test/browse",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .expect_err("a rejected key cannot capture");
+
+    assert!(
+        matches!(error, SolverCaptureError::Unauthorized),
+        "a 401 is a key problem, not an incompatible image, got: {error:?}"
+    );
+    assert!(
+        error.to_string().contains("KANI_SOLVER_SECRET"),
+        "the message names the setting to fix, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn a_capture_error_from_a_compatible_solver_surfaces_verbatim() {
+    let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
+    solver.set(
+        "/v1",
+        Response::json(
+            r#"{"status":"error","message":"Error capturing the payload. passPayload was not called within 30000 ms."}"#,
+        ),
+    );
+
+    let client = SmartClient::new(Some(solver.url("/v1"))).unwrap();
+    let error = client
+        .solver_capture(
+            "https://site.test/browse",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .expect_err("the capture failed");
+
+    assert!(
+        !matches!(error, SolverCaptureError::Unsupported),
+        "a real capture failure is not mistaken for an incompatible solver"
+    );
+    assert!(
+        error.to_string().contains("passPayload was not called"),
+        "the solver's diagnosis reaches the caller, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn an_ok_envelope_without_a_payload_is_an_error_not_an_empty_capture() {
+    let solver = TestOrigin::start().await;
+    solver.set("/", Response::json(CAPABLE_INDEX));
+    solver.set(
+        "/v1",
+        Response::json(r#"{"status":"ok","solution":{"userAgent":"FlareUA/1.0"}}"#),
+    );
+
+    let client = SmartClient::new(Some(solver.url("/v1"))).unwrap();
+    let error = client
+        .solver_capture(
+            "https://site.test/browse",
+            "passPayload('x')",
+            30000,
+            None,
+            false,
+        )
+        .await
+        .expect_err("a missing payload must not read as a successful empty capture");
+
+    assert!(error.to_string().contains("no payload"), "got: {error}");
 }

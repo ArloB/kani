@@ -8,18 +8,18 @@ pub struct UpdateInfo {
     pub url: String,
 }
 
-pub fn normalise_tag(tag: &str) -> Option<semver::Version> {
+pub(crate) fn normalise_tag(tag: &str) -> Option<semver::Version> {
     semver::Version::parse(tag.trim().trim_start_matches('v')).ok()
 }
 
-pub fn is_newer(latest: &str, current: &str) -> bool {
+pub(crate) fn is_newer(latest: &str, current: &str) -> bool {
     match (normalise_tag(latest), normalise_tag(current)) {
         (Some(l), Some(c)) => l > c,
         _ => false,
     }
 }
 
-pub async fn check_for_update(
+pub(crate) async fn check_for_update(
     client: &kani_core::http::SmartClient,
     current: &str,
 ) -> Option<UpdateInfo> {
@@ -75,7 +75,7 @@ async fn check_for_update_impl(
 }
 
 impl AppService {
-    pub async fn run_update_check(&self) -> crate::error::Result<()> {
+    pub(crate) async fn run_update_check(&self) -> crate::error::Result<()> {
         if !self.settings.read().await.update_check_enabled {
             tracing::debug!("update check disabled by setting");
             return Ok(());

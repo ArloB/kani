@@ -6,7 +6,7 @@ use sqlx::Row as _;
 
 const DEFAULT_GLOBAL_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 
-pub(crate) fn compile_pure_registry(
+pub(super) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
     if metadata.scripts.is_empty() {
@@ -24,7 +24,7 @@ pub(crate) fn compile_pure_registry(
     }
 }
 
-pub(crate) fn compile_hook_registry(
+pub(super) fn compile_hook_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::HookRegistry>> {
     let scripts = kani_core::scripting::HookScripts {
@@ -48,7 +48,7 @@ pub(crate) fn compile_hook_registry(
     }
 }
 
-pub(crate) async fn resolve_option_set(
+pub(super) async fn resolve_option_set(
     cache: &dyn kani_core::cache::CacheBackend,
     client: &kani_core::http::SmartClient,
     source_id: i64,
@@ -235,10 +235,9 @@ impl AppService {
                 .await
                 .map_err(ServiceError::Core)?;
 
+            self.sources.remove_and_shutdown(id, "source-delete").await;
             let profile_dir = kani_core::v8_process::profile_dir_for(&row.name);
             let _ = tokio::fs::remove_dir_all(&profile_dir).await;
-
-            self.sources.remove(id);
             self.cache.invalidate_source(id);
             self.audit(
                 Some(user_id),
@@ -295,7 +294,7 @@ impl AppService {
                     prefs,
                     browser_enabled,
                 );
-                self.sources.insert(id, backend);
+                self.sources.hot_swap(id, backend).await;
                 return Ok(());
             }
 
@@ -362,7 +361,7 @@ impl AppService {
                 max_hook_requests,
             );
 
-            self.sources.insert(id, backend);
+            self.sources.hot_swap(id, backend).await;
         } else {
             if let Ok(base_url) = self.get_source_base_url(id).await
                 && let Some(domain) = base_url
@@ -372,7 +371,9 @@ impl AppService {
             {
                 self.smart_client.deregister_rate_limit(&domain);
             }
-            self.sources.remove(id);
+            self.sources
+                .remove_and_shutdown(id, "source-disabled")
+                .await;
             self.cache.invalidate_source(id);
         }
 
@@ -849,7 +850,7 @@ impl AppService {
         }
     }
 
-    pub async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
+    pub(crate) async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
         let ms = elapsed_ms as f64;
         let _ = sqlx::query(
             r#"INSERT INTO source_health (source_id, last_success_at, consecutive_error_count, avg_response_ms)
@@ -868,7 +869,7 @@ impl AppService {
         .await;
     }
 
-    pub async fn record_source_error(&self, source_id: i64) {
+    pub(crate) async fn record_source_error(&self, source_id: i64) {
         let _ = sqlx::query(
             r#"INSERT INTO source_health (source_id, last_error_at, consecutive_error_count)
                VALUES (?, datetime('now'), 1)
@@ -923,6 +924,7 @@ impl AppService {
                     Ok(ext) => {
                         let err = crate::install_gating::check_required_capabilities(
                             &ext.requires_capabilities,
+                            kani_core::http::SolverCapability::Capture,
                         )
                         .err()
                         .or_else(|| {
@@ -1267,8 +1269,12 @@ impl AppService {
             host_version,
         )
         .map_err(ServiceError::Validation)?;
-        crate::install_gating::check_required_capabilities(&metadata.requires_capabilities)
-            .map_err(ServiceError::Validation)?;
+        crate::install_gating::check_required_capabilities_live(
+            &metadata.requires_capabilities,
+            &self.smart_client,
+        )
+        .await
+        .map_err(ServiceError::Validation)?;
 
         let languages_json = serde_json::to_string(&metadata.languages)
             .map_err(|e| ServiceError::Internal(format!("Failed to encode languages: {e}")))?;

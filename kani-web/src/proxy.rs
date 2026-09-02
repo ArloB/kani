@@ -41,7 +41,7 @@ const TOKEN_TTL_SECS: i64 = 3600;
 /// 1. `KANI_PROXY_SECRET` — base64url-encoded 32-byte value.
 /// 2. `data_dir/proxy.key` — persisted from a previous boot.
 /// 3. Generate a fresh random secret and write it to `data_dir/proxy.key`.
-pub fn load_or_persist_secret(data_dir: &std::path::Path) -> [u8; 32] {
+pub(crate) fn load_or_persist_secret(data_dir: &std::path::Path) -> [u8; 32] {
     if let Ok(val) = std::env::var("KANI_PROXY_SECRET") {
         let decoded = URL_SAFE_NO_PAD.decode(val.trim()).unwrap_or_default();
         if decoded.len() == 32 {
@@ -85,7 +85,7 @@ pub fn load_or_persist_secret(data_dir: &std::path::Path) -> [u8; 32] {
 }
 
 /// Seal a (url, referer) pair into an opaque, time-limited token.
-pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
+pub(crate) fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let expiry = ((now / TOKEN_TTL_SECS) + 1) * TOKEN_TTL_SECS;
     let plaintext = format!("{}|{}|{}", url, referer, expiry);
@@ -112,7 +112,7 @@ pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
 }
 
 /// Unseal a token, returning `(url, referer)` if it is valid and unexpired.
-pub fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, String)> {
+pub(crate) fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, String)> {
     let raw = URL_SAFE_NO_PAD.decode(token).ok()?;
     if raw.len() <= NONCE_LEN {
         return None;
@@ -140,7 +140,7 @@ pub fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, Str
 }
 
 /// Compute a stable, server-signed ETag for a (url, referer) pair.
-pub fn compute_etag(url: &str, referer: &str, secret: &[u8; 32]) -> String {
+pub(crate) fn compute_etag(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     let mut mac =
         <HmacSha256 as hmac::Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(b"etag|");

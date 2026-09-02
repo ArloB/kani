@@ -12,7 +12,9 @@ Never commit a release directly to either permanent branch.
    manifests.
 5. Run the default-member build, tests, clippy, formatting, docs, frontend checks, and extension
    build required by CI.
-6. Review migration and stability notes and make breaking or rollback behavior explicit.
+6. Review migration and stability notes and make breaking or rollback behavior explicit. A
+   [migration squash](migrations.md#squashing-the-history) may only fold migrations this release's
+   predecessors already shipped; folding an unreleased one strands every existing installation.
 7. Open the release PR from `develop` to `main`.
 
 ## Rehearse artifacts
@@ -52,6 +54,10 @@ the release notes only after the publishing job proves them.
   release command.
 - Complete first-run setup, check `/ready`, and exercise login, a source load, a job, and backup
   creation.
+- Run `node scripts/verify-permission-matrix.mjs <base> <admin> <password>` against that instance.
+  It is the only check on which UI surfaces each permission hides; the Rust permission tests cover
+  the API contract, not visibility. It creates `permmatrix-*` accounts, so point it at the
+  disposable instance rather than a real one.
 - Confirm that release notes, supported targets, image coordinates, migration policy, and
   documentation describe the published artifacts.
 

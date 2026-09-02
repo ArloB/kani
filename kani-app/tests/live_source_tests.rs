@@ -55,6 +55,7 @@ fn json_endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> V
         page_url: None,
         script_name: None,
         timeout_ms: 10_000,
+        auto_scroll: true,
     }
 }
 

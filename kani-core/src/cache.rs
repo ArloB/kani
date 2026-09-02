@@ -122,7 +122,7 @@ impl InMemoryCache {
         Self::with_max_bytes(DEFAULT_MAX_BYTES)
     }
 
-    pub fn with_max_bytes(max_global_bytes: usize) -> Self {
+    pub(crate) fn with_max_bytes(max_global_bytes: usize) -> Self {
         Self {
             namespaces: Arc::new(DashMap::new()),
             max_global_bytes,

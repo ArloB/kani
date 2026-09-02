@@ -74,8 +74,33 @@ impl WasmSource {
         }
     }
 
-    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
-        kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
+    /// `idle_for` governs the local V8 worker only; solver sessions expire on the
+    /// solver's own TTL, so the host has nothing to configure for them.
+    pub(crate) async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for),
+            self.smart_client
+                .reap_solver_sessions(self.extension_id(), kani_core::http::solver_session_ttl())
+        );
+        local || solver > 0
+    }
+
+    pub(crate) async fn shutdown_v8(&self, reason: &str) -> bool {
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::shutdown(&self.v8_process, reason),
+            self.smart_client
+                .destroy_solver_sessions(self.extension_id())
+        );
+        local || solver > 0
+    }
+
+    pub(crate) async fn retire_v8(&self, reason: &str) -> bool {
+        let (local, solver) = tokio::join!(
+            kani_core::v8_process::retire(&self.v8_process, reason),
+            self.smart_client
+                .destroy_solver_sessions(self.extension_id())
+        );
+        local || solver > 0
     }
 
     pub fn set_browser_enabled(&self, enabled: bool) {

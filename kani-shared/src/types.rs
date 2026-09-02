@@ -1046,8 +1046,12 @@ pub struct Category {
 pub struct BrowserStats {
     pub calls_total: u64,
     pub restarts: u64,
+    pub graceful_shutdowns: u64,
+    pub forced_terminations: u64,
+    pub solver_attempts: u64,
+    pub solver_successes: u64,
+    pub solver_failures: u64,
     pub max_memory_mb: u32,
-    pub max_instances: u32,
     pub idle_timeout_s: u32,
 }
 
@@ -1067,7 +1071,8 @@ pub struct AppSettings {
     pub auto_download_category_ids: Vec<i64>,
     pub default_tracking_enabled: bool,
     pub http_request_logging: bool,
-    pub browser_debug_logging: bool,
+    #[serde(alias = "browser_debug_logging")]
+    pub v8_debug_logging: bool,
     pub registration_enabled: bool,
     pub cover_max_dimension: Option<i64>,
     pub email_enabled: bool,
@@ -1110,9 +1115,10 @@ pub struct AppSettings {
     pub upgrade_axis_bitrate: String,
     pub upgrade_show_downgrades: bool,
     pub upgrade_auto_replace_reasons: String,
-    pub browser_max_memory_mb: i64,
-    pub browser_max_instances: i64,
-    pub browser_idle_timeout_s: i64,
+    #[serde(alias = "browser_max_memory_mb")]
+    pub v8_max_memory_mb: i64,
+    #[serde(alias = "browser_idle_timeout_s")]
+    pub v8_idle_timeout_s: i64,
     pub update_check_enabled: bool,
     /// OPDS-PSE `?page=` numbering: `false` is one-based and `true` is zero-based.
     pub opds_page_index_zero_based: bool,
@@ -1279,12 +1285,14 @@ pub struct AdvancedSettings {
     pub wasm_storage_path: String,
     pub max_wasm_instances: i64,
     pub http_request_logging: bool,
-    pub browser_debug_logging: bool,
+    #[serde(alias = "browser_debug_logging")]
+    pub v8_debug_logging: bool,
     pub registration_enabled: bool,
     pub cover_max_dimension: Option<i64>,
-    pub browser_max_memory_mb: i64,
-    pub browser_max_instances: i64,
-    pub browser_idle_timeout_s: i64,
+    #[serde(alias = "browser_max_memory_mb")]
+    pub v8_max_memory_mb: i64,
+    #[serde(alias = "browser_idle_timeout_s")]
+    pub v8_idle_timeout_s: i64,
     pub update_check_enabled: bool,
     /// OPDS-PSE `?page=` numbering: `false` is one-based and `true` is zero-based.
     pub opds_page_index_zero_based: bool,
@@ -1928,12 +1936,11 @@ mod tests {
             wasm_storage_path: "/data/wasm".into(),
             max_wasm_instances: 4,
             http_request_logging: false,
-            browser_debug_logging: false,
+            v8_debug_logging: false,
             registration_enabled: true,
             cover_max_dimension: Some(512),
-            browser_max_memory_mb: 512,
-            browser_max_instances: 2,
-            browser_idle_timeout_s: 300,
+            v8_max_memory_mb: 512,
+            v8_idle_timeout_s: 300,
             update_check_enabled: true,
             opds_page_index_zero_based: false,
             global_search_timeout_secs: 6,

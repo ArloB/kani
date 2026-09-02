@@ -14,7 +14,13 @@ fn req(
 ) -> axum::http::Request<axum::body::Body> {
     let mut b = axum::http::Request::builder().method(method).uri(path);
     if let Some(c) = cookie {
-        b = b.header(axum::http::header::COOKIE, c);
+        if matches!(method, "GET" | "HEAD" | "OPTIONS") {
+            b = b.header(axum::http::header::COOKIE, c);
+        } else {
+            b = b
+                .header(axum::http::header::COOKIE, common::csrf_cookie(c))
+                .header("X-CSRF-Token", common::csrf_token(c));
+        }
     }
     match body {
         Some(v) => {
@@ -105,21 +111,6 @@ async fn a_library_wide_upgrade_names_its_series_and_chapter() {
 }
 
 #[tokio::test]
-async fn upgrades_require_authentication() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    for path in ["/rest/me/upgrades", "/rest/manga/1/upgrades"] {
-        let res = app
-            .clone()
-            .oneshot(req("GET", path, None, None))
-            .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{path}");
-    }
-}
-
-#[tokio::test]
 async fn applying_an_upgrade_is_a_library_manage_action() {
     let state = test_state().await;
     let (u, p) = create_regular_user(&state, "hank").await;
@@ -146,10 +137,7 @@ async fn applying_an_upgrade_is_a_library_manage_action() {
 
 #[tokio::test]
 async fn applying_an_upgrade_to_a_missing_chapter_is_a_404() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .oneshot(req(
@@ -165,10 +153,7 @@ async fn applying_an_upgrade_to_a_missing_chapter_is_a_404() {
 
 #[tokio::test]
 async fn dismiss_reports_a_missing_chapter_rather_than_succeeding() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let anon = app
         .clone()

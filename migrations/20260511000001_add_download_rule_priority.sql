@@ -1,1 +1,0 @@
-ALTER TABLE download_rules ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;

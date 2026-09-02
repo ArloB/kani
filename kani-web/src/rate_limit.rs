@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 
 /// Result of a rate-limit check.
 #[derive(Debug, PartialEq)]
-pub enum RateLimitResult {
+pub(crate) enum RateLimitResult {
     Allowed,
     LockedOutByIdentity { retry_after_secs: i64 },
     LockedOutByIp { retry_after_secs: i64 },
@@ -66,7 +66,7 @@ impl AuthRateLimiter {
     ///
     /// Does NOT write to the database. Returns `Locked*` if the identity or IP
     /// is already within a lockout window from prior failures.
-    pub async fn check_lockout(&self, identity: &str, ip_addr: &str) -> RateLimitResult {
+    pub(crate) async fn check_lockout(&self, identity: &str, ip_addr: &str) -> RateLimitResult {
         let identity_hash = Self::hash_identity(identity);
         let limits = self.limits().await;
         let window_start = OffsetDateTime::now_utc().unix_timestamp() - limits.lockout_seconds;
@@ -79,7 +79,7 @@ impl AuthRateLimiter {
     /// Call this AFTER authentication completes. On success the row is recorded
     /// with `succeeded = 1` and `Allowed` is returned. On failure the row is
     /// recorded with `succeeded = 0` and the lockout state is rechecked.
-    pub async fn record_and_check(
+    pub(crate) async fn record_and_check(
         &self,
         identity: &str,
         ip_addr: &str,
@@ -176,7 +176,7 @@ impl AuthRateLimiter {
     }
 
     /// Prune attempts older than the lockout window. Called by the daily background job.
-    pub async fn prune_old_attempts(&self) {
+    pub(crate) async fn prune_old_attempts(&self) {
         let lockout_seconds = self.settings.read().await.login_lockout_seconds;
         let cutoff = OffsetDateTime::now_utc().unix_timestamp() - lockout_seconds;
         let _ = sqlx::query("DELETE FROM login_attempts WHERE attempted_at < ?")

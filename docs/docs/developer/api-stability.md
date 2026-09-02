@@ -92,6 +92,21 @@ open, and its `--help` text is marked `[unstable]`:
 The list is `STABLE_COMMANDS` in `kani-cli/src/commands/mod.rs`, checked against the help clap
 renders by `kani-cli/tests/command_stability_tests.rs`.
 
+## Extension-facing Rust surface
+
+`kani-shared` is compiled into every extension, so its public items are an API for extension
+authors even when nothing in this workspace calls them. They are **unstable**, but "no caller in
+the workspace" is not on its own a reason to delete one.
+
+Kept deliberately despite having no in-tree caller, because an extension author would reach for
+them: the `Expr` DSL combinators `append_str`, `prepend_str`, and `get_key`; the preference
+accessor `get_list`; `JsonHandle::object_iter`; and `parse_date` / `parse_date_rfc3339`, which
+almost every source needs for chapter dates.
+
+The test is whether a guest can reach the item and would want it. `HttpRequest::send_json` failed
+both — it was gated behind `feature = "host"`, so no extension could call it, and no host code did
+either. It was removed in the pre-1.0 sweep; `send_json_handle` covers the guest path.
+
 ## Changing a tier
 
 Promoting unstable to stable is additive and may happen in a minor release. Demoting stable to

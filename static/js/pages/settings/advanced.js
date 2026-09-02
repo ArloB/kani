@@ -16,6 +16,66 @@ import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
+/**
+ * Probes the URL in the box rather than the saved one, so a change can be
+ * checked before it is committed. A solver without scripted capture is warned
+ * about, not failed: it still solves ordinary HTTP challenges.
+ */
+function SolverTest({ url }) {
+  const [result, setResult] = useState(
+    /** @type {{ tone: string, text: string, insecure: boolean } | null} */ (null),
+  );
+  const { busy, run } = useBusy();
+
+  const check = () =>
+    run(async () => {
+      setResult(null);
+      const trimmed = (url ?? '').trim();
+      if (!trimmed) {
+        setResult({
+          tone: 'text-text-muted',
+          text: t('settings.advanced.flaresolverr.result_not_configured'),
+          insecure: false,
+        });
+        return;
+      }
+      try {
+        const res = await api.testSolver(trimmed);
+        const tone =
+          res.status === 'capture'
+            ? 'text-success'
+            : res.status === 'unreachable'
+              ? 'text-danger'
+              : 'text-warn';
+        setResult({
+          tone,
+          text: t(`settings.advanced.flaresolverr.result_${res.status}`),
+          insecure: !!res.insecure_transport,
+        });
+      } catch (e) {
+        setResult({
+          tone: 'text-danger',
+          text: /** @type {any} */ (e)?.message ?? t('settings.advanced.flaresolverr.result_unreachable'),
+          insecure: false,
+        });
+      }
+    });
+
+  return html`
+    <div class="flex flex-col items-end gap-1">
+      <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${check}>
+        ${busy ? t('settings.advanced.flaresolverr.testing') : t('settings.advanced.flaresolverr.test_btn')}
+      </button>
+      ${result &&
+      html`<span class=${`text-xs text-right max-w-64 ${result.tone}`}>${result.text}</span>`}
+      ${result?.insecure &&
+      html`<span class="text-xs text-right max-w-64 text-warn"
+        >${t('settings.advanced.flaresolverr.insecure')}</span
+      >`}
+    </div>
+  `;
+}
+
 function EncryptionGroup() {
   const [status, setStatus] = useState(/** @type {any} */ (null));
   const [failed, setFailed] = useState(false);
@@ -156,14 +216,13 @@ export function AdvancedSection({ settings, bootId }) {
     wasm_storage_path: settings?.wasm_storage_path ?? '',
     max_wasm_instances: settings?.max_wasm_instances ?? null,
     cover_max_dimension: settings?.cover_max_dimension ?? null,
-    browser_max_memory_mb: settings?.browser_max_memory_mb ?? null,
-    browser_max_instances: settings?.browser_max_instances ?? null,
-    browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
+    v8_max_memory_mb: settings?.v8_max_memory_mb ?? null,
+    v8_idle_timeout_s: settings?.v8_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
     update_check_enabled: settings?.update_check_enabled ?? true,
     global_search_timeout_secs: Number(settings?.global_search_timeout_secs ?? 6),
     opds_page_index_zero_based: settings?.opds_page_index_zero_based ?? false,
-    browser_debug_logging: settings?.browser_debug_logging ?? false,
+    v8_debug_logging: settings?.v8_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
   const [form, setForm] = useState(initial);
@@ -234,13 +293,16 @@ export function AdvancedSection({ settings, bootId }) {
         label=${t('settings.advanced.flaresolverr.label')}
         description=${t('settings.advanced.flaresolverr.desc')}
       >
-        <input
-          type="url"
-          class="input w-56 text-sm"
-          placeholder="http://localhost:8191"
-          value=${form.flaresolverr_url}
-          onInput=${(e) => set('flaresolverr_url', e.target.value)}
-        />
+        <div class="flex items-center gap-2">
+          <input
+            type="url"
+            class="input w-56 text-sm"
+            placeholder="http://localhost:8191"
+            value=${form.flaresolverr_url}
+            onInput=${(e) => set('flaresolverr_url', e.target.value)}
+          />
+          <${SolverTest} url=${form.flaresolverr_url} />
+        </div>
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.library_path.label')}
@@ -268,25 +330,11 @@ export function AdvancedSection({ settings, bootId }) {
         ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800', label: t('settings.advanced.cover_dim.label') })}
       <//>
       <${SettingsRow}
-        label=${t('settings.advanced.browser_max_memory.label')}
-        description=${t('settings.advanced.browser_max_memory.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
+        label=${t('settings.advanced.v8_max_memory.label')}
+        description=${t('settings.advanced.v8_max_memory.desc')}
+        tooltip=${t('settings.advanced.v8_caps.tooltip')}
       >
-        ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.browser_max_memory.label') })}
-      <//>
-      <${SettingsRow}
-        label=${t('settings.advanced.browser_max_instances.label')}
-        description=${t('settings.advanced.browser_max_instances.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
-      >
-        ${numInput('browser_max_instances', { min: 1, max: 16, placeholder: '2', label: t('settings.advanced.browser_max_instances.label') })}
-      <//>
-      <${SettingsRow}
-        label=${t('settings.advanced.browser_idle_timeout.label')}
-        description=${t('settings.advanced.browser_idle_timeout.desc')}
-        tooltip=${t('settings.advanced.browser_caps.tooltip')}
-      >
-        ${numInput('browser_idle_timeout_s', { min: 10, max: 3600, placeholder: '300', label: t('settings.advanced.browser_idle_timeout.label') })}
+        ${numInput('v8_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.v8_max_memory.label') })}
       <//>
       <${ToggleRow}
         label=${t('settings.advanced.http_logging.label')}
@@ -313,10 +361,10 @@ export function AdvancedSection({ settings, bootId }) {
         onChange=${(v) => set('opds_page_index_zero_based', v)}
       />
       <${ToggleRow}
-        label=${t('settings.advanced.browser_logging.label')}
-        description=${t('settings.advanced.browser_logging.desc')}
-        checked=${form.browser_debug_logging}
-        onChange=${(v) => set('browser_debug_logging', v)}
+        label=${t('settings.advanced.v8_logging.label')}
+        description=${t('settings.advanced.v8_logging.desc')}
+        checked=${form.v8_debug_logging}
+        onChange=${(v) => set('v8_debug_logging', v)}
       />
       <${ToggleRow}
         label=${t('settings.advanced.registration.label')}

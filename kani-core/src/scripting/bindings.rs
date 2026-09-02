@@ -25,6 +25,7 @@ pub struct ScriptableCtx {
     pub cache_namespace: String,
     pub prefs: HashMap<String, String>,
     pub v8_process: Option<crate::v8_process::V8ProcessHandle>,
+    pub http: Option<crate::http::SmartClient>,
     pub browser_scripts: Option<Arc<crate::scripting::BrowserScriptRegistry>>,
     pub browser_profile_key: Option<String>,
 }
@@ -98,7 +99,7 @@ fn ctx_pref(ctx: &mut ScriptableCtx, key: String) -> Dynamic {
     ctx.prefs
         .get(&key)
         .map(|v| Dynamic::from(v.clone()))
-        .unwrap_or(Dynamic::from(()))
+        .unwrap_or_else(|| Dynamic::from(()))
 }
 
 fn ctx_cache_get(ctx: &mut ScriptableCtx, namespace: String, key: String) -> Dynamic {
@@ -151,23 +152,31 @@ fn ctx_capture_page_payload(
         .ok_or_else(|| {
             Box::<rhai::EvalAltResult>::from(format!("browser script '{script_name}' not declared"))
         })?;
+    let http = ctx
+        .http
+        .as_ref()
+        .ok_or_else(|| Box::<rhai::EvalAltResult>::from("solver unavailable in this context"))?;
     let profile_key = ctx.browser_profile_key.clone();
     let timeout = timeout_ms.max(0) as u32;
     let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(crate::v8_process::capture_page_payload(
-            handle,
-            &page_url,
-            init_script,
-            timeout,
-            profile_key.as_deref(),
-        ))
+        tokio::runtime::Handle::current().block_on(
+            crate::v8_process::capture_page_payload_resilient(
+                handle,
+                http,
+                &page_url,
+                init_script,
+                timeout,
+                profile_key.as_deref(),
+                true,
+            ),
+        )
     });
     result
         .map(Dynamic::from)
-        .map_err(Box::<rhai::EvalAltResult>::from)
+        .map_err(|error| Box::<rhai::EvalAltResult>::from(error.to_string()))
 }
 
-pub fn register_hook_bindings(engine: &mut Engine) {
+pub(crate) fn register_hook_bindings(engine: &mut Engine) {
     engine
         .register_type_with_name::<ScriptableRequest>("Request")
         .register_get("method", req_get_method)
@@ -234,6 +243,7 @@ mod tests {
             cache_namespace: "test".to_string(),
             prefs: HashMap::new(),
             v8_process,
+            http: None,
             browser_scripts: Some(Arc::new(crate::scripting::BrowserScriptRegistry::from_map(
                 &map,
             ))),

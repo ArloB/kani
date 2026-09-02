@@ -19,7 +19,7 @@ pub enum JobPriority {
 }
 
 impl JobPriority {
-    pub fn from_i64(v: i64) -> Self {
+    pub(crate) fn from_i64(v: i64) -> Self {
         match v {
             100 => Self::High,
             50 => Self::Normal,

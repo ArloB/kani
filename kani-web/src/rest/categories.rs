@@ -25,7 +25,7 @@ pub fn router() -> Router<AppState> {
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn list_categories(
+pub(super) async fn list_categories(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn CategoryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -43,7 +43,7 @@ pub(crate) async fn list_categories(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn create_category(
+pub(super) async fn create_category(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Json(body): Json<CreateCategoryRequest>,
@@ -62,7 +62,7 @@ pub(crate) async fn create_category(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn reorder_categories(
+pub(super) async fn reorder_categories(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Json(body): Json<ReorderCategoriesRequest>,
@@ -82,7 +82,7 @@ pub(crate) async fn reorder_categories(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn rename_category(
+pub(super) async fn rename_category(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(category_id): Path<i64>,
@@ -102,7 +102,7 @@ pub(crate) async fn rename_category(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn delete_category_handler(
+pub(super) async fn delete_category_handler(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(category_id): Path<i64>,
@@ -121,7 +121,7 @@ pub(crate) async fn delete_category_handler(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn get_manga_categories(
+pub(super) async fn get_manga_categories(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -140,7 +140,7 @@ pub(crate) async fn get_manga_categories(
     security(("session" = [])),
     tag = "library"
 )]
-pub(crate) async fn set_manga_categories(
+pub(super) async fn set_manga_categories(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(manga_id): Path<MangaId>,

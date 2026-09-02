@@ -70,14 +70,17 @@ fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
         format!("\"{}\"", rust_page_url)
     };
     let timeout = ep.timeout_ms;
+    let auto_scroll = ep.auto_scroll;
     Some(format!(
-        "let _payload = kani_shared::host_abi::v8_context::capture_page_payload({page_url_expr}, {const_name}, {timeout})?;\n\
+        "let _payload = kani_shared::host_abi::v8_context::capture_page_payload_configured({page_url_expr}, {const_name}, {timeout}, {auto_scroll})?;\n\
          let _json = kani_shared::host_abi::JsonHandle::parse(_payload.as_bytes())?;\n\
          let rows = extract::json(Some(_json.raw_handle()), &bp)?;"
     ))
 }
 
-pub fn emit_browser_script_statics(scripts: &std::collections::BTreeMap<String, String>) -> String {
+pub(crate) fn emit_browser_script_statics(
+    scripts: &std::collections::BTreeMap<String, String>,
+) -> String {
     scripts
         .keys()
         .map(|name| {
@@ -88,7 +91,7 @@ pub fn emit_browser_script_statics(scripts: &std::collections::BTreeMap<String, 
         .join("\n")
 }
 
-pub fn emit_popular(
+pub(crate) fn emit_popular(
     popular: &ValidatedPopular,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -125,7 +128,7 @@ pub fn emit_popular(
     }
 }
 
-pub fn emit_search(
+pub(crate) fn emit_search(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -140,7 +143,7 @@ pub fn emit_search(
     )
 }
 
-pub fn emit_manga_details(
+pub(crate) fn emit_manga_details(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -212,7 +215,7 @@ pub fn emit_manga_details(
     }
 }
 
-pub fn emit_chapter_list(
+pub(crate) fn emit_chapter_list(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
@@ -284,7 +287,7 @@ pub fn emit_chapter_list(
     }
 }
 
-pub fn emit_pages(
+pub(crate) fn emit_pages(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,

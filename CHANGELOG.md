@@ -6,8 +6,26 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-09-02
+
+Release candidate. Soaking as the daily driver before tagging `v1.0.0`.
+
+### Removed
+
+- Kani no longer runs its own browser. Browser capture happens in the configured solver, so the
+  `KANI_BROWSER_ENABLED`, `CHROMIUM_PATH`, and `BROWSER_IDLE_TIMEOUT_MS` environment variables are
+  gone, along with the `kani_browser_reuses_total`, `kani_browser_recovery_launches_total`,
+  `kani_browser_challenges_total`, and `kani_browser_page_close_timeouts_total` metrics. Dashboards
+  referencing those series need updating; `kani_browser_solver_*` remains and now covers every
+  capture.
+
 ### Changed
 
+- The migration history is consolidated into a single baseline. An existing database that has
+  applied every prior migration is adopted automatically at startup and nothing else changes. One
+  whose history is incomplete — an upgrade interrupted part-way, or a migration recorded as failed
+  — now stops with an error naming the offending version instead of proceeding against a schema it
+  cannot verify. Restore a backup taken before the interrupted upgrade and start again.
 - `kani-cli rollback` is renamed `kani-cli backup-verify`. Its behaviour is unchanged: it checks
   whether a backup archive can be restored onto this build and performs no restore itself. The
   name is freed for a command that actually rolls back, which needs the deferred `kani-cli` async

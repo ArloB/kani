@@ -106,7 +106,7 @@ impl JobRegistry {
 }
 
 /// Queue entry ordered by descending priority and then oldest submission first.
-pub struct QueuedJob {
+pub(crate) struct QueuedJob {
     pub priority: JobPriority,
     pub created_at: Instant,
     pub source_id: Option<i64>,
@@ -337,7 +337,6 @@ impl JobManager {
             circuit_breakers.insert(
                 row.source_id,
                 CircuitBreaker {
-                    source_id: row.source_id,
                     state,
                     failure_count: row.failure_count as u32,
                     last_failure_at: row.last_failure_at,
@@ -492,9 +491,7 @@ impl JobManager {
             if let Some(sid) = source_id {
                 let now = unix_now();
                 let is_open = {
-                    let mut entry = circuit_breakers
-                        .entry(sid)
-                        .or_insert_with(|| crate::jobs::circuit_breaker::CircuitBreaker::new(sid));
+                    let mut entry = circuit_breakers.entry(sid).or_default();
                     entry.maybe_transition_to_half_open(now);
                     entry.is_open_at(now)
                 };
@@ -688,7 +685,7 @@ impl JobManager {
                     Err(e) => {
                         if let (Some(sid), JobError::Download(kind)) = (source_id, &e) {
                             let mut entry = cb_t.entry(sid).or_insert_with(|| {
-                                crate::jobs::circuit_breaker::CircuitBreaker::new(sid)
+                                crate::jobs::circuit_breaker::CircuitBreaker::new()
                             });
                             entry.record_failure(kind, now);
                             let state = entry.state.to_string();
@@ -811,20 +808,7 @@ impl JobManager {
                 let _ = completion_t.send(job_id);
                 notify_t.notify_one();
 
-                let max = max_history as i64;
-                let _ = sqlx::query!(
-                    "DELETE FROM jobs \
-                     WHERE status IN ('completed','failed','cancelled') \
-                     AND id NOT IN (\
-                         SELECT id FROM jobs \
-                         WHERE status IN ('completed','failed','cancelled') \
-                         ORDER BY completed_at DESC \
-                         LIMIT ?\
-                     )",
-                    max
-                )
-                .execute(&pool_t)
-                .await;
+                let _ = Self::prune_history(&pool_t, max_history).await;
             });
         }
     }
@@ -1159,7 +1143,12 @@ impl JobManager {
         })
     }
 
-    pub async fn prune_history(&self, max_history: usize) -> Result<u64> {
+    /// Trims completed, failed, and cancelled jobs to the newest `max_history`.
+    /// Runs after every job completes, so the `jobs` table cannot grow without bound.
+    pub(crate) async fn prune_history(
+        pool: &sqlx::sqlite::SqlitePool,
+        max_history: usize,
+    ) -> Result<u64> {
         let max = max_history as i64;
         let result = sqlx::query!(
             "DELETE FROM jobs \
@@ -1172,7 +1161,7 @@ impl JobManager {
              )",
             max
         )
-        .execute(&self.pool)
+        .execute(pool)
         .await?;
         Ok(result.rows_affected())
     }
@@ -1181,11 +1170,7 @@ impl JobManager {
         Self::drain_active(&self.active, &self.completion_tx, timeout).await;
     }
 
-    pub fn active_count(&self) -> usize {
-        self.active.len()
-    }
-
-    pub fn queue_len(&self) -> usize {
+    pub(crate) fn active_count(&self) -> usize {
         self.active.len()
     }
 
@@ -1209,11 +1194,11 @@ impl JobManager {
             .map(|cb| cb.state.to_string())
     }
 
-    pub fn invalidate_source_semaphore(&self, source_id: i64) {
+    pub(crate) fn invalidate_source_semaphore(&self, source_id: i64) {
         self.per_source_semaphores.remove(&source_id);
     }
 
-    pub fn invalidate_all_source_semaphores(&self) {
+    pub(crate) fn invalidate_all_source_semaphores(&self) {
         self.per_source_semaphores.clear();
     }
 }

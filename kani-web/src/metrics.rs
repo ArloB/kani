@@ -72,6 +72,42 @@ pub fn describe() {
         "kani_v8_process_restarts_total",
         "Times the V8 subprocess has been restarted"
     );
+    metrics::describe_counter!(
+        "kani_v8_graceful_shutdowns_total",
+        "Managed V8 or Chromium processes stopped through a graceful shutdown"
+    );
+    metrics::describe_counter!(
+        "kani_v8_forced_terminations_total",
+        "Managed V8 or Chromium processes that required forced process-tree termination"
+    );
+    metrics::describe_counter!(
+        "kani_browser_reuses_total",
+        "Browser-backed calls that reused an existing Chromium instance"
+    );
+    metrics::describe_counter!(
+        "kani_browser_recovery_launches_total",
+        "Chromium launches that required an isolated recovery profile"
+    );
+    metrics::describe_counter!(
+        "kani_browser_challenges_total",
+        "Cloudflare challenges detected by browser payload capture"
+    );
+    metrics::describe_counter!(
+        "kani_browser_page_close_timeouts_total",
+        "Browser pages that exceeded the bounded close timeout"
+    );
+    metrics::describe_counter!(
+        "kani_browser_solver_attempts_total",
+        "FlareSolverr credential requests made for browser challenges"
+    );
+    metrics::describe_counter!(
+        "kani_browser_solver_successes_total",
+        "Successful FlareSolverr credential requests for browser challenges"
+    );
+    metrics::describe_counter!(
+        "kani_browser_solver_failures_total",
+        "Failed FlareSolverr credential requests for browser challenges"
+    );
 
     metrics::counter!("kani_log_errors_total").increment(0);
     metrics::gauge!("kani_sse_clients").set(0.0);
@@ -91,7 +127,7 @@ pub fn router(state: crate::state::AppState) -> Router {
 
 #[derive(Clone)]
 /// Router state pairing the Prometheus renderer with application authorization state.
-pub struct MetricsState {
+pub(crate) struct MetricsState {
     handle: PrometheusHandle,
     app: crate::state::AppState,
 }
@@ -128,10 +164,15 @@ async fn authorized(app: &crate::state::AppState, headers: &HeaderMap) -> bool {
     }
 }
 
-pub fn sync_runtime_counters() {
+pub(crate) fn sync_runtime_counters() {
     let stats = kani_core::v8_process::browser_stats();
     metrics::counter!("kani_v8_calls_total").absolute(stats.calls_total);
     metrics::counter!("kani_v8_process_restarts_total").absolute(stats.restarts);
+    metrics::counter!("kani_v8_graceful_shutdowns_total").absolute(stats.graceful_shutdowns);
+    metrics::counter!("kani_v8_forced_terminations_total").absolute(stats.forced_terminations);
+    metrics::counter!("kani_browser_solver_attempts_total").absolute(stats.solver_attempts);
+    metrics::counter!("kani_browser_solver_successes_total").absolute(stats.solver_successes);
+    metrics::counter!("kani_browser_solver_failures_total").absolute(stats.solver_failures);
 }
 
 async fn render(State(state): State<MetricsState>, headers: HeaderMap) -> impl IntoResponse {

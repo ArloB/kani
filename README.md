@@ -95,7 +95,6 @@ Data is persisted in two directories created alongside `docker-compose.yml`:
 ```yaml
 build:
   args:
-    INSTALL_BROWSER: "true"   # Chromium + puppeteer (~250 MB) — required for extensions that need to evaluate JS
     INSTALL_KCC: "true"       # Kindle Comic Converter — required for MOBI/AZW3 export
 ```
 
@@ -126,9 +125,8 @@ Set these in `docker-compose.yml` or pass as `-e` flags:
 | `KANI_CORS_ORIGIN` | *(mirrors request)* | Restrict CORS to a specific origin in production |
 | `KANI_SECRET_KEY` | *(none)* | 32-byte hex key for credential encryption at rest (`openssl rand -hex 32`) |
 | `KANI_SECRET_KEY_FILE` | *(none)* | Load the encryption key from a file (for Docker secrets) |
+| `KANI_SOLVER_SECRET` | *(none)* | Shared key sent to the solver; must match its `API_KEY` |
 | `RUST_LOG` | `error` | Log level: `error`, `warn`, `info`, `debug`, `trace` |
-| `KANI_BROWSER_ENABLED` | `true` | Set `false` to disable browser-based extensions at runtime |
-| `BROWSER_IDLE_TIMEOUT_MS` | `300000` | How long to keep Chromium alive after pages close |
 
 ---
 

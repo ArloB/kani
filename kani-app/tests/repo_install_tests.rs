@@ -18,7 +18,7 @@ fn gen_key() -> SigningKey {
 }
 
 fn sign(key: &SigningKey, data: &[u8]) -> String {
-    signature_b64(&sign_artifact(data, &key.to_bytes()))
+    signature_b64(&sign_artifact(data, key))
 }
 
 fn pk_b64(key: &SigningKey) -> String {
@@ -404,6 +404,18 @@ async fn refresh_repo_succeeds_with_same_key() {
     };
 
     svc.refresh_repo(id, None).await.unwrap();
+
+    // Without this the test asserts nothing: it would pass if refresh_repo
+    // returned Ok without contacting the repo or recording anything.
+    let after = svc.get_repo(id).await.unwrap();
+    assert!(
+        after.index_cache.is_some(),
+        "a successful refresh must cache the index it fetched"
+    );
+    assert!(
+        after.last_refreshed_at.is_some(),
+        "a successful refresh must record when it happened"
+    );
 }
 
 #[tokio::test]

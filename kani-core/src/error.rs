@@ -14,6 +14,13 @@ pub enum Error {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    /// Browser capture could not run, with the solver state preserved.
+    ///
+    /// The code is carried rather than formatted into a string so the web layer
+    /// can turn each state into its own status and hint.
+    #[error("Browser capture unavailable: {message} [{code}]")]
+    BrowserCaptureUnavailable { code: String, message: String },
+
     /// A non-success HTTP status, with the code preserved.
     ///
     /// Carrying the status rather than formatting it into a string is what lets

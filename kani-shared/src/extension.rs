@@ -316,14 +316,16 @@ pub fn bridge_chapter_list_stream<E: MangaExtension + Sync + 'static>(
                     }
                     let has_next_page = list.has_next_page;
                     let items: Vec<_> = list.chapters.into_iter().map(Ok).collect();
-                    let (result, _buf) = tx.write(items).await;
-                    if !matches!(result, wit_bindgen::StreamResult::Complete(_)) || !has_next_page {
+                    // `write_all`, not `write`: a write transfers only what the reader
+                    // takes. Non-empty here means the reader is gone.
+                    let unwritten = tx.write_all(items).await;
+                    if !unwritten.is_empty() || !has_next_page {
                         break;
                     }
                     page += 1;
                 }
                 Err(e) => {
-                    let _ = tx.write(vec![Err(e.into_wit())]).await;
+                    let _ = tx.write_all(vec![Err(e.into_wit())]).await;
                     break;
                 }
             }
@@ -353,6 +355,7 @@ pub struct RateLimitConfig {
     pub max_hook_requests: u32,
 }
 
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
 fn default_max_hook_requests() -> u32 {
     3
 }

@@ -19,13 +19,21 @@ fn png_bytes(shade: u8) -> Vec<u8> {
 }
 
 fn write_cbz(path: &Path, shades: &[u8]) {
+    write_cbz_stamped(path, shades, zip::DateTime::default());
+}
+
+/// The entry timestamp is explicit because the default is the current time,
+/// which makes two archives of identical pages differ in bytes — and
+/// `archive_hash` is deliberately a hash of the file as it sits on disk.
+fn write_cbz_stamped(path: &Path, shades: &[u8], stamp: zip::DateTime) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
     let file = std::fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
     let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(stamp);
     for (i, shade) in shades.iter().enumerate() {
         zip.start_file(format!("{:04}.png", i + 1), opts).unwrap();
         zip.write_all(&png_bytes(*shade)).unwrap();
@@ -664,6 +672,74 @@ async fn scrub_groups_byte_identical_chapters() {
         .unwrap();
 
     assert_eq!(report.exact_duplicates.len(), 1, "same bytes, one group");
+    let mut group = report.exact_duplicates[0].clone();
+    group.sort();
+    let mut want = ids.clone();
+    want.sort();
+    assert_eq!(group, want);
+}
+
+#[tokio::test]
+async fn the_same_pages_re_zipped_are_still_reported_as_duplicates() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    let library = { svc.settings.read().await.library_path.clone() };
+
+    let mut ids = Vec::new();
+    let mut paths = Vec::new();
+    for (slug, title) in [("m1", "Repack A"), ("m2", "Repack B")] {
+        let manga = insert_manga(&svc.db, src, slug, title).await;
+        let chapter = insert_chapter(&svc.db, manga, "c1", 1.0).await;
+        sqlx::query("UPDATE chapters SET download_status = 2 WHERE id = ?")
+            .bind(chapter)
+            .execute(&svc.db)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(library.join(format!(
+            "{} - {}",
+            kani_core::utilities::sanitize_filename(title),
+            manga.0
+        )))
+        .unwrap();
+        paths.push(svc.chapter_cbz_path(chapter).await.unwrap().path);
+        ids.push(chapter.0);
+    }
+
+    // Same pages, different containers: this is what a re-download or a repack
+    // produces, and it is exactly what an archive hash cannot see through.
+    write_cbz_stamped(&paths[0], &[10, 90], zip::DateTime::default());
+    write_cbz_stamped(
+        &paths[1],
+        &[10, 90],
+        zip::DateTime::from_date_and_time(1999, 6, 1, 12, 0, 0).unwrap(),
+    );
+    for (chapter, path) in ids.iter().zip(paths.iter()) {
+        svc.record_chapter_manifest(ChapterId(*chapter), path.clone())
+            .await;
+    }
+
+    let hashes: Vec<String> =
+        sqlx::query_scalar("SELECT content_hash FROM chapters WHERE id IN (?, ?) ORDER BY id")
+            .bind(ids[0])
+            .bind(ids[1])
+            .fetch_all(&svc.db)
+            .await
+            .unwrap();
+    assert_ne!(
+        hashes[0], hashes[1],
+        "sanity: the archives must differ in bytes, or this proves nothing"
+    );
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report.exact_duplicates.len(),
+        1,
+        "identical pages in differently packed archives are still duplicates"
+    );
     let mut group = report.exact_duplicates[0].clone();
     group.sort();
     let mut want = ids.clone();

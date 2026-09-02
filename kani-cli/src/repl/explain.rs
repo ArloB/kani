@@ -1,6 +1,5 @@
-use crate::dsl::parser;
-use crate::error::{CliError, report_custom_error, report_errors};
-use chumsky::Parser;
+use crate::dsl::parse;
+use crate::error::{CliError, report_custom_error, report_dsl_errors};
 use kani_shared::ast::Expr;
 use std::fmt;
 
@@ -45,19 +44,10 @@ pub fn run(expression: &str) -> Result<(), CliError> {
 }
 
 pub fn explain(expression: &str) -> Result<ExplainTrace, CliError> {
-    let result = parser().parse(expression);
-
-    if result.has_errors() {
-        let errs: Vec<_> = result.errors().cloned().collect();
-        report_errors("<expression>", expression, errs);
-        return Err(CliError::Other(
-            "DSL parsing failed (see above)".to_string(),
-        ));
-    }
-
-    let parse_ast = result
-        .into_result()
-        .map_err(|_| CliError::Other("DSL parse failed".to_string()))?;
+    let parse_ast = parse(expression).map_err(|errors| {
+        report_dsl_errors("<expression>", expression, None, &errors);
+        CliError::Other("DSL parsing failed (see above)".to_string())
+    })?;
 
     let expr: Expr = parse_ast
         .try_into()
@@ -474,6 +464,11 @@ fn describe_expr(expr: &Expr) -> (String, String, Vec<&Expr>) {
             "UserFn".into(),
             format!(".user.{name}() — {} arg(s)", args.len()),
             args.iter().collect(),
+        ),
+        Expr::Arena { arena, root } => (
+            "Arena".into(),
+            format!("{} flat nodes, root {}", arena.nodes.len(), root.0),
+            vec![],
         ),
     }
 }

@@ -92,18 +92,20 @@ installation policy, database pools, and which values should instead be changed 
 
 ## Optional image features
 
-The Dockerfile supports build arguments for larger optional dependencies:
+The Dockerfile supports a build argument for a larger optional dependency:
 
 ```yaml
 build:
   args:
-    INSTALL_BROWSER: "true"
     INSTALL_KCC: "true"
 ```
 
-`INSTALL_BROWSER` adds Chromium for sources that require browser payload capture. `INSTALL_KCC`
-adds Kindle Comic Converter for MOBI/AZW3 export. These increase image size and should be enabled
-only when needed.
+`INSTALL_KCC` adds Kindle Comic Converter for MOBI/AZW3 export. It increases image size and should
+be enabled only when needed.
+
+Sources that capture browser payloads need no build argument: that work runs in the solver, which
+is a separate container. See [Configuration](../admin/configuration.md) for the solver image and
+its key.
 
 ## Health and restart behavior
 

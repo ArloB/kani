@@ -5,16 +5,16 @@ use crate::jobs::error::JobError;
 use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 
 /// Default per-token spacing; provider `Retry-After` extends it dynamically.
-pub const MIN_TOKEN_SPACING: Duration = Duration::from_millis(700);
+pub(crate) const MIN_TOKEN_SPACING: Duration = Duration::from_millis(700);
 
 /// Maximum number of stale entries processed in a single run, to bound work.
-pub const MAX_ENTRIES_PER_RUN: usize = 200;
+pub(crate) const MAX_ENTRIES_PER_RUN: usize = 200;
 
 /// Per-token call throttle: enforces a minimum spacing between calls and honours a
 /// rate-limit backoff window (driven by HTTP 429 `Retry-After`). Pure and clock-injected
 /// so it can be unit-tested without sleeping.
 #[derive(Default)]
-pub struct TokenThrottle {
+pub(crate) struct TokenThrottle {
     last_call: HashMap<i64, Instant>,
     backoff_until: HashMap<i64, Instant>,
 }
@@ -22,7 +22,12 @@ pub struct TokenThrottle {
 impl TokenThrottle {
     /// How long to wait before the next call for `token_key`, given `now` and the minimum
     /// spacing. Returns the larger of the spacing gap and any active backoff window.
-    pub fn delay_before(&self, token_key: i64, now: Instant, min_spacing: Duration) -> Duration {
+    pub(crate) fn delay_before(
+        &self,
+        token_key: i64,
+        now: Instant,
+        min_spacing: Duration,
+    ) -> Duration {
         let mut wait = Duration::ZERO;
         if let Some(&last) = self.last_call.get(&token_key) {
             let next_allowed = last + min_spacing;
@@ -38,30 +43,23 @@ impl TokenThrottle {
         wait
     }
 
-    pub fn record_call(&mut self, token_key: i64, at: Instant) {
+    pub(crate) fn record_call(&mut self, token_key: i64, at: Instant) {
         self.last_call.insert(token_key, at);
     }
 
     /// Register a rate-limit backoff for `token_key` lasting `retry_after` from `at`.
-    pub fn record_rate_limited(&mut self, token_key: i64, at: Instant, retry_after: Duration) {
+    pub(crate) fn record_rate_limited(
+        &mut self,
+        token_key: i64,
+        at: Instant,
+        retry_after: Duration,
+    ) {
         self.backoff_until.insert(token_key, at + retry_after);
     }
 }
 
-/// Whether a tracker mapping is due for a sync: never-synced rows are always stale.
-pub fn is_stale(
-    last_synced_at: Option<time::OffsetDateTime>,
-    now: time::OffsetDateTime,
-    interval: time::Duration,
-) -> bool {
-    match last_synced_at {
-        None => true,
-        Some(ts) => now - ts >= interval,
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct TrackerSyncJob {
+pub(crate) struct TrackerSyncJob {
     id: JobId,
 }
 
@@ -144,25 +142,5 @@ mod tests {
         t.record_rate_limited(1, now, Duration::from_secs(60));
         assert!(t.delay_before(1, now, MIN_TOKEN_SPACING) >= Duration::from_secs(60));
         assert_eq!(t.delay_before(2, now, MIN_TOKEN_SPACING), Duration::ZERO);
-    }
-
-    #[test]
-    fn never_synced_is_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        assert!(is_stale(None, now, time::Duration::hours(24)));
-    }
-
-    #[test]
-    fn recently_synced_is_not_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        let last = now - time::Duration::hours(1);
-        assert!(!is_stale(Some(last), now, time::Duration::hours(24)));
-    }
-
-    #[test]
-    fn old_sync_is_stale() {
-        let now = time::OffsetDateTime::now_utc();
-        let last = now - time::Duration::hours(25);
-        assert!(is_stale(Some(last), now, time::Duration::hours(24)));
     }
 }

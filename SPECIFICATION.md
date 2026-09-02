@@ -1200,7 +1200,7 @@ All `metadata` fields are optional and additive — an extension YAML with no `m
 - **`min_kani_version`** — parsed as semver and compared against the running host's version (`kani_web::KANI_VERSION`). Install is rejected if the host is older than the declared floor.
 - **`requires_capabilities`** — each entry must appear in the host's `HOST_CAPABILITIES` allow-list (currently `["unrestricted_http"]`). Install is rejected if any requested capability is unrecognized.
 
-Both checks return a `Result<(), String>`; failures are surfaced as `AppError::ValidationError` with a human-readable message naming the offending version/capability. Installation that passes gating persists `icon`, `description`, `languages` (JSON-encoded `Vec<String>`), and `schema_version` onto the `sources` table row, alongside the existing `name`/`version`/`base_url`/`unrestricted_http` columns (`migrations/20260616233000_add_source_metadata.sql`). These four columns are also added to `kani_shared::types::Source` and round-trip through `get_source`/`list_sources`/library scan queries. The frontend (`static/js/pages/source-details.js`, `static/js/components/sources-sidebar.js`) reads them directly off the `Source` object: the sidebar list item swaps the initial-letter avatar for the decoded `icon` (`data:image/png;base64,...`) when present, and the source details page's "About" card shows the icon, description, and a `languages` chip list (parsed from the JSON column).
+Both checks return a `Result<(), String>`; failures are surfaced as `AppError::ValidationError` with a human-readable message naming the offending version/capability. Installation that passes gating persists `icon`, `description`, `languages` (JSON-encoded `Vec<String>`), and `schema_version` onto the `sources` table row, alongside the existing `name`/`version`/`base_url`/`unrestricted_http` columns (`migrations/20260818000002_baseline.sql`). These four columns are also added to `kani_shared::types::Source` and round-trip through `get_source`/`list_sources`/library scan queries. The frontend (`static/js/pages/source-details.js`, `static/js/components/sources-sidebar.js`) reads them directly off the `Source` object: the sidebar list item swaps the initial-letter avatar for the decoded `icon` (`data:image/png;base64,...`) when present, and the source details page's "About" card shows the icon, description, and a `languages` chip list (parsed from the JSON column).
 
 #### Chapter Sort
 
@@ -1821,9 +1821,10 @@ factory:
 
 ### 3.8 Browser Payload Endpoints
 
-Set `via: browser_payload` to load an endpoint in a headless browser instead of using direct HTTP.
+Set `via: browser_payload` to load an endpoint in the solver's browser instead of using direct HTTP.
 Code generation emits `capture_page_payload` with the configured script and timeout. The browser
-runtime manages Chromium, `passPayload` injection, `AllowedHost` checks, and resource limits.
+runtime manages the solver session, `passPayload` injection, `AllowedHost` checks, and resource
+limits.
 
 **Compiled-tier limitation:** Code generation emits `capture_page_payload` but does not extract its
 result; `kani-cli/src/codegen/endpoints.rs::try_emit_browser_fetch` remains unimplemented. The
@@ -1832,7 +1833,7 @@ interpreted backend (§5.1) extracts the captured payload as a standard JSON end
 ```yaml
 browser_scripts:
   fetch_manga: |
-    // Script injected into the headless browser page.
+    // Script injected into the solver's browser page.
     // Must call passPayload(jsonString) with the data to extract.
     fetch('/api/manga')
       .then(r => r.json())

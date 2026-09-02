@@ -264,8 +264,10 @@ function _buildNavLinks() {
     { href: '/accounts',  label: t('nav.accounts'),  icon: iconAccounts,  perm: 'user:manage' },
     { href: '/admin/logs', label: t('nav.logs'),     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin/logs' },
     { href: '/jobs',       label: t('nav.jobs'), icon: iconRefresh,   perm: 'admin:jobs',      matchPrefix: '/jobs',  section: 'Admin' },
-    { href: '/admin/ui-showcase', label: 'UI Showcase', icon: iconCube, perm: 'admin:manage', matchPrefix: '/admin/ui-showcase' },
   ];
+  if (__KANI_DEV__) {
+    defs.push({ href: '/admin/ui-showcase', label: 'UI Showcase', icon: iconCube, perm: 'admin:manage', matchPrefix: '/admin/ui-showcase' });
+  }
   const visible = defs.filter(d => !d.perm || hasPermission(d.perm));
   let html = '';
   let lastSection = '';

@@ -103,7 +103,7 @@ pub struct UpsertUiThemeBody {
 /// What `sanitize_custom_css` removed, so an editor can tell the user why their
 /// CSS looks different from what they typed.
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct SanitizeResult {
+pub(crate) struct SanitizeResult {
     pub css: String,
     pub stripped: Vec<String>,
 }
@@ -188,7 +188,7 @@ const ALLOWED_AT_RULES: &[&str] = &["@media", "@supports", "@keyframes"];
 /// Allowlist-based, and a small `{}`/`;` tokenizer rather than regex: a regex
 /// over CSS cannot tell a `}` inside a string from one that closes a block, and
 /// that difference is the whole security boundary.
-pub fn sanitize_custom_css(input: &str) -> SanitizeResult {
+pub(crate) fn sanitize_custom_css(input: &str) -> SanitizeResult {
     let mut stripped = Vec::new();
     let without_comments = strip_comments(input);
     let mut out = String::new();

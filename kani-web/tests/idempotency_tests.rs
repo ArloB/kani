@@ -13,7 +13,8 @@ fn post(
     let mut b = axum::http::Request::builder()
         .method("POST")
         .uri("/rest/me/api-tokens")
-        .header(axum::http::header::COOKIE, cookie)
+        .header(axum::http::header::COOKIE, common::csrf_cookie(cookie))
+        .header("X-CSRF-Token", common::csrf_token(cookie))
         .header(axum::http::header::CONTENT_TYPE, "application/json");
     if let Some(k) = key {
         b = b.header("Idempotency-Key", k);
@@ -36,10 +37,7 @@ async fn token_count(app: &axum::Router, cookie: &str) -> usize {
 
 #[tokio::test]
 async fn a_retry_with_the_same_key_replays_instead_of_writing_twice() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let first = app
         .clone()
@@ -80,10 +78,7 @@ async fn a_retry_with_the_same_key_replays_instead_of_writing_twice() {
 
 #[tokio::test]
 async fn reusing_a_key_for_a_different_request_is_refused() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let first = app
         .clone()
@@ -108,10 +103,7 @@ async fn reusing_a_key_for_a_different_request_is_refused() {
 
 #[tokio::test]
 async fn distinct_keys_both_execute() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     for key in ["k1", "k2"] {
         let res = app
@@ -126,10 +118,7 @@ async fn distinct_keys_both_execute() {
 
 #[tokio::test]
 async fn writes_without_a_key_are_untouched() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     for _ in 0..2 {
         let res = app
@@ -182,10 +171,7 @@ async fn one_users_key_never_replays_to_another_user() {
 
 #[tokio::test]
 async fn a_get_is_never_recorded() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let mut req = common::authed_get("/rest/me/api-tokens", &cookie);
     req.headers_mut()
@@ -205,10 +191,7 @@ async fn a_get_is_never_recorded() {
 
 #[tokio::test]
 async fn a_malformed_key_is_rejected() {
-    let state = test_state().await;
-    let (u, p) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, u, p).await;
+    let (app, cookie) = common::admin_app().await;
 
     let res = app
         .clone()

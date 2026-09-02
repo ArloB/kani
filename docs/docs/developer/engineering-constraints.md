@@ -41,19 +41,74 @@ the production-image workflow builds the same Dockerfile.
 
 **Revalidate when.** The Docker stages, cargo-chef, `.cargo/config.toml`, or linker selection changes.
 
-### Browser-assisted sources materially increase the image size
+### The Kani image ships no browser
 
-**Constraint.** Chromium and `puppeteer-core` are optional runtime dependencies used only by
-sources that capture browser-issued tokens. The standard image omits them.
+**Constraint.** Browser capture runs in the solver container. The Kani image installs neither
+Chromium nor `puppeteer-core`, and has no build argument to add them.
 
-**Evidence.** Including the browser-assisted source dependencies added approximately 250 MB to
-the container image when measured during the Docker image split. Restarting an idle Chromium
-process added approximately two seconds during the same browser-runtime testing.
+**Evidence.** Building the runtime base with and without the browser package set measured 1.44 GB
+against 260 MB on 2026-08-12, so carrying them cost 1.18 GB. The Kani image built without them on
+the same day is 340 MB and contains no `chromium` binary. The solver image is 1.07 GB, but it is
+already required for any source behind a managed challenge, so it is not additional.
 
-**Enforcement.** The standard and browser-enabled Docker targets remain separate, and Compose
-requires an explicit profile to select the browser-enabled target.
+**Consequence.** A deployment that wants browser sources runs two containers. A deployment that
+does not is 1.18 GB smaller than before, and cannot run browser sources at all.
 
-**Revalidate when.** Chromium, puppeteer, the browser source set, or the image base changes.
+**Enforcement.** The runtime stage installs `nodejs` for the sandbox worker and nothing browser
+related. Browser capture reaches the solver over HTTP or fails with a solver-specific error.
+
+**Revalidate when.** The solver protocol changes, a source needs a browser capability the solver
+cannot provide, or the image base changes.
+
+### Managed-challenge capture stays in the solving browser
+
+**Constraint.** The challenge solve, host-page token generation, extension script, and payload
+capture must run in one solver browser session. Clearance is never carried to a second browser.
+
+**Evidence.** Cloudflare documents clearance as bound to the visitor and device. Against live
+Comix on 2026-08-12, across 20 captures per cell: a fresh solver took 12.57 s at p50, and a cleared
+session 2.07 s, with no correctness failures in 80 captures and no re-challenge in 40. The solve is
+almost all of the cold cost — 10.4 s of it — while the capture itself runs about 300 ms either way.
+On an identical local fixture the solver beat local Puppeteer at every percentile, 246 ms against
+370 ms at p50, so removing the local browser cost no latency.
+
+**Consequence.** Cookie fidelity cannot make cross-browser replay reliable. A solver without
+scripted capture can still solve ordinary HTTP requests, but protected browser sources may fail.
+The solver executes extension-authored JavaScript and must remain private.
+
+**Enforcement.** `kani.capture/2` installs the script before page code, rearms the idle deadline on
+`resetPayloadTimer`, caps payload size, serialises each deterministic per-source/domain session,
+and removes injected scripts after every capture. Kani memoises challenged routes, reaps sessions
+with source browser state, and keeps runtime browser-disable controls as hard gates.
+
+**Revalidate when.** Cloudflare clearance behavior, the solver protocol, browser-source security
+controls, session lifecycle, or the browser source set changes.
+
+### The V8 settings are named for the worker they configure
+
+**Constraint.** `v8_max_memory_mb`, `v8_idle_timeout_s` and `v8_debug_logging` govern the Node/V8
+worker that runs source scripts. They were named `browser_*` for the Puppeteer pool that browser
+capture used before it moved into the solver, and that pool no longer exists.
+
+**Evidence.** `browser_max_instances` reached `V8Config::max_instances`, which only ever appeared
+in `browser_stats()` and the diagnostics payload; nothing enforced a limit, so it was dropped
+rather than renamed. `browser_idle_timeout_s` was live — `jobs/v8_reap.rs` reads it and
+`jobs/recurring.rs` sets the reap cadence from it — but it was governing two unrelated lifetimes
+at once: the local V8 worker and the solver's own sessions.
+
+**Consequence.** The solver already expires sessions on `SOLVER_SESSION_TTL_MINUTES`, so an
+operator lowering the setting could only make the host reap earlier than the solver, never later,
+and the two could disagree silently. `reap_solver_sessions` now takes `http::solver_session_ttl()`
+and the setting governs the local worker alone.
+
+**Enforcement.** Migration `20260818000001` renames the three columns and drops the fourth. The
+DTO carries `#[serde(alias = "browser_*")]` on each renamed field, because they are required
+rather than optional and a backup written before the rename would otherwise fail to deserialise —
+`backup_import_tests::a_backup_written_before_the_v8_rename_still_restores` fails with
+`missing field v8_debug_logging` if an alias is removed.
+
+**Revalidate when.** A solver-side equivalent of either control is exposed and needs a home, or
+the local V8 worker stops being the thing these configure.
 
 ## HTTP routing
 
@@ -154,6 +209,43 @@ or per-token throttle behavior changes.
 
 ## Delivery workflows
 
+### `dist-workspace.toml` can reference a workflow fragment with no `uses:` site
+
+**Constraint.** `github-build-setup = "fragments/build-setup.yml"` in `dist-workspace.toml` has
+`cargo-dist` read that file directly as an asset when it generates or validates `release.yml`
+(the `dist generate --check` job in `ci.yml`). A grep for `uses:` across `.github/workflows/`
+does not find this reference, because it is consumed as a config-key file path, not invoked
+through GitHub Actions' own reference syntax.
+
+**Failure signature.** `dist generate --check` fails with `failed to load github-build-setup
+file … No such file or directory`, on a file that has zero conventional workflow references and
+looks safe to delete by every ordinary check.
+
+**Consequence.** `.github/workflows/fragments/build-setup.yml` was deleted as dead CI config
+during the 2026-08/09 waste sweep on the (true but incomplete) claim that it had no `uses:`
+reference from any workflow. Restored once CI caught it on the next PR.
+
+**Enforcement.** Before deleting anything under `.github/workflows/fragments/`, grep
+`dist-workspace.toml` for its filename in addition to grepping workflows for `uses:`, and run
+`dist generate --check` locally.
+
+**Revalidate when.** `dist-workspace.toml`'s `github-build-setup` key changes, or the fragment
+directory gains a second consumer.
+
+### Content-hashed bundle output accumulates unless the directory is cleared
+
+**Constraint.** `build_js` clears `static/js/dist` before invoking esbuild. The bundler names
+split chunks by content hash, so a rebuild writes new files beside the old ones instead of
+replacing them, and `stage_assets_for_embedding` copies whatever the directory holds.
+
+**Evidence.** Before the clean was added the directory held 483 files and 8.0 MB, of which
+408 files and 7.09 MB — 88% by size — were unreachable from the `app.js` entry point and were
+being embedded in every release binary. Ten hashed copies of each page module had accumulated.
+A clean build produces 71 files and 906 KB.
+
+**Consequence.** Any future output whose filename varies by content needs the same treatment.
+Reachability is the test, not file count: walk the import graph from the entry the HTML names.
+
 ### Matrix outputs cannot carry per-architecture digests
 
 **Constraint.** A GitHub Actions matrix exposes one last-writer-wins job output rather than an
@@ -231,7 +323,63 @@ explicitly rather than relying on the default-branch checkout.
 **Revalidate when.** The benchmark set changes, the alert threshold proves too noisy for a shared
 runner, or documentation deployment stops using `gh-pages`.
 
+## Component-model streams
+
+### A stream write transfers only what the reader takes
+
+**Constraint.** `StreamWriter::write` transfers as many items as the reader accepts and returns the
+remainder in its buffer; `StreamResult::Complete(n)` reports the count written, not that the whole
+batch went. Guest code writing a batch must use `write_all`, which retries until the buffer drains
+and returns values only once the reader has dropped.
+
+**Evidence.** `bridge_chapter_list_stream` wrote a page per call as `let (result, _buf) =
+tx.write(items)`, matched `Complete(_)` as success, and discarded `_buf`. Against a host consumer
+reading one item per poll, a two-chapter page delivered its first chapter and dropped the second:
+draining `paginated-stream` from `kani-test-abi` yielded `["p1-1", "p2-1"]` instead of
+`["p1-1", "p1-2", "p2-1", "p2-2"]`.
+
+**Consequence.** Any extension relying on the default `get-chapter-list-stream` bridge silently
+lost chapters, at a rate set by how the host drained the stream. Production polls per page and does
+not use the bridge, so no released behaviour depended on it.
+
+**Enforcement.** `kani-core/tests/wasm_abi.rs::abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order`
+asserts the exact ids and their order, so a batch that loses items fails rather than returning
+fewer. The test needs `wasm_sources/test-abi.wasm`, which CI builds in the `test` job.
+
+**Revalidate when.** wit-bindgen changes `write_all`'s contract, or a guest starts writing batches
+through `write` directly.
+
 ## Storage and recovery
+
+### A squashed baseline cannot be stamped onto a partial history
+
+**Constraint.** Baseline adoption replaces a pre-squash `_sqlx_migrations` history with one
+baseline row only when the recorded set is exactly the folded set. Any other state — a missing
+folded version, an unrecognised version, a failed row — is refused with the history left intact.
+
+**Evidence.** Stamping the baseline records that the database is at the baseline's schema. A
+database missing one folded migration is missing that migration's schema change, and no later
+migration would reapply it, so the claim would be silently false and every subsequent query
+against the absent column would fail at runtime rather than at startup.
+
+**Consequence.** The squash cut point is bounded by deployment, not by convenience: every
+installation that must be upgradable has to have applied every migration being folded in. The
+20260818000002 baseline could fold the entire history only because no tagged release existed, so
+no installation was stranded. A later squash must cut at the last released migration.
+
+### Migration checksums record two unrelated kinds of drift
+
+**Constraint.** `TRANSITIONS` maps a legacy checksum to a current one for a migration edited in
+place, and is guarded by a semantic hash proving the edit was comment-only. Baseline adoption is
+checksum-blind and matches on version and success alone.
+
+**Evidence.** The two mechanisms answer different questions. A transition asserts that a file's
+bytes changed while its effect did not, which requires comparing effects. Adoption discards rows
+describing migrations whose files no longer exist, so their checksums have nothing left to
+describe.
+
+**Consequence.** Adoption runs before reconciliation and must not depend on it. Coupling them
+would make a legacy checksum on a folded migration block an upgrade for no reason.
 
 ### Lease coordination uses one atomic word for modelability
 
@@ -284,6 +432,28 @@ verify its retention purge separately.
 
 **Revalidate when.** Upgrade application, library paths, download replacement, trash retention, or
 recovery behavior changes.
+
+## Lints
+
+### Whole-group pedantic and nursery are not worth their volume here
+
+**Constraint.** `[workspace.lints.clippy]` enables named lints that find dead or redundant code,
+not the `pedantic` or `nursery` groups. A lint sits at `allow` only while its recorded violation
+count is being drained.
+
+**Evidence.** Enabling both groups produced 3,295 warnings across the workspace. The largest
+categories were 535 missing `# Errors` doc sections, 517 `Self` repetitions, and 471 `must_use`
+suggestions — none of which identify unused or duplicated code. Restricting to the waste-finding
+subset produced 397, of which 303 were `redundant_pub_crate`.
+
+**Consequence.** CI runs `cargo clippy -- -D warnings`, so a group that mostly reports style would
+have made every build fail on documentation preferences.
+
+**Enforcement.** The block lists lints individually with a count beside each `allow`, so the
+backlog is visible in the manifest rather than tracked elsewhere.
+
+**Revalidate when.** A group's contents change materially, or the `allow` counts reach zero and the
+remaining lints can be promoted.
 
 ## Test execution
 

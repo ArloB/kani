@@ -7,9 +7,6 @@ services:
         # build cannot derive it. Export GIT_SHA=$(git rev-parse --short HEAD).
         GIT_SHA: "${GIT_SHA:-}"
 
-        # Enables browser-based extensions; see the engineering constraints register.
-        #   INSTALL_BROWSER: "true"
-
         #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
         #   INSTALL_KCC: "true"
     image: kani:latest
@@ -48,17 +45,9 @@ services:
       # Prometheus metrics disclose extension names, upstream hosts, and error
       # counts. Scrape /metrics with an API token scoped to metrics:read.
 
-      # Set to "false" to disable browser-based extension features at runtime,
-      # even if Chromium is installed (e.g. to reclaim memory on idle servers).
-      # KANI_BROWSER_ENABLED: "false"
-
-      # Override the Chromium binary path if not at the default /usr/bin/chromium.
-      # CHROMIUM_PATH: "/usr/bin/chromium-browser"
-
-      # How long (ms) to keep the Chromium process alive after all pages close. Defaults to
-      # 300000 (5 min). Set to 0 to keep it alive indefinitely. Lower values save RAM on idle
-      # servers at the cost of process-start latency. BROWSER_IDLE_TIMEOUT_MS: "120000"
-
+      # Shared key sent to the solver on every request. Must match the solver's
+      # API_KEY. Leave unset only when the solver is unreachable from elsewhere.
+      # KANI_SOLVER_SECRET: "change-me"
 
       # Signs cover-image proxy URLs. Auto-provisioned to /data/proxy.key on
       # first boot — no action needed unless you want a fixed key across restarts.
@@ -85,4 +74,16 @@ services:
       # Where kani stores its database and auto-provisioned key files. Defaults to the process
       # working directory (/data inside Docker). Only needed for non-Docker deployments where the
       # working directory differs. KANI_DATA_DIR: "/data"
+    restart: unless-stopped
+
+  # Runs capture scripts for browser sources. Bound to localhost because /v1
+  # executes caller-supplied JavaScript against named browser profiles; set
+  # API_KEY plus the matching KANI_SOLVER_SECRET if anything else can reach it.
+  solver:
+    image: ghcr.io/kani-app/flaresolverr:latest
+    ports:
+      - "127.0.0.1:8191:8191"
+    environment:
+      LOG_LEVEL: info
+      # API_KEY: "change-me"
     restart: unless-stopped

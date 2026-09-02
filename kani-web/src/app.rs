@@ -26,6 +26,7 @@ async fn serve_changelog() -> impl IntoResponse {
 pub async fn build_app(state: AppState) -> Router {
     let touch_state = state.clone();
     let idem_state = state.clone();
+    let csrf_state = state.clone();
     let session_store = SqliteStore::new(state.db.clone());
     session_store
         .migrate()
@@ -70,6 +71,12 @@ pub async fn build_app(state: AppState) -> Router {
             crate::session_touch::session_touch_middleware,
         ))
         .layer(auth_layer)
+        // Outside the session layer, so the response it inspects already carries
+        // any rotated session cookie.
+        .layer(axum::middleware::from_fn_with_state(
+            csrf_state,
+            crate::csrf::csrf_middleware,
+        ))
         .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             crate::middleware::trace_id::UuidRequestId,

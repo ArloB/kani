@@ -364,3 +364,63 @@ async fn storing_fresh_credentials_clears_the_reauth_flag() {
         "re-linking must clear the needs-reauth flag"
     );
 }
+
+/// A rejected link is only useful to the user if something tells them. The
+/// degradation is reconciled from the table on each sync pass, so it also has to
+/// clear itself once the link is restored.
+#[tokio::test]
+async fn rejected_credentials_raise_and_then_clear_a_degradation() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "reader").await;
+    let tid = tracker_id(&svc.db).await;
+    seed_credentials(&svc.db, user, tid, 3600).await;
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    svc.sync_stale_trackers(24, 10, std::time::Duration::ZERO, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        !svc.degradations
+            .list()
+            .iter()
+            .any(|d| d.id == kani_app::service::degradations::ids::TRACKER_CREDENTIALS),
+        "a healthy link must not be reported as degraded"
+    );
+
+    sqlx::query("UPDATE user_tracker_credentials SET needs_reauth = TRUE WHERE user_id = ?")
+        .bind(user.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.sync_stale_trackers(24, 10, std::time::Duration::ZERO, &cancel)
+        .await
+        .unwrap();
+
+    let raised = svc.degradations.list();
+    let entry = raised
+        .iter()
+        .find(|d| d.id == kani_app::service::degradations::ids::TRACKER_CREDENTIALS)
+        .expect("a rejected link must be reported");
+    assert!(
+        entry.remedy.to_lowercase().contains("re-link"),
+        "the remedy must tell the user what to do, got: {}",
+        entry.remedy
+    );
+
+    sqlx::query("UPDATE user_tracker_credentials SET needs_reauth = FALSE WHERE user_id = ?")
+        .bind(user.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.sync_stale_trackers(24, 10, std::time::Duration::ZERO, &cancel)
+        .await
+        .unwrap();
+
+    assert!(
+        !svc.degradations
+            .list()
+            .iter()
+            .any(|d| d.id == kani_app::service::degradations::ids::TRACKER_CREDENTIALS),
+        "re-linking must clear the entry, or it sticks until restart"
+    );
+}

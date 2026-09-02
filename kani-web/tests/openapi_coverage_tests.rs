@@ -9,15 +9,13 @@
 //! presence of an attribute: whatever `ApiDoc::openapi()` emits is what clients
 //! get.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+mod common;
+
+use common::routes::{Route, declared_routes, mentions_method, route_calls};
+use std::collections::BTreeSet;
 use utoipa::OpenApi;
 
 /// `(path, method)`, e.g. `("/rest/manga/{id}", "get")`.
-type Route = (String, String);
-
-const METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head", "options"];
-
 /// Routes the surface deliberately leaves out of the spec.
 ///
 /// Keep this short and justified — an entry here is a documented endpoint that
@@ -32,99 +30,11 @@ fn exempt(path: &str, _method: &str) -> Option<&'static str> {
     }
 }
 
-fn rest_sources() -> Vec<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/rest");
-    let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
-        .collect();
-    out.sort();
-    assert!(
-        out.len() > 15,
-        "expected the REST modules under {}, found {}",
-        dir.display(),
-        out.len()
-    );
-    out
-}
-
-/// Everything `.route("…", get(…).post(…))` mounts, prefixed with the `/rest`
-/// nest from `app.rs`.
-fn declared_routes() -> BTreeMap<Route, String> {
-    let mut out = BTreeMap::new();
-    for file in rest_sources() {
-        let src = std::fs::read_to_string(&file).unwrap();
-        let module = file.file_stem().unwrap().to_string_lossy().to_string();
-        for (path, chain) in route_calls(&src) {
-            for method in METHODS {
-                if mentions_method(&chain, method) {
-                    out.insert((format!("/rest{path}"), method.to_string()), module.clone());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The `("/path", <handler chain>)` pairs of every `.route(...)` call.
-fn route_calls(src: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let bytes = src.as_bytes();
-    let mut cursor = 0usize;
-    while let Some(rel) = src[cursor..].find(".route(") {
-        let open = cursor + rel + ".route(".len();
-        cursor = open;
-        let rest = src[open..].trim_start();
-        let Some(after_quote) = rest.strip_prefix('"') else {
-            continue;
-        };
-        let Some(end) = after_quote.find('"') else {
-            continue;
-        };
-        let path = &after_quote[..end];
-        // The handler chain runs from the comma to the `.route(`'s closing paren.
-        let mut depth = 1i32;
-        let mut i = open;
-        while i < bytes.len() && depth > 0 {
-            match bytes[i] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
-                _ => {}
-            }
-            i += 1;
-        }
-        let chain = &src[open..i.saturating_sub(1)];
-        let after_path = chain.find(',').map(|c| &chain[c..]).unwrap_or("");
-        out.push((path.to_string(), after_path.to_string()));
-    }
-    out
-}
-
-/// `get(...)` / `routing::get(...)`, but not `.get_ref(` or a word ending in it.
-fn mentions_method(chain: &str, method: &str) -> bool {
-    let mut cursor = 0usize;
-    while let Some(rel) = chain[cursor..].find(method) {
-        let at = cursor + rel;
-        cursor = at + method.len();
-        let before_ok = chain[..at]
-            .chars()
-            .next_back()
-            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
-        let after_ok = chain[cursor..].trim_start().starts_with('(');
-        if before_ok && after_ok {
-            return true;
-        }
-    }
-    false
-}
-
 /// What clients actually receive.
 fn documented_routes() -> BTreeSet<Route> {
     let doc = kani_web::openapi::ApiDoc::openapi();
     let mut out = BTreeSet::new();
-    for (path, item) in doc.paths.paths.iter() {
+    for (path, item) in &doc.paths.paths {
         for (method, present) in [
             ("get", item.get.is_some()),
             ("post", item.post.is_some()),
@@ -225,7 +135,7 @@ fn every_operation_is_tagged_with_a_declared_tag() {
     let declared: BTreeSet<String> = doc.tags.iter().flatten().map(|t| t.name.clone()).collect();
 
     let mut problems = Vec::new();
-    for (path, item) in doc.paths.paths.iter() {
+    for (path, item) in &doc.paths.paths {
         let operations = [
             ("get", &item.get),
             ("post", &item.post),
@@ -270,7 +180,7 @@ fn every_operation_is_tagged_with_a_declared_tag() {
 fn documented_operations() -> Vec<(String, String, Option<String>)> {
     let doc = kani_web::openapi::ApiDoc::openapi();
     let mut out = Vec::new();
-    for (path, item) in doc.paths.paths.iter() {
+    for (path, item) in &doc.paths.paths {
         let operations = [
             ("get", &item.get),
             ("post", &item.post),

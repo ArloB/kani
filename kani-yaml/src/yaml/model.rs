@@ -155,6 +155,8 @@ pub struct ValidatedEndpoint {
     pub script_name: Option<String>,
     /// Browser page-load timeout in milliseconds.
     pub timeout_ms: u32,
+    /// Whether browser capture periodically scrolls the page.
+    pub auto_scroll: bool,
 }
 
 pub struct ValidatedThenStep {

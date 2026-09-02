@@ -95,7 +95,7 @@ impl AppService {
         Ok((rows, has_next, total_pages))
     }
 
-    pub async fn prune_audit_log(&self) -> Result<u64> {
+    pub(crate) async fn prune_audit_log(&self) -> Result<u64> {
         let (retention_days, security_retention_days) = {
             let s = self.settings.read().await;
             let sec = if s.audit_security_retention_days > 0 {

@@ -44,7 +44,7 @@ fn recent_changelog(raw: &str, max_sections: usize) -> String {
     ),
     tag = "system"
 )]
-pub(crate) async fn system_changelog() -> impl IntoResponse {
+pub(super) async fn system_changelog() -> impl IntoResponse {
     let md = recent_changelog(CHANGELOG_MD, CHANGELOG_MAX_SECTIONS);
     Json(json!({
         "version": crate::KANI_VERSION,
@@ -96,7 +96,7 @@ mod tests {
     ),
     tag = "system"
 )]
-pub(crate) async fn system_info(State(state): State<AppState>) -> impl IntoResponse {
+pub(super) async fn system_info(State(state): State<AppState>) -> impl IntoResponse {
     let s = state.get_settings().await;
     Json(json!({
         "version": crate::KANI_VERSION,
@@ -116,7 +116,7 @@ pub(crate) async fn system_info(State(state): State<AppState>) -> impl IntoRespo
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn complete_first_run(
+pub(super) async fn complete_first_run(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
     auth: AuthSession,
@@ -138,7 +138,7 @@ pub(crate) async fn complete_first_run(
     security(("session" = [])),
     tag = "system"
 )]
-pub(crate) async fn system_update(
+pub(super) async fn system_update(
     _: AuthGuard<crate::permissions::guards::Authenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

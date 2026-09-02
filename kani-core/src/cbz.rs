@@ -36,7 +36,7 @@ fn sorted_image_names(archive: &mut zip::ZipArchive<std::fs::File>) -> Vec<Strin
 }
 
 /// Maps a lowercase file extension (without dot) to its image content type.
-pub fn content_type_for_ext(ext: &str) -> &'static str {
+pub(crate) fn content_type_for_ext(ext: &str) -> &'static str {
     match ext {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
@@ -147,7 +147,7 @@ pub fn read_cbz_page_transcoded(
 }
 
 /// Read the raw UTF-8 content of `ComicInfo.xml` from a CBZ archive, if present.
-pub fn read_cbz_comic_info(path: &Path) -> Option<String> {
+pub(crate) fn read_cbz_comic_info(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
     let mut entry = archive.by_name("ComicInfo.xml").ok()?;
@@ -181,7 +181,7 @@ const DIFF_THRESHOLD: f64 = 20.0;
 
 /// Returns 0-based indices that should be flagged `DoublePage=true` in `ComicInfo.xml`.
 /// Wide (w/h ≥ 1.2) images are flagged directly; portrait pairs are confirmed via pixel edge comparison.
-pub fn detect_spread_pages(page_paths: &[PathBuf]) -> HashSet<usize> {
+pub(crate) fn detect_spread_pages(page_paths: &[PathBuf]) -> HashSet<usize> {
     let mut double_pages = HashSet::new();
     let mut candidate: Option<(usize, PathBuf, u32, u32)> = None;
 

@@ -201,7 +201,7 @@ pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: MangaI
 }
 
 /// Read persisted (non-dismissed) duplicate pairs from the DB, joining manga details.
-pub async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair>> {
+pub(crate) async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair>> {
     struct PairRow {
         manga_a_id: MangaId,
         name_a: String,
@@ -270,7 +270,7 @@ pub async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair
 
 /// Mark a pair as dismissed. Canonical ordering is enforced so callers can pass
 /// the IDs in either order.
-pub async fn dismiss_duplicate_pair(
+pub(crate) async fn dismiss_duplicate_pair(
     pool: &SqlitePool,
     manga_id_x: MangaId,
     manga_id_y: MangaId,
@@ -392,7 +392,7 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
 }
 
 /// Merge two manga: keep `keep_id`, migrate tracking from `discard_id`, then delete discard.
-pub async fn merge_manga(pool: &SqlitePool, keep_id: i64, discard_id: i64) -> Result<()> {
+pub(crate) async fn merge_manga(pool: &SqlitePool, keep_id: i64, discard_id: i64) -> Result<()> {
     if keep_id == discard_id {
         return Err(ServiceError::Validation(
             "keep_id and discard_id must be different".into(),

@@ -5,12 +5,12 @@ use common::{insert_chapter, insert_manga, insert_source, start_mock_page_server
 use kani_app::jobs::BackgroundJob;
 use kani_app::jobs::JobId;
 use kani_app::jobs::audit_prune::AuditPruneJob;
-use kani_app::jobs::browser_reap::BrowserReapJob;
 use kani_app::jobs::download::MangaDownloadAllJob;
 use kani_app::jobs::import_dedup::ImportDedupJob;
 use kani_app::jobs::pending_delete_retry::PendingDeleteRetryJob;
 use kani_app::jobs::test_jobs::{FailingDownloadJob, SlowTestJob, TestJob};
 use kani_app::jobs::trash_purge::TrashPurgeJob;
+use kani_app::jobs::v8_reap::V8ReapJob;
 use kani_app::jobs::webhook_delivery::WebhookDeliveryJob;
 use kani_app::service::AppService;
 use kani_core::downloader::MockPageListFetcher;
@@ -434,9 +434,9 @@ async fn audit_prune_job_runs_to_completion() {
 }
 
 #[tokio::test]
-async fn browser_reap_job_runs_to_completion() {
+async fn v8_reap_job_runs_to_completion() {
     let svc = test_service().await;
-    let job_id = svc.job_manager.submit(BrowserReapJob::new()).await.unwrap();
+    let job_id = svc.job_manager.submit(V8ReapJob::new()).await.unwrap();
     assert_eq!(await_terminal(&svc, job_id).await, "completed");
 }
 

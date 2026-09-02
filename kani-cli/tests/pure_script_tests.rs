@@ -6,6 +6,17 @@ use kani_cli::{
 };
 use std::path::Path;
 
+fn errors_of(
+    result: Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_yaml::YamlError>>,
+) -> Vec<String> {
+    result
+        .err()
+        .expect("validation must reject this fixture")
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect()
+}
+
 fn validate_str(
     yaml: &str,
 ) -> Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_yaml::YamlError>> {
@@ -153,9 +164,14 @@ scripts:
     "": "fn foo(s) { s }"
 "#,
     );
+    // A fixture can fail validation for any reason, so the message has to name the
+    // rule under test — otherwise this passes when that rule is gone.
+    let messages = errors_of(result);
     assert!(
-        result.is_err(),
-        "empty pure script name must fail validation"
+        messages
+            .iter()
+            .any(|m| m.contains("scripts.pure: function name must not be empty")),
+        "the empty-name rule must be what rejects it, got: {messages:?}"
     );
 }
 
@@ -172,8 +188,11 @@ scripts:
     my_fn: ""
 "#,
     );
+    let messages = errors_of(result);
     assert!(
-        result.is_err(),
-        "empty pure script body must fail validation"
+        messages
+            .iter()
+            .any(|m| m.contains("script source must not be empty")),
+        "the empty-body rule must be what rejects it, got: {messages:?}"
     );
 }

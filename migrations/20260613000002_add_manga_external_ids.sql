@@ -1,2 +1,0 @@
-ALTER TABLE manga ADD COLUMN mal_id TEXT;
-ALTER TABLE manga ADD COLUMN anilist_id TEXT;

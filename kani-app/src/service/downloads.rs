@@ -23,7 +23,10 @@ impl AppService {
         self.enqueue_claimed_chapter(chapter_id).await
     }
 
-    pub async fn enqueue_claimed_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
+    pub(crate) async fn enqueue_claimed_chapter(
+        &self,
+        chapter_id: ChapterId,
+    ) -> Result<uuid::Uuid> {
         let result = async {
             let row = sqlx::query!(
                 "SELECT c.manga_id, m.source_id, m.name as manga_title \
@@ -254,7 +257,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn build_download_task(&self, chapter_id: ChapterId) -> Result<DownloadTask> {
+    pub(crate) async fn build_download_task(&self, chapter_id: ChapterId) -> Result<DownloadTask> {
         let record = sqlx::query!(
             "SELECT
                 c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,
@@ -490,7 +493,7 @@ impl AppService {
         Ok(items)
     }
 
-    pub async fn retry_pending_deletes(&self) -> Result<()> {
+    pub(crate) async fn retry_pending_deletes(&self) -> Result<()> {
         let pending = sqlx::query!(
             "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, \
              c.chapter_number, c.volume, c.file_path \

@@ -84,7 +84,7 @@ Validate examples rather than treating this page as a substitute for the parser.
 | `cache` | no | Named cache namespaces |
 | `chapter_sort` | no | Source-supported chapter ordering |
 | `factory` | no | Expand one template into several sources |
-| `browser_scripts` | no | JavaScript payload capture in Chromium |
+| `browser_scripts` | no | JavaScript payload capture in the solver's browser |
 | `scripts`, `pre_request`, `on_status` | no | Sandboxed Rhai logic |
 
 ## Metadata and rate limits
@@ -189,10 +189,12 @@ validates each expansion and emits one extension per source.
 
 ## Browser endpoints
 
-`via: browser_payload` loads `page_url` in Chromium and runs a named `browser_scripts` entry that
-must call `passPayload`. The interpreted YAML backend supports extracting the returned payload.
-Browser support must be present in the image and enabled at runtime. Prefer direct HTTP extraction
-when possible.
+`via: browser_payload` loads `page_url` in the solver's browser and runs a named `browser_scripts` entry in that
+page before its own scripts. The entry must call `passPayload`; long-running captures can call
+`resetPayloadTimer` after each unit of progress. When a Kani-compatible FlareSolverr is configured,
+managed challenges are solved and captured in its browser without transferring clearance to a
+second browser. The interpreted YAML backend supports extracting the returned payload. Browser
+support must be enabled at runtime. Prefer direct HTTP extraction when possible.
 
 ## Build and inspect
 
@@ -203,6 +205,11 @@ cargo run -p kani-cli -- build kani-my-source
 cargo run -p kani-cli -- repl inspect my-source.yaml
 cargo run -p kani-cli -- repl test my-source.yaml
 ```
+
+`repl test` and `repl replay` pick the HAR entry whose URL matches the endpoint's route. A HAR
+written by `repl record` holds a single entry, but one exported from a browser holds every request
+the page made, so an endpoint with no matching entry is an error rather than a guess. Pass
+`--url-contains <fragment>` when the route does not appear in the recorded URL.
 
 Use `kani-cli --help` and subcommand help for the current flags. Generated Rust is an artifact of
 the YAML definition; edit the YAML and regenerate rather than maintaining both by hand.

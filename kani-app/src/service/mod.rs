@@ -19,7 +19,7 @@ use crate::error::{Result, ServiceError};
 use crate::events::{AppEvent, RefreshProgressEvent};
 use crate::ids::MangaId;
 use crate::models::{DownloadRuleRow, Settings};
-use crate::utils::decode_manga_id;
+use kani_shared::decode_manga_id;
 use kani_shared::types::{
     ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList,
     MigrationPreview, MigrationResult, SearchScope, Source,
@@ -319,15 +319,14 @@ impl AppService {
         let degradation_registry = Arc::new(degradations::DegradationRegistry::new());
         let enc = load_or_provision_credential_cipher(data_dir, &degradation_registry);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based, scan_barren_page_tolerance, global_search_timeout_secs FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, v8_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, v8_max_memory_mb, v8_idle_timeout_s, update_check_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based, scan_barren_page_tolerance, global_search_timeout_secs FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
-        kani_core::v8_process::set_v8_debug_logging(settings.browser_debug_logging);
+        kani_core::v8_process::set_v8_debug_logging(settings.v8_debug_logging);
         kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {
-            max_memory_mb: settings.browser_max_memory_mb as u32,
-            max_instances: settings.browser_max_instances as u32,
-            idle_timeout_s: settings.browser_idle_timeout_s as u32,
+            max_memory_mb: settings.v8_max_memory_mb as u32,
+            idle_timeout_s: settings.v8_idle_timeout_s as u32,
         });
 
         // Decrypt email_provider_config so in-memory value is always plaintext.
@@ -837,7 +836,7 @@ impl AppService {
         job_registry.register::<crate::jobs::import_dedup::ImportDedupJob>();
         job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
-        job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        job_registry.register::<crate::jobs::v8_reap::V8ReapJob>();
         job_registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         job_registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
         job_registry.register::<crate::jobs::migration::MigrationJob>();
@@ -953,7 +952,7 @@ impl AppService {
             auto_download_category_ids: "[]".to_string(),
             default_tracking_enabled: false,
             http_request_logging: false,
-            browser_debug_logging: false,
+            v8_debug_logging: false,
             registration_enabled: true,
             cover_max_dimension: None,
             email_enabled: false,
@@ -998,9 +997,8 @@ impl AppService {
             upgrade_axis_bitrate: "gain".into(),
             upgrade_show_downgrades: false,
             upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
-            browser_max_memory_mb: 512,
-            browser_max_instances: 2,
-            browser_idle_timeout_s: 300,
+            v8_max_memory_mb: 512,
+            v8_idle_timeout_s: 300,
             update_check_enabled: true,
             opds_page_index_zero_based: false,
             scan_barren_page_tolerance: 3,
@@ -1050,7 +1048,7 @@ impl AppService {
         registry.register::<crate::jobs::storage::StorageMonitorJob>();
         registry.register::<crate::jobs::scrub::ScrubJob>();
         registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
-        registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        registry.register::<crate::jobs::v8_reap::V8ReapJob>();
         registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
 
@@ -1232,19 +1230,19 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn rebuild_email_service(&self) {
+    pub(crate) async fn rebuild_email_service(&self) {
         let settings = self.settings.read().await;
         let svc = email::EmailService::from_settings(&settings);
         *self.email_service.write().await = svc;
     }
 
     /// Returns a clone of the email service if email is enabled and configured.
-    pub async fn mailer(&self) -> Option<email::EmailService> {
+    pub(crate) async fn mailer(&self) -> Option<email::EmailService> {
         self.email_service.read().await.clone()
     }
 
     /// Spawns a background task to send an email. Logs errors but never fails the caller.
-    pub fn send_email_bg(&self, to: String, subject: String, html: String) {
+    pub(crate) fn send_email_bg(&self, to: String, subject: String, html: String) {
         let svc = self.email_service.clone();
         tokio::spawn(async move {
             let guard = svc.read().await;
@@ -1461,7 +1459,7 @@ impl AppService {
 
     /// Schedules a cover download retry for the given manga ID.
     /// Called from library operations when a cover download fails.
-    pub async fn schedule_cover_retry(&self, manga_id: MangaId) {
+    pub(crate) async fn schedule_cover_retry(&self, manga_id: MangaId) {
         self.cover_retry_queue.lock().await.insert(manga_id);
     }
 

@@ -61,7 +61,7 @@ pub(crate) fn check_tracker_response(
 /// Record that a tracker link can no longer authenticate, so the settings page
 /// can prompt the user to re-link. Best-effort: a failure here must not mask
 /// the original error.
-pub async fn mark_needs_reauth(db: &SqlitePool, user_id: UserId, tracker_id: i64) {
+pub(crate) async fn mark_needs_reauth(db: &SqlitePool, user_id: UserId, tracker_id: i64) {
     let _ = sqlx::query!(
         "UPDATE user_tracker_credentials SET needs_reauth = TRUE \
          WHERE user_id = ? AND tracker_id = ?",
@@ -250,7 +250,7 @@ impl TrackerRegistry {
 }
 
 /// Returns `(client_id, secret_is_configured)`. Never returns the secret value.
-pub async fn get_tracker_app_config(
+pub(crate) async fn get_tracker_app_config(
     db: &SqlitePool,
     tracker_id: i64,
 ) -> Result<Option<(String, bool)>> {
@@ -265,7 +265,7 @@ pub async fn get_tracker_app_config(
 
 /// Upsert tracker app config. Ensures the tracker row exists first.
 /// `client_secret` is encrypted before storage if a cipher is provided.
-pub async fn set_tracker_app_config(
+pub(crate) async fn set_tracker_app_config(
     db: &SqlitePool,
     tracker_id: i64,
     client_id: &str,
@@ -289,7 +289,7 @@ pub async fn set_tracker_app_config(
 }
 
 /// Delete tracker app config and all associated user credentials.
-pub async fn delete_tracker_app_config(db: &SqlitePool, tracker_id: i64) -> Result<()> {
+pub(crate) async fn delete_tracker_app_config(db: &SqlitePool, tracker_id: i64) -> Result<()> {
     sqlx::query!(
         "DELETE FROM tracker_app_config WHERE tracker_id = ?",
         tracker_id
@@ -468,7 +468,11 @@ pub async fn get_access_token(
         .map_err(|e| ServiceError::Internal(format!("Cannot decrypt access token: {e}")))
 }
 
-pub async fn delete_credentials(db: &SqlitePool, user_id: UserId, tracker_id: i64) -> Result<()> {
+pub(crate) async fn delete_credentials(
+    db: &SqlitePool,
+    user_id: UserId,
+    tracker_id: i64,
+) -> Result<()> {
     sqlx::query!(
         "DELETE FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
         user_id,
@@ -526,7 +530,7 @@ pub async fn get_mapping(
 }
 
 /// A mapping plus the last time it synced, for display.
-pub async fn get_mapping_row(
+pub(crate) async fn get_mapping_row(
     db: &SqlitePool,
     user_id: UserId,
     tracker_id: i64,
@@ -549,7 +553,10 @@ pub async fn get_mapping_row(
 /// Written by metadata enrichment and backfilled from the `anilist_id` /
 /// `mal_id` columns that `20260614000002` dropped. Nothing read them until the
 /// tracker panel began offering them as link suggestions.
-pub async fn get_external_ids(db: &SqlitePool, manga_id: MangaId) -> Result<Vec<(String, String)>> {
+pub(crate) async fn get_external_ids(
+    db: &SqlitePool,
+    manga_id: MangaId,
+) -> Result<Vec<(String, String)>> {
     let rows = sqlx::query!(
         "SELECT provider, external_id FROM manga_external_ids WHERE manga_id = ?",
         manga_id

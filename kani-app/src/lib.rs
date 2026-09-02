@@ -16,7 +16,6 @@ pub mod permissions;
 pub mod service;
 pub mod source;
 pub mod tuning;
-pub mod utils;
 
 pub use error::ServiceError;
 pub use models::{
