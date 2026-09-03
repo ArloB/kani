@@ -75,13 +75,16 @@ services:
       # KANI_DATA_DIR: "/data"
     restart: unless-stopped
 
-  # Runs capture scripts for browser sources. Bound to localhost because /v1
-  # executes caller-supplied JavaScript against named browser profiles; set
-  # API_KEY plus the matching KANI_SOLVER_SECRET if anything else can reach it.
+  # Runs capture scripts for browser sources. /v1 executes caller-supplied
+  # JavaScript against named browser profiles, so it isn't published to the
+  # host at all -- only the kani container can reach it, via the compose
+  # network's service DNS (http://solver:8191). Uncomment the ports: block
+  # below only to debug it directly from the host, and revert it after; set
+  # API_KEY plus the matching KANI_SOLVER_SECRET if anything else needs in.
   solver:
     image: ghcr.io/kani-app/flaresolverr:latest
-    ports:
-      - "127.0.0.1:8191:8191"
+    # ports:
+    #   - "127.0.0.1:8191:8191"
     environment:
       LOG_LEVEL: info
       # API_KEY: "change-me"
