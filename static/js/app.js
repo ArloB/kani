@@ -216,7 +216,7 @@ function _renderDesktopNav(el) {
   _updateDesktopActive(el, location.pathname);
 
   onNavigate(path => {
-    if (['/login', '/register', '/setup'].includes(path)) { _hideChrome(); return; }
+    if (['/login', '/register', '/setup', '/onboarding'].includes(path)) { _hideChrome(); return; }
     _showChrome();
     _updateDesktopActive(el, path);
   });
@@ -362,7 +362,7 @@ function _renderBottomNav(el) {
   _updateTabActive(el, location.pathname);
 
   onNavigate(path => {
-    if (['/login', '/register', '/setup'].includes(path)) { el.style.display = 'none'; return; }
+    if (['/login', '/register', '/setup', '/onboarding'].includes(path)) { el.style.display = 'none'; return; }
     el.style.display = '';
     _updateTabActive(el, path);
   });
