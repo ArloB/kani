@@ -68,6 +68,21 @@ fn stage_assets_for_embedding() {
         }
     }
 
+    // chart.umd.min.js is not an esbuild input like the rest of static/js/vendor
+    // (preact/htm/signals are consumed via --alias: and end up in js/dist) -- it
+    // loads as a plain <script src="/js/vendor/chart.umd.min.js"> for its UMD
+    // global, per stats.js, so it needs embedding on its own.
+    let chart_src = Path::new("../static/js/vendor/chart.umd.min.js");
+    if chart_src.is_file() {
+        let dest = out.join("js/vendor/chart.umd.min.js");
+        if let Some(parent) = dest.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::copy(chart_src, &dest) {
+            println!("cargo:warning=cannot stage {}: {e}", chart_src.display());
+        }
+    }
+
     for name in [
         "index.prod.html",
         "manifest.webmanifest",

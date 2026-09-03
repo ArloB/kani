@@ -400,6 +400,7 @@ export async function uploadWasm(id, file) {
   const res = await fetch(`/rest/sources/${id}/wasm`, {
     method: 'POST',
     credentials: 'include',
+    headers: { 'X-CSRF-Token': _csrfToken() },
     body,
   });
   if (res.status === 401) {
@@ -781,7 +782,7 @@ export async function updateLocalMetadata(id, data) {
 export async function uploadMangaCover(id, file) {
   const body = new FormData();
   body.append('file', file);
-  const res = await fetch(`/rest/manga/${id}/cover`, { method: 'POST', credentials: 'include', body });
+  const res = await fetch(`/rest/manga/${id}/cover`, { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': _csrfToken() }, body });
   if (res.status === 401) {
     if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
@@ -1256,7 +1257,7 @@ export function downloadBackup(includeChapterProgress = false) {
 export async function previewTachiyomiImport(file) {
   const body = new FormData();
   body.append('file', file);
-  const res = await fetch('/rest/library/import/tachiyomi/preview', { method: 'POST', credentials: 'include', body });
+  const res = await fetch('/rest/library/import/tachiyomi/preview', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': _csrfToken() }, body });
   if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
 }
@@ -1270,7 +1271,7 @@ export async function importTachiyomiBackup(file, opts = {}) {
   const body = new FormData();
   body.append('file', file);
   for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
-  const res = await fetch('/rest/library/import/tachiyomi', { method: 'POST', credentials: 'include', body });
+  const res = await fetch('/rest/library/import/tachiyomi', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': _csrfToken() }, body });
   if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
 }
@@ -1781,7 +1782,7 @@ export async function previewBackupEncrypted(file, passphrase = '') {
   const body = new FormData();
   body.append('file', file);
   if (passphrase) body.append('passphrase', passphrase);
-  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', body });
+  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': _csrfToken() }, body });
   if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
 }
@@ -1798,7 +1799,7 @@ export async function restoreBackupEncrypted(file, opts = {}, passphrase = '') {
   body.append('file', file);
   for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
   if (passphrase) body.append('passphrase', passphrase);
-  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', body });
+  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': _csrfToken() }, body });
   if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
 }
