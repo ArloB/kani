@@ -123,10 +123,21 @@ export async function init(container) {
         btn.disabled = false;
       }
     });
-    const skip = document.createElement('a');
-    skip.href = '/sources';
+    const skip = document.createElement('button');
+    skip.type = 'button';
     skip.className = 'btn-ghost self-center text-sm';
     skip.textContent = t('onboarding.browse_sources');
+    skip.addEventListener('click', async () => {
+      skip.disabled = true;
+      try {
+        await api.markFirstRunComplete();
+        consumeIntendedDestination();
+        navigate('/sources');
+      } catch (e) {
+        showApiError(e);
+        skip.disabled = false;
+      }
+    });
     row.append(btn, skip);
     el.append(heading, desc, row);
     return el;
