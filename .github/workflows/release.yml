@@ -92,8 +92,12 @@ jobs:
         uses: "actions/setup-node@v4"
         with:
           "node-version": "22"
+      # Built with the same profile, target and RUSTFLAGS as `dist build`, so dist reuses this compile
+      # instead of repeating it. A `--release` build here shared nothing and cost 9-17 minutes per runner.
       - name: "Fetch JS vendors and CSS toolchain"
-        run: "cargo run --release -p kani-cli -- setup"
+        env:
+          "RUSTFLAGS": "${{ runner.os == 'Windows' && '-Ctarget-feature=+crt-static' || '' }}"
+        run: "cargo run --profile dist --target ${{ join(matrix.targets, '') }} -p kani-cli -- setup"
       - uses: swatinem/rust-cache@v2
         with:
           key: ${{ join(matrix.targets, '-') }}
