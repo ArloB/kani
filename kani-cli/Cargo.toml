@@ -44,3 +44,7 @@ regex     = "1"
 resvg     = "0.44"
 tiny-skia = "0.11"
 zip = "7"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]

@@ -41,6 +41,7 @@ jobs:
               - '**/Cargo.toml'
               - 'Cargo.lock'
               - '.cargo/**'
+              - '.config/hakari.toml'
               - 'kani-core/wit/**'
               - '.github/workflows/ci.yml'
             js:
@@ -96,6 +97,15 @@ jobs:
 
       - name: Unused dependencies
         uses: bnjbvr/cargo-machete@main
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
+
+      - name: Workspace-hack is current
+        run: |
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run
 
       - name: Restore asset toolchain
         uses: actions/cache/restore@v6

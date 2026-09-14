@@ -74,6 +74,7 @@ regex = "1.12.3"
 rand = "0.10.0"
 blake3 = "1.8.5"
 stacker = "0.1"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 
 [dev-dependencies]
@@ -88,3 +89,6 @@ wiremock = "0.6"
 [[bench]]
 name = "blueprint_eval"
 harness = false
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]

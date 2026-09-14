@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-yaml", "kani-shared-test", "kani-lease"]
+members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-yaml", "kani-shared-test", "kani-lease", "workspace-hack"]
 default-members = ["kani-core", "kani-shared", "kani-app", "kani-web", "kani-cli", "kani-yaml", "kani-lease"]
 
 [profile.dev]

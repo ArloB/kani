@@ -68,6 +68,7 @@ metrics = "0.24"
 # how the embed reads the assets build.rs stages rather than the source tree.
 rust-embed = { version = "8.12.0", features = ["mime-guess", "interpolate-folder-path"] }
 mime_guess = "2.0.5"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
@@ -81,3 +82,6 @@ moka = { workspace = true }
 async-trait = "0.1"
 ed25519-dalek.workspace = true
 rand = "0.10"
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]

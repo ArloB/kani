@@ -11,8 +11,7 @@
   uses: actions/setup-node@v4
   with:
     node-version: "22"
-# Built with the same profile, target and RUSTFLAGS as `dist build`, so dist reuses this compile
-# instead of repeating it. A `--release` build here shared nothing and cost 9-17 minutes per runner.
+# Must match `dist build`'s profile, target and RUSTFLAGS; see the constraints register.
 - name: Fetch JS vendors and CSS toolchain
   env:
     RUSTFLAGS: ${{ runner.os == 'Windows' && '-Ctarget-feature=+crt-static' || '' }}
