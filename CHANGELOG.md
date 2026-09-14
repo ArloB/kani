@@ -20,9 +20,12 @@ Kani uses [Semantic Versioning](https://semver.org/).
   small and grainy on high-density screens.
 - A tile size setting for the library, source browse and search rails. Grids on larger screens
   fit whole tiles to the window instead of scrolling the page.
-- Imported Tachiyomi and Mihon manga whose ids a source cannot address are repaired in the
-  background. Library cards and the manga page show that a title is waiting for repair, and a title
-  that cannot be repaired offers a migrate action.
+- Imported Tachiyomi and Mihon manga whose ids a source cannot address are repaired by a
+  background queue. Library cards and the manga page show that a title is waiting, and a title
+  that cannot be repaired explains why and offers a migrate action.
+- Library search shows which field a result matched on when it was not the title.
+- Library cards show the orphaned badge.
+- A manga's refresh action has its own row on the manga page instead of sitting in a dialogue.
 - Chapter lists show page numbers for sources that return the whole list at once, and for MangaDex
   (extension 0.1.1).
 - `kani-cli repl request` prints the request an endpoint would send — route, filter defaults,
@@ -39,11 +42,19 @@ Kani uses [Semantic Versioning](https://semver.org/).
   each write to the session table.
 - Phones always use infinite scroll for the library, source browse and chapter lists, and the
   Pagination settings are hidden there.
+- Global search keeps every source's rail the same height, including sources that found nothing,
+  places the scrollbar under the covers, and no longer scrolls the whole page sideways. A source
+  that timed out says so and offers a retry instead of reporting no matches.
 - The sources page and a source's page share one header.
 - Loading more titles in a source list shows placeholder cards inside the grid.
+- Page transitions fade faster.
+- Scheduled backups default to a `backups` directory next to the database.
 - Tachiyomi and Mihon imports match sources by the source list the backup itself carries, as well
-  as by declared Mihon ids.
+  as by declared Mihon ids. Importing chapter progress now overwrites existing progress, and
+  progress for a manga whose chapters are not listed yet is applied once they are.
 - Duplicate warnings no longer flag a numbered sequel as a duplicate of the original series.
+- The bundled solver's port is no longer published to the host in `docker-compose.yml`; only the
+  Kani container can reach it.
 
 ### Fixed
 
@@ -51,13 +62,24 @@ Kani uses [Semantic Versioning](https://semver.org/).
   page was refreshed.
 - Importing a backup that names a manga already in the trash reported it as imported even though
   it stayed hidden. The import now reports it separately and leaves the trash untouched.
+- Uploading an extension or a cover, previewing or importing a Tachiyomi backup, and previewing or
+  restoring a Kani backup were rejected by CSRF protection.
+- Statistics charts did not load in release builds.
+- Onboarding showed the sidebar and bottom navigation, and finishing it through "browse sources"
+  did not mark first-run setup complete.
+- Some dropdowns, including the library filters and display menus and the jobs filter, did not
+  open in production builds.
+- A source installed from a repository, or a change to a source's preferences, did not appear
+  until the page was reloaded.
+- Source health counted configuration reads as source calls, so error counts were misleading.
+- Browser-backed sources returned their own page size instead of the number of titles requested.
+- Paginated YAML sources showed a single page because their total page count was dropped.
 - Chapter selection could be opened by long-pressing a chapter of a manga not in the library.
+- Holding a chapter row left a focus ring stuck on the first row.
 - In infinite scroll, the library's category tabs collapsed under the filter bar; long category
   names also wrapped instead of scrolling.
 - The library grid ran off the side of the screen on phones.
-- Paginated YAML sources showed a single page because their total page count was dropped.
-- Some dropdowns, including the library filters and display menus and the jobs filter, did not
-  open in production builds.
+- The continue-reading shelf query was slow on large libraries.
 - The migration dialogue always reported zero chapters migrated, and reported failure to a user
   without job administration rights even when the migration succeeded.
 - Four-digit page numbers overflowed their pagination buttons.
