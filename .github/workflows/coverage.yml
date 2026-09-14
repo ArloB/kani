@@ -49,7 +49,7 @@ jobs:
           tool: wasm-tools, wasm-opt, nextest
 
       - name: Cache kani-cli binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: kani-cli-cache
         with:
           path: target/release/kani-cli
@@ -60,7 +60,7 @@ jobs:
         run: cargo build --release -p kani-cli
 
       - name: Cache WASM extensions
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: wasm-cache
         with:
           path: wasm_sources/
