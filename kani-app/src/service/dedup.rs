@@ -28,6 +28,35 @@ pub struct MangaSummary {
     pub local_cover_path: Option<String>,
 }
 
+/// Indexes this source's library by normalised title.
+///
+/// A backup entry's stored id stops addressing its row once the resolve job
+/// rewrites `source_manga_id`, and a manga added by browsing never carried that
+/// id at all, so the title is what is left to match on.
+///
+/// Built once per source rather than per entry: a miss is the common case on a
+/// first import, and querying per entry makes that quadratic.
+pub(crate) async fn source_title_index(
+    db: &SqlitePool,
+    source_id: i64,
+) -> Result<std::collections::HashMap<String, Vec<i64>>> {
+    let rows = sqlx::query!(
+        "SELECT id, name FROM manga WHERE source_id = ? AND deleted_at IS NULL",
+        source_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut index: std::collections::HashMap<String, Vec<i64>> = Default::default();
+    for row in rows {
+        let key = normalise_title(&row.name);
+        if !key.is_empty() {
+            index.entry(key).or_default().push(row.id);
+        }
+    }
+    Ok(index)
+}
+
 pub fn normalise_title(title: &str) -> String {
     let lower = title.to_lowercase();
     let stripped = lower
@@ -55,6 +84,82 @@ pub fn normalise_title(title: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+pub(crate) const DUPLICATE_THRESHOLD: f64 = 0.85;
+
+const DIFFERENT_NUMBERS_CAP: f64 = 0.5;
+const MAX_SEQUEL_NUMBER: u32 = 20;
+
+fn is_year(token: &str) -> bool {
+    token.len() == 4
+        && token
+            .parse::<u32>()
+            .is_ok_and(|y| (1900..=2099).contains(&y))
+}
+
+fn is_number(token: &str) -> bool {
+    !token.is_empty() && token.chars().all(|c| c.is_ascii_digit())
+}
+
+fn ends_in_sequel_number(tokens: &[&str]) -> bool {
+    tokens
+        .last()
+        .is_some_and(|t| is_number(t) && t.parse::<u32>().is_ok_and(|n| n <= MAX_SEQUEL_NUMBER))
+}
+
+fn years<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
+    tokens.iter().copied().filter(|t| is_year(t)).collect()
+}
+
+fn undated<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
+    tokens.iter().copied().filter(|t| !is_year(t)).collect()
+}
+
+fn plain_numbers<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
+    tokens
+        .iter()
+        .copied()
+        .filter(|t| is_number(t) && !is_year(t))
+        .collect()
+}
+
+fn numbers_conflict(a: &[&str], b: &[&str]) -> bool {
+    let (years_a, years_b) = (years(a), years(b));
+    if !years_a.is_empty() && !years_b.is_empty() && years_a != years_b {
+        return true;
+    }
+    let (numbers_a, numbers_b) = (plain_numbers(a), plain_numbers(b));
+    match (numbers_a.is_empty(), numbers_b.is_empty()) {
+        (false, false) => numbers_a != numbers_b,
+        (true, false) => ends_in_sequel_number(&undated(b)),
+        (false, true) => ends_in_sequel_number(&undated(a)),
+        (true, true) => false,
+    }
+}
+
+fn score_titles(a: &str, b: &str, metric: fn(&str, &str) -> f64) -> f64 {
+    let (a, b) = (normalise_title(a), normalise_title(b));
+    let a_tokens: Vec<&str> = a.split_whitespace().collect();
+    let b_tokens: Vec<&str> = b.split_whitespace().collect();
+    let (a_text, b_text) = (undated(&a_tokens).join(" "), undated(&b_tokens).join(" "));
+    if a_text.is_empty() || b_text.is_empty() {
+        return 0.0;
+    }
+    let score = metric(&a_text, &b_text);
+    if numbers_conflict(&a_tokens, &b_tokens) {
+        score.min(DIFFERENT_NUMBERS_CAP)
+    } else {
+        score
+    }
+}
+
+pub(crate) fn duplicate_title_score(a: &str, b: &str) -> f64 {
+    score_titles(a, b, strsim::jaro_winkler)
+}
+
+pub fn title_similarity(a: &str, b: &str) -> f64 {
+    score_titles(a, b, strsim::normalized_levenshtein)
 }
 
 /// Returns manga in the library that are similar to `title`/`authors`.
@@ -110,8 +215,8 @@ pub async fn find_similar_manga(
     let mut hits = Vec::new();
 
     for c in candidates {
-        let sim = strsim::jaro_winkler(&norm, &normalise_title(&c.name));
-        if sim >= 0.85 {
+        let sim = duplicate_title_score(title, &c.name);
+        if sim >= DUPLICATE_THRESHOLD {
             let author_match = if !authors.is_empty() {
                 let db_authors: Vec<String> = sqlx::query_scalar!(
                     "SELECT p.name FROM manga_people mp \
@@ -340,8 +445,8 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
             if seen.contains(&key) {
                 continue;
             }
-            let sim = strsim::jaro_winkler(&norm_a, &normalise_title(&b.name));
-            if sim < 0.85 {
+            let sim = duplicate_title_score(&a.name, &b.name);
+            if sim < DUPLICATE_THRESHOLD {
                 continue;
             }
             seen.insert(key);
@@ -510,6 +615,36 @@ impl super::AppService {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::normalise_title;
+
+    #[test]
+    fn a_numbered_sequel_is_not_flagged_as_a_duplicate() {
+        use super::{DUPLICATE_THRESHOLD, duplicate_title_score};
+        for (a, b) in [
+            ("Solo Leveling", "Solo Leveling 2"),
+            ("Kaiju No. 8", "Kaiju No. 9"),
+            ("Hellsing (1997)", "Hellsing (2006)"),
+        ] {
+            let score = duplicate_title_score(a, b);
+            assert!(score < DUPLICATE_THRESHOLD, "{a:?} vs {b:?} scored {score}");
+        }
+    }
+
+    #[test]
+    fn a_shortened_title_is_still_a_possible_duplicate() {
+        use super::{DUPLICATE_THRESHOLD, duplicate_title_score};
+        for (a, b) in [
+            ("Omniscient Reader's Viewpoint", "Omniscient Reader"),
+            ("Kaiju No. 8", "Kaiju No 8"),
+            ("The Promised Neverland (2019)", "The Promised Neverland"),
+            ("Mob Psycho 100", "Mob Psycho 100 (2012)"),
+        ] {
+            let score = duplicate_title_score(a, b);
+            assert!(
+                score >= DUPLICATE_THRESHOLD,
+                "{a:?} vs {b:?} scored {score}"
+            );
+        }
+    }
 
     #[test]
     fn strips_leading_the() {

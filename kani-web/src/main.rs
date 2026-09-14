@@ -372,6 +372,12 @@ async fn main() {
     }
     kani_app::jobs::recurring::spawn_recurring_scheduler(&state);
 
+    if state.service.pending_import_link_count().await > 0
+        && let Err(e) = state.service.queue_import_resolve(None).await
+    {
+        tracing::warn!("Failed to submit startup import relink sweep: {e}");
+    }
+
     let dev_build = cfg!(debug_assertions);
     let env_u64 = |name: &str, default: u64| -> u64 {
         std::env::var(name)

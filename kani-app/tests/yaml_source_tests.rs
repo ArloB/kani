@@ -878,6 +878,188 @@ endpoints:
 }
 
 #[tokio::test]
+async fn reload_source_rereads_a_yaml_extension_from_disk() {
+    let html_v1: &'static str = r#"<html><body>
+        <div class="item" data-id="m-1"><span class="title">Before Reload</span></div>
+    </body></html>"#;
+    let port = start_html_server(html_v1).await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let svc = test_service().await;
+    let storage_path = svc.settings.read().await.wasm_storage_path.clone();
+
+    let yaml_v1 = format!(
+        r#"id: reload-test-source
+name: reload-test-source
+version: "1.0.0"
+base_url: "{base_url}"
+language: en
+requires_capabilities:
+  - unrestricted_http
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".title").text()'
+"#
+    );
+    std::fs::write(storage_path.join("reload-test-source.yaml"), &yaml_v1).unwrap();
+
+    let source_id = common::insert_source(&svc.db, "reload-test-source").await;
+    svc.sources.insert(
+        source_id,
+        SourceBackend::Yaml(Box::new(YamlSource::new(
+            Arc::new(kani_yaml::parse_and_validate(&yaml_v1, std::path::Path::new("x")).unwrap()),
+            svc.smart_client.clone(),
+            svc.ext_cache.clone(),
+            "reload-test-source:".to_string(),
+            HashMap::new(),
+            false,
+        ))),
+    );
+
+    let yaml_v2 = yaml_v1.replace("1.0.0", "2.0.0");
+    std::fs::write(storage_path.join("reload-test-source.yaml"), &yaml_v2).unwrap();
+
+    svc.reload_source(source_id).await.unwrap();
+
+    let version: String = sqlx::query_scalar("SELECT version FROM sources WHERE id = ?")
+        .bind(source_id)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(version, "2.0.0", "reload must persist the re-read version");
+
+    let backend = svc.sources.get_backend(source_id).unwrap();
+    assert!(
+        backend.is_yaml(),
+        "reload must not turn a YAML source into a WASM one"
+    );
+    let result = backend.get_popular_manga(1, 20, &[]).await.unwrap();
+    assert_eq!(
+        result.manga[0].title, "Before Reload",
+        "swapped-in backend must serve live requests, not stale cached data"
+    );
+}
+
+#[tokio::test]
+async fn app_service_manga_and_chapter_endpoints_accept_base64_composite_ids_verbatim() {
+    let html: &'static str = r#"<html><body>
+        <div class="item" data-hid="h1" data-slug="some-title-slug"><span class="title">Some Title</span></div>
+        <div class="chapter" data-chid="c1" data-chslug="chapter-1-slug" data-number="1"></div>
+        <div class="page" data-url="http://example.com/p1.jpg"></div>
+    </body></html>"#;
+    let port = start_html_server(html).await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let yaml = format!(
+        r#"id: repro-source
+name: repro-source
+version: "1.0.0"
+base_url: "{base_url}"
+language: en
+requires_capabilities:
+  - unrestricted_http
+get_url: "/title/$manga.slug$"
+id_encoding:
+  manga:
+    fields: [hid, slug]
+    delimiter: "|"
+    encoding: base64_url
+  chapter:
+    fields: [id, slug]
+    delimiter: "|"
+    encoding: base64_url
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id:
+        hid: 'self.attr("data-hid")'
+        slug: 'self.attr("data-slug")'
+      title: 'self.first(".title").text()'
+  manga_details:
+    route: /title/$manga.slug$
+    container: ":root"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.first(".title").text()'
+      status: '"unknown"'
+  chapter_list:
+    route: /title/$manga.slug$
+    container: ".chapter"
+    fields:
+      id:
+        id: 'self.attr("data-chid")'
+        slug: 'self.attr("data-chslug")'
+      number: "1.0"
+      language: '"en"'
+  pages:
+    route: /title/$manga.slug$/$chapter.slug$
+    container: ".page"
+    fields:
+      index: "index()"
+      url: 'self.attr("data-url")'
+"#
+    );
+
+    let svc = test_service().await;
+    let source_id = svc.install_yaml_source(yaml.as_bytes()).await.unwrap();
+
+    let popular_json = svc.get_popular_manga(source_id, 1, 20, None).await.unwrap();
+    let popular: serde_json::Value = serde_json::from_str(&popular_json).unwrap();
+    // This is the exact id a client round-trips through every .../{manga_id} route —
+    // the extension's own base64url composite, not something the host wraps further.
+    let manga_id = popular["manga"][0]["id"].as_str().unwrap().to_string();
+
+    let details = svc.get_manga_details(source_id, &manga_id).await;
+    assert!(
+        details.is_ok(),
+        "get_manga_details must accept the id verbatim, got {:?}",
+        details.err()
+    );
+
+    let url = svc.get_source_url(source_id, &manga_id).await;
+    assert!(
+        url.is_ok(),
+        "get_source_url must accept the id verbatim, got {:?}",
+        url.err()
+    );
+
+    let chapters_json = svc
+        .get_chapter_list_paged(source_id, &manga_id, 1, 20, None)
+        .await;
+    assert!(
+        chapters_json.is_ok(),
+        "get_chapter_list_paged must accept the manga id verbatim, got {:?}",
+        chapters_json.err()
+    );
+    let chapters: serde_json::Value = serde_json::from_str(&chapters_json.unwrap()).unwrap();
+    let chapter_id = chapters["chapters"][0]["id"].as_str().unwrap().to_string();
+
+    let pages = svc.get_pages(source_id, &manga_id, &chapter_id).await;
+    assert!(
+        pages.is_ok(),
+        "get_pages must accept both composite ids verbatim, got {:?}",
+        pages.err()
+    );
+
+    let saved = svc
+        .save_to_library(source_id, &manga_id, false)
+        .await
+        .unwrap();
+    let found = svc.check_in_library(source_id, &manga_id).await.unwrap();
+    assert_eq!(
+        found,
+        Some(saved.0),
+        "check_in_library must find a manga saved under the same composite id verbatim"
+    );
+}
+
+#[tokio::test]
 async fn browser_payload_endpoint_returns_clear_error() {
     use kani_yaml::yaml::schema::EndpointVia;
 

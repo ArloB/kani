@@ -22,6 +22,9 @@ pub struct RequestCache {
     pages: Cache<(i64, String, String), String>,
     search_results: Cache<(i64, String, i32, i32, String), String>,
     pub preference_schema: DashMap<i64, Vec<kani_core::PreferenceSpec>>,
+    /// Filter defaults an extension declares, by source. Fixed until the
+    /// extension is replaced, and consulted on every browse.
+    filter_defaults: DashMap<i64, Vec<kani_shared::types::ActiveFilter>>,
     /// Reading stats keyed by (user_id, period_days). 10-minute TTL.
     pub stats: Cache<(i64, i32), Arc<ReadingStats>>,
     /// CBZ page-index lists keyed by (chapter_id, file_mtime_unix). A changed file
@@ -79,6 +82,7 @@ impl RequestCache {
                 .support_invalidation_closures()
                 .build(),
             preference_schema: DashMap::new(),
+            filter_defaults: DashMap::new(),
             stats: Cache::builder()
                 .max_capacity(500)
                 .time_to_live(Duration::from_secs(10 * 60))
@@ -214,6 +218,25 @@ impl RequestCache {
         schema: Vec<kani_core::PreferenceSpec>,
     ) {
         self.preference_schema.insert(source_id, schema);
+        // A replaced extension can declare different defaults.
+        self.filter_defaults.remove(&source_id);
+    }
+
+    pub(crate) fn get_filter_defaults(
+        &self,
+        source_id: i64,
+    ) -> Option<Vec<kani_shared::types::ActiveFilter>> {
+        self.filter_defaults
+            .get(&source_id)
+            .map(|r| r.value().clone())
+    }
+
+    pub(crate) fn insert_filter_defaults(
+        &self,
+        source_id: i64,
+        defaults: Vec<kani_shared::types::ActiveFilter>,
+    ) {
+        self.filter_defaults.insert(source_id, defaults);
     }
 
     pub(crate) async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {

@@ -12,6 +12,7 @@ import { deferredSkeleton } from '../../utils.js';
 import { iconLock } from '../../icons.js';
 import { t } from '../../i18n.js';
 import { buildSettingsSearchIndex } from '../../settings-search-index.js';
+import { isPhoneLayout, PAGINATION_SETTINGS_PREFIX } from '../../pagination-mode.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { EmptyState } from '../../components/empty-state.js';
 import { RestartTray } from '../../components/restart-tray.js';
@@ -171,7 +172,7 @@ function highlightMatches(root, q, single) {
 function SettingsPage({ settings, categories, bootId }) {
   const allSections = useMemo(() => buildSections(settings, categories, bootId), [settings, categories, bootId]);
   const sections = useMemo(() => allSections.filter((s) => !s.perm || hasPermission(s.perm)), [allSections]);
-  const searchIndex = useMemo(() => buildSettingsSearchIndex(sections), [sections]);
+  const searchIndex = useMemo(() => buildSettingsSearchIndex(sections, { exclude: isPhoneLayout() ? [PAGINATION_SETTINGS_PREFIX] : [] }), [sections]);
 
   const initialFromUrl = () => {
     const p = new URLSearchParams(location.search);

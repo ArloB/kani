@@ -91,8 +91,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   const [tagsStatus, setTagsStatus] = useState(/** @type {string|null} */(null));
 
   const canRefresh = hasPermission('library:refresh');
-  const [redownloadCover, setRedownloadCover] = useState(() => getLocal('kani.refreshOpts.cover') !== 'false');
-  const [refreshStatus, setRefreshStatus] = useState(/** @type {string|null} */(null));
   const [pulling, setPulling] = useState(/** @type {string|null} */(null));
 
   /** @param {(v: string|null) => void} setter @param {string|null} v */
@@ -245,40 +243,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   }
 
 
-  async function handleRefreshAll() {
-    flash(setRefreshStatus, 'refreshing');
-    const fields = redownloadCover ? undefined : ['title', 'description', 'status', 'people', 'tags'];
-    try {
-      const { job_id } = await api.refreshManga(dbId, { fields, fetch_chapters: false });
-      if (job_id) {
-        subscribeJob(job_id, {
-          onComplete: async () => {
-            const fresh = await api.getMangaDetails(dbId);
-            onFieldSaved(fresh);
-            if (!hasLocalPeople) {
-              setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
-              setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
-            }
-            if (!hasLocalTags) {
-              setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
-            }
-            setCoverTs(Date.now());
-            flash(setRefreshStatus, 'saved');
-          },
-          onFailed: (data) => {
-            flash(setRefreshStatus, 'error');
-            showApiError({ message: data?.message ?? t('manga.meta.refresh_failed') });
-          },
-        });
-      } else {
-        flash(setRefreshStatus, 'error');
-      }
-    } catch (e) {
-      flash(setRefreshStatus, 'error');
-      showApiError(e);
-    }
-  }
-
   /** @param {string} fieldName */
   async function handlePullField(fieldName) {
     setPulling(fieldName);
@@ -328,7 +292,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   const titleOverridden = d.local_name != null || !!localName;
   const descOverridden = d.local_description != null || !!localDesc;
   const statusOverridden = localStatus !== '';
-  const isRefreshing = refreshStatus === 'refreshing';
 
   const srcStatusLabel = STATUS_OPTIONS().find(o => String(o.value) === String(d.source_status))?.label;
 
@@ -341,35 +304,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     <${Modal} open=${true} onClose=${onClose} title=${t('manga.meta.title')} wide=${true}
       footer=${html`<button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.close')}</button>`}
     >
-      ${canRefresh && html`
-        <div class="border-b border-border pb-4 mb-2">
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-text">${t('manga.meta.refresh_source')}</span>
-            <div class="flex items-center gap-3">
-              <${SaveStatus} status=${isRefreshing ? null : refreshStatus} />
-              <label class="flex items-center gap-1.5 cursor-pointer select-none text-xs text-text-muted">
-                <input type="checkbox" class="accent-accent" checked=${redownloadCover}
-                  onChange=${(/** @type {Event} */e) => {
-                    const v = /** @type {HTMLInputElement} */(e.target).checked;
-                    setRedownloadCover(v);
-                    setLocal('kani.refreshOpts.cover', String(v));
-                  }} />
-                ${t('manga.meta.redownload_cover')}
-              </label>
-              <button type="button"
-                class="btn-ghost btn-sm flex items-center gap-1"
-                disabled=${!!pulling || isRefreshing}
-                title=${t('manga.meta.refresh_tip')}
-                onClick=${handleRefreshAll}>
-                <span class=${'icon-xs' + (isRefreshing ? ' icon-spin' : '')}
-                  dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
-                ${isRefreshing ? t('manga.meta.refreshing') : t('manga.meta.refresh')}
-              </button>
-            </div>
-          </div>
-        </div>
-      `}
-
       <!-- Two columns at wide: the cover and status sit beside the text fields,
            which are what actually need the width. -->
       <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
@@ -635,6 +569,70 @@ let _liveData = null;
 
 
 /**
+ * @param {{ dbId: number, onRefreshed: (fresh: any) => void }} props
+ */
+function RefreshRow({ dbId, onRefreshed }) {
+  const [redownloadCover, setRedownloadCover] = useState(() => getLocal('kani.refreshOpts.cover') !== 'false');
+  const [status, setStatus] = useState(/** @type {string|null} */(null));
+  const isRefreshing = status === 'refreshing';
+
+  /** @param {string|null} v */
+  function flash(v) {
+    setStatus(v);
+    setTimeout(() => setStatus(null), 2500);
+  }
+
+  async function handleRefresh() {
+    flash('refreshing');
+    const fields = redownloadCover ? undefined : ['title', 'description', 'status', 'people', 'tags'];
+    try {
+      const { job_id } = await api.refreshManga(dbId, { fields, fetch_chapters: false });
+      if (!job_id) {
+        flash('error');
+        return;
+      }
+      subscribeJob(job_id, {
+        onComplete: async () => {
+          const fresh = await api.getMangaDetails(dbId);
+          onRefreshed(fresh);
+          flash('saved');
+        },
+        onFailed: (/** @type {any} */ data) => {
+          flash('error');
+          showApiError({ message: data?.message ?? t('manga.meta.refresh_failed') });
+        },
+      });
+    } catch (e) {
+      flash('error');
+      showApiError(e);
+    }
+  }
+
+  return html`
+    <div class="flex items-center gap-3">
+      <${SaveStatus} status=${isRefreshing ? null : status} />
+      <label class="flex items-center gap-1.5 cursor-pointer select-none text-xs text-text-muted">
+        <input type="checkbox" class="accent-accent" checked=${redownloadCover}
+          onChange=${(/** @type {Event} */e) => {
+            const v = /** @type {HTMLInputElement} */(e.target).checked;
+            setRedownloadCover(v);
+            setLocal('kani.refreshOpts.cover', String(v));
+          }} />
+        ${t('manga.meta.redownload_cover')}
+      </label>
+      <button type="button"
+        class="btn-secondary btn-sm flex items-center gap-1"
+        disabled=${isRefreshing}
+        onClick=${handleRefresh}>
+        <span class=${'icon-xs' + (isRefreshing ? ' icon-spin' : '')}
+          dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+        ${isRefreshing ? t('manga.meta.refreshing') : t('manga.meta.refresh')}
+      </button>
+    </div>
+  `;
+}
+
+/**
  * Creates a compact "Edit metadata" row in the Manage tab that opens the modal on click.
  * @param {HTMLElement} containerEl
  * @param {{ dbId: number, mangaData: any }} ctx
@@ -666,6 +664,22 @@ export function mountMetadataPanel(containerEl, { dbId, mangaData }) {
     t('manga.meta.row_desc'),
     btn,
   )));
+
+  if (hasPermission('library:refresh')) {
+    const refreshHost = document.createElement('div');
+    render(
+      html`<${RefreshRow}
+        dbId=${dbId}
+        onRefreshed=${(/** @type {any} */ fresh) => { Object.assign(_liveData, fresh); }}
+      />`,
+      refreshHost,
+    );
+    card.appendChild(mkItem(mkRow(
+      t('manga.meta.refresh_source'),
+      t('manga.meta.refresh_tip'),
+      refreshHost,
+    )));
+  }
 
   containerEl.appendChild(card);
 }

@@ -90,7 +90,7 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
   useEffect(() => { setIsRead(!!chapter.read); }, [chapter.read]);
 
   function _startLongPress(/** @type {PointerEvent} */ e) {
-    if (selectMode || !onEnterSelectWithChapter) return;
+    if (selectMode || !inLibrary || !onEnterSelectWithChapter) return;
     // Only primary pointer (touch or left mouse)
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     longPressTimer.current = setTimeout(() => {
@@ -504,6 +504,10 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   const [scrollTop, setScrollTop] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [focused, setFocused] = useState(false);
+  // Separate from `focused`: clicking a row focuses the listbox, and painting a
+  // keyboard cursor over the row the user did not click reads as a stuck
+  // selection. `aria-activedescendant` still follows real focus.
+  const [keyboardCursor, setKeyboardCursor] = useState(false);
   const [menuSignal, setMenuSignal] = useState({ id: /** @type {number|null} */ (null), tick: 0 });
   const [ROW_H] = useState(_readRowH);
   const showScanlator = useMemo(() => {
@@ -545,6 +549,20 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   }, [activeIndex, height]);
 
   const visibleCount = height ? Math.ceil(height / ROW_H) : chapters.length;
+
+  /**
+   * Moves the cursor to the row the pointer went down on, so the arrow keys
+   * carry on from what the user just touched rather than from the top.
+   *
+   * @param {PointerEvent} e
+   */
+  const handlePointerDown = useCallback((e) => {
+    const target = e.target instanceof Element ? e.target.closest('[id^="chapter-opt-"]') : null;
+    if (!target) return;
+    const id = Number(target.id.slice('chapter-opt-'.length));
+    const index = chapters.findIndex(c => c.id === id);
+    if (index >= 0) setActiveIndex(index);
+  }, [chapters]);
 
   /** @param {KeyboardEvent} e */
   function handleListKeyDown(e) {
@@ -591,6 +609,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     }
 
     setActiveIndex(newIndex);
+    setKeyboardCursor(true);
 
     if (height && scrollRef.current) {
       const top = newIndex * ROW_H;
@@ -677,8 +696,13 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
         tabindex="0"
         aria-activedescendant=${focused ? activeDescendant : undefined}
         onKeyDown=${handleListKeyDown}
-        onFocus=${() => setFocused(true)}
-        onBlur=${() => setFocused(false)}
+        onPointerDown=${handlePointerDown}
+        onFocus=${(/** @type {FocusEvent} */ e) => {
+          setFocused(true);
+          const el = /** @type {HTMLElement} */ (e.currentTarget);
+          setKeyboardCursor(el.matches?.(':focus-visible') ?? false);
+        }}
+        onBlur=${() => { setFocused(false); setKeyboardCursor(false); }}
       >
         <div class="flex flex-col divide-y divide-border-subtle">
           ${chapters.map((ch, i) => html`
@@ -690,7 +714,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               mangaId=${mangaId}
               selectMode=${!!selectMode}
               selected=${selected ? selected.has(ch.id) : false}
-              isKeyboardActive=${focused && i === activeIndex}
+              isKeyboardActive=${keyboardCursor && i === activeIndex}
               menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
               showScanlator=${showScanlator}
               onToggleRead=${onToggleRead}
@@ -734,8 +758,13 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       tabindex="0"
       aria-activedescendant=${focused ? activeDescendant : undefined}
       onKeyDown=${handleListKeyDown}
-      onFocus=${() => setFocused(true)}
-      onBlur=${() => setFocused(false)}
+      onPointerDown=${handlePointerDown}
+      onFocus=${(/** @type {FocusEvent} */ e) => {
+        setFocused(true);
+        const el = /** @type {HTMLElement} */ (e.currentTarget);
+        setKeyboardCursor(el.matches?.(':focus-visible') ?? false);
+      }}
+      onBlur=${() => { setFocused(false); setKeyboardCursor(false); }}
     >
       <div
         ref=${scrollRef}
@@ -756,7 +785,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 mangaId=${mangaId}
                 selectMode=${!!selectMode}
                 selected=${selected ? selected.has(ch.id) : false}
-                isKeyboardActive=${focused && startIdx + i === activeIndex}
+                isKeyboardActive=${keyboardCursor && startIdx + i === activeIndex}
                 menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
               showScanlator=${showScanlator}
                 onToggleRead=${onToggleRead}

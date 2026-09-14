@@ -212,3 +212,72 @@ async fn stops_when_has_next_page_false() {
     );
     assert_eq!(result["scalars"]["has_next_page"], false);
 }
+
+/// A paginated endpoint still declares scalars, and `total_pages` is read from
+/// one of them. Dropping them leaves the client with a single page.
+#[tokio::test]
+async fn paginated_extraction_preserves_declared_scalars() {
+    let server = MockServer::start().await;
+    let items: String = (1usize..=20)
+        .map(|i| format!(r#"{{"id":{i}}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+            r#"{{"items":[{items}],"meta":{{"lastPage":923}}}}"#
+        )))
+        .mount(&server)
+        .await;
+
+    let bp = BlueprintBuilder::new("/items")
+        .with_request(RequestDef {
+            url: server.uri(),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .paginated(20, "page", OffsetType::PageNumber { start: 1 })
+        .field("id", Expr::self_ref().ptr("/id").int_val())
+        .scalar("total_pages", Expr::json_root("/meta/lastPage").int_val())
+        .build();
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let result = extract_json_paginated(&mut state, 1, 20, &bp)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result["scalars"]["total_pages"], 923,
+        "declared scalars were dropped: {}",
+        result["scalars"]
+    );
+}
+
+#[test]
+fn total_pages_is_rescaled_to_the_requested_page_size() {
+    let mut scalars = serde_json::Map::new();
+    scalars.insert("total_pages".into(), serde_json::json!(923));
+    kani_core::evaluator::json_eval::rescale_total_pages_for_test(&mut scalars, 100, 10);
+    assert_eq!(scalars["total_pages"], 9230);
+}
+
+#[test]
+fn an_item_count_makes_the_page_total_exact() {
+    let mut scalars = serde_json::Map::new();
+    scalars.insert("total_pages".into(), serde_json::json!(923));
+    scalars.insert("total_items".into(), serde_json::json!(92205));
+    kani_core::evaluator::json_eval::rescale_total_pages_for_test(&mut scalars, 100, 10);
+    assert_eq!(
+        scalars["total_pages"], 9221,
+        "item count must win over page count"
+    );
+}
+
+#[test]
+fn a_matching_page_size_leaves_the_total_alone() {
+    let mut scalars = serde_json::Map::new();
+    scalars.insert("total_pages".into(), serde_json::json!(42));
+    kani_core::evaluator::json_eval::rescale_total_pages_for_test(&mut scalars, 20, 20);
+    assert_eq!(scalars["total_pages"], 42);
+}

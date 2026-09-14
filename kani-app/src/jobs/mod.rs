@@ -8,6 +8,7 @@ pub mod download;
 pub mod error;
 pub mod framework;
 pub mod import_dedup;
+pub mod import_resolve;
 pub mod maintenance;
 pub mod manager;
 pub mod manifest_backfill;

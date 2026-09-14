@@ -34,9 +34,10 @@ const ROW_DESC_SUFFIX = /\.(desc|description|tooltip|subtitle|hint)$/;
  * desc }`, so a query matching both the title and the description of a row
  * still returns a single result carrying the full row text.
  * @param {Array<{ id: string }>} sections — visible sections only
+ * @param {{ exclude?: string[] }} [options] — key prefixes of rows the current layout hides
  * @returns {Map<string, Array<{ key: string, label: string, desc: string }>>}
  */
-export function buildSettingsSearchIndex(sections) {
+export function buildSettingsSearchIndex(sections, { exclude = [] } = {}) {
   const idx = new Map();
   const entries = Object.entries(catalog);
   for (const { id } of sections) {
@@ -48,6 +49,7 @@ export function buildSettingsSearchIndex(sections) {
       if (typeof value !== 'string') continue;
       if (SEARCH_NOISE.test(key)) continue;
       if (!prefixes.some(p => key.startsWith(p))) continue;
+      if (exclude.some(p => key.startsWith(p))) continue;
       const isDesc = ROW_DESC_SUFFIX.test(key);
       const base = key.replace(ROW_DESC_SUFFIX, '').replace(ROW_TITLE_SUFFIX, '');
       let row = rows.get(base);

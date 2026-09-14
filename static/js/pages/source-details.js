@@ -11,7 +11,8 @@ import { hasPermission } from '../session.js';
 import { subscribe as subscribeCache, updateState as updateCacheState } from '../cache.js';
 import { subscribe as subscribeUiState } from '../ui-state.js';
 import { navigate, scrollPageTop } from '../router.js';
-import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, fmtCompactDate, errorCountAriaLabel } from '../utils.js';
+import { debounce, hasNextPage, fmtCompactDate, errorCountAriaLabel } from '../utils.js';
+import { getTileSize, setTileSize } from '../tile-size.js';
 import { skeletonSettingsCards, skeletonKeyValueRows } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
@@ -20,35 +21,63 @@ import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { showApiError } from '../components/toast.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { PreferenceRow, PreferenceDetailView } from '../components/preference-row.js';
-import { PageSizeSelect } from '../components/page-size-select.js';
+import { TileSizeSelect } from '../components/tile-size-select.js';
+import { FALLBACK_PAGE_SIZE, MAX_PAGE_SIZE, gridCapacity, gridFitEnabled, observeCapacity } from '../grid-columns.js';
 import { Icon } from '../components/icon.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { createSourcesHeaderActions } from '../components/sources-header.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { mountFilterModal } from '../components/filter-panel.js';
 import { renderTabs } from '../components/tabs.js';
 import { iconSearch, iconChevronDown, iconWarning } from '../icons.js';
 import { t } from '../i18n.js';
+import { prefersInfiniteScroll } from '../pagination-mode.js';
 const html = htm.bind(h);
 
 
 let _sourceId = 0;
 let _page = 1;
 let _pageSize = 0;
+/** @type {import('../tile-size.js').TileSize} */
+let _tileSize = 'md';
+/** @type {Array<() => void>} */ let _stopColumnWatches = [];
+
+/**
+ * @param {HTMLElement | null} gridEl A grid container fetchPagedGrid renders into.
+ * @returns {HTMLElement | null}
+ */
+function _mangaGridIn(gridEl) {
+  return /** @type {HTMLElement|null} */ (gridEl?.querySelector('.manga-grid') ?? null);
+}
+
+/**
+ * The page holds exactly what fits. Where the shell does not pin the page to
+ * the viewport the question has no answer, so a fixed batch is used instead.
+ *
+ * @param {HTMLElement | null} gridEl
+ */
+function _syncPageSize(gridEl) {
+  const next = gridFitEnabled() && !_isInfinite()
+    ? gridCapacity(_mangaGridIn(gridEl), gridEl)
+    : 0;
+  if (next > 0) _pageSize = Math.min(next, MAX_PAGE_SIZE);
+  else if (_pageSize < 1) _pageSize = FALLBACK_PAGE_SIZE;
+}
+
+function _isInfinite() {
+  return prefersInfiniteScroll('kani_source_pagination');
+}
 let _query = '';
 let _sourceName = '';
 let _sourceEnabled = true;
 let _activeTab = 'popular';
 /** @type {AbortController | null} */
 let _abort = null;
-/** @type {AbortController | null} */
-let _libAbort = null;
 /** @type {(() => void) | null} */
 let _destroyPaginationSearch = null;
 /** @type {(() => void) | null} */
 let _destroyPaginationPopular = null;
-/** @type {(() => void) | null} */
-let _destroyLibPagination = null;
 /** @type {(() => void) | null} */
 let _unsubSourcesInvalidation = null;
 /** @type {(() => void) | null} */
@@ -63,6 +92,8 @@ let _prefsMountEl = null;
 let _asideEl = null;
 /** @type {HTMLButtonElement | null} */
 let _addSourceBtn = null;
+/** @type {HTMLElement[] | null} */
+let _headerActions = null;
 /** @type {HTMLElement | null} */
 let _popularPanelEl = null;
 /** @type {HTMLElement | null} */
@@ -72,8 +103,6 @@ let _tabsUpdateFn = null;
 let _settingsMounted = false;
 let _prefsMounted = false;
 let _hasPrefs = false;
-let _libPage = 1;
-let _libPageSize = 24;
 /** @type {any[]} */
 let _filterDefs = [];
 /** @type {Record<string, string>} */
@@ -562,7 +591,6 @@ function _updateUrl() {
   const params = {
     tab: _activeTab,
     page: _page > 1 ? _page : null,
-    lib_page: _libPage > 1 ? _libPage : null,
     q: _query || null,
   };
   for (const [filterId, state] of Object.entries(_filters)) {
@@ -580,7 +608,7 @@ function _updateBreadcrumb() {
   } else {
     crumbs.push({ label: _sourceName || t('source.nav.source') });
   }
-  setPageHeader({ crumbs, actions: _addSourceBtn ?? null });
+  setPageHeader({ crumbs, actions: _headerActions });
 }
 
 
@@ -593,7 +621,7 @@ export async function init(container, { id }) {
   _page = 1;
   const _urlParams = new URLSearchParams(location.search);
   _query = _urlParams.get('q') ?? '';
-  _pageSize = getLocalInt('kani_source_page_size', 18);
+  _tileSize = getTileSize();
   _sourceName = '';
   _sourceEnabled = true;
   _settingsMountEl = null;
@@ -616,7 +644,11 @@ export async function init(container, { id }) {
 
   // Restore tab from URL (takes precedence over query-based heuristic)
   const _tabParam = _urlParams.get('tab');
-  if (_tabParam && ['popular', 'search', 'library', 'prefs', 'settings'].includes(_tabParam)) {
+  if (_tabParam === 'library') {
+    navigate(`/?source_id=${_sourceId}`, { replace: true });
+    return;
+  }
+  if (_tabParam && ['popular', 'search', 'prefs', 'settings'].includes(_tabParam)) {
     _activeTab = _tabParam;
   } else {
     _activeTab = (_query || _preFilterName) ? 'search' : 'popular';
@@ -625,8 +657,6 @@ export async function init(container, { id }) {
   // Restore page numbers from URL
   const _pageParam = _urlParams.get('page');
   if (_pageParam) _page = Math.max(1, parseInt(_pageParam, 10) || 1);
-  const _libPageParam = _urlParams.get('lib_page');
-  if (_libPageParam) _libPage = Math.max(1, parseInt(_libPageParam, 10) || 1);
 
   // Stash f_* filter params for async restoration after filter defs load
   _pendingFilterParams = {};
@@ -640,50 +670,46 @@ export async function init(container, { id }) {
     return;
   }
 
-  // Add source button (kept in the header for consistency with the sources
-  // page, but secondary here: this view is about browsing the selected
-  // source, so it doesn't own the accent).
-  if (hasPermission('source:install')) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn-secondary btn-sm';
-    btn.textContent = t('source.add');
-    _addSourceBtn = btn;
-  } else {
-    _addSourceBtn = null;
-  }
+  const header = createSourcesHeaderActions({
+    canInstall: hasPermission('source:install'),
+    onTab: (tab) => navigate(tab === 'repos' ? '/sources?tab=repos' : '/sources'),
+  });
+  header.setActive('extensions');
+  _headerActions = header.actions;
+  _addSourceBtn = header.addSourceBtn;
 
+  container.classList.add('page-fixed');
   container.innerHTML = `
-    <div class="flex">
+    <div class="flex page-body-host">
 
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
         class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
-        style="top:var(--header-h);height:calc(100dvh - var(--header-h));"
+        style="top:0;height:calc(100dvh - var(--header-h));"
         aria-label="${t('source.nav.sources')}"
       ></aside>
 
       <!-- Main panel -->
-      <div class="flex-1 min-w-0 flex flex-col">
+      <div class="flex-1 min-w-0 flex flex-col page-col">
 
-        <div class="flex-1 max-w-page w-full px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
+        <div class="flex-1 max-w-page mx-auto w-full px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4 page-col">
           <!-- Tab bar -->
           <div class="js-tabs"></div>
 
           <!-- Popular panel -->
-          <div class="js-panel" data-panel="popular">
-            <div class="flex flex-col gap-4">
+          <div class="js-panel page-panel" data-panel="popular">
+            <div class="flex flex-col gap-4 page-col page-fill">
               <div class="flex items-end justify-end gap-2">
-                <div class="js-popular-page-size-mount w-20"></div>
+                <div class="js-popular-tile-size-mount w-28"></div>
               </div>
-              <div class="js-popular-grid" aria-live="polite" aria-busy="false"></div>
+              <div class="js-popular-grid page-body" aria-live="polite" aria-busy="false"><div class="manga-grid"></div></div>
               <div class="js-popular-pagination"></div>
             </div>
           </div>
 
           <!-- Search panel (hidden initially) -->
-          <div class="js-panel hidden" data-panel="search">
-            <div class="flex flex-col gap-4">
+          <div class="js-panel page-panel hidden" data-panel="search">
+            <div class="flex flex-col gap-4 page-col page-fill">
               <div class="flex items-center gap-3 flex-wrap">
                 <div class="relative flex-1 min-w-48 max-w-sm">
                   <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
@@ -694,30 +720,23 @@ export async function init(container, { id }) {
                     aria-label="${t('source.search.aria')}"
                   />
                 </div>
-                <div class="js-page-size-mount w-20 shrink-0"></div>
+                <div class="js-tile-size-mount w-28 shrink-0"></div>
                 <button type="button" class="js-filter-btn input flex items-center justify-center gap-1.5 w-full sm:w-auto shrink-0" aria-label="${t('source.filters.open')}" style="display:none">${t('library.filters')}</button>
               </div>
-              <div class="js-search-grid" aria-live="polite" aria-busy="false"></div>
+              <div class="js-search-grid page-body" aria-live="polite" aria-busy="false"><div class="manga-grid"></div></div>
               <div class="js-search-pagination"></div>
             </div>
           </div>
 
-          <!-- Library panel (hidden initially) -->
-          <div class="js-panel hidden" data-panel="library">
-            <div class="flex flex-col gap-4">
-              <div class="js-lib-grid" aria-live="polite" aria-busy="false"></div>
-              <div class="js-lib-pagination"></div>
-            </div>
-          </div>
 
           <!-- Preferences panel (hidden initially) -->
-          <div class="js-panel hidden" data-panel="prefs">
-            <div class="js-prefs-mount flex flex-col gap-4"></div>
+          <div class="js-panel page-panel hidden" data-panel="prefs">
+            <div class="js-prefs-mount flex flex-col gap-4 page-body"></div>
           </div>
 
           <!-- Settings panel (hidden initially) -->
-          <div class="js-panel hidden" data-panel="settings">
-            <div class="js-settings-mount flex flex-col gap-4"></div>
+          <div class="js-panel page-panel hidden" data-panel="settings">
+            <div class="js-settings-mount flex flex-col gap-4 page-body"></div>
           </div>
         </div>
       </div>
@@ -732,14 +751,12 @@ export async function init(container, { id }) {
 
   const popularGridEl  = /** @type {HTMLElement} */ (container.querySelector('.js-popular-grid'));
   const popularPaginEl = /** @type {HTMLElement} */ (container.querySelector('.js-popular-pagination'));
-  const popularSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-popular-page-size-mount'));
+  const popularSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-popular-tile-size-mount'));
   const searchGridEl   = /** @type {HTMLElement} */ (container.querySelector('.js-search-grid'));
   const searchPaginEl  = /** @type {HTMLElement} */ (container.querySelector('.js-search-pagination'));
   const filterBtnEl    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-btn'));
   const searchEl       = /** @type {HTMLInputElement} */ (container.querySelector('.js-search'));
-  const searchSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-page-size-mount'));
-  const libGridEl      = /** @type {HTMLElement} */ (container.querySelector('.js-lib-grid'));
-  const libPaginEl     = /** @type {HTMLElement} */ (container.querySelector('.js-lib-pagination'));
+  const searchSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-tile-size-mount'));
 
   _updateBreadcrumb();
 
@@ -773,7 +790,6 @@ export async function init(container, { id }) {
     }
     if (tab === 'settings') _mountSettings();
     if (tab === 'prefs') _mountPrefs();
-    if (tab === 'library') _fetchLibrary(libGridEl, libPaginEl);
     if (tab === 'popular' && !_popularFetched) {
       _popularFetched = true;
       if (!_sourceEnabled) {
@@ -790,7 +806,6 @@ export async function init(container, { id }) {
   const _tabDefs = () => [
     { id: 'popular', name: t('source.tab.popular') },
     { id: 'search', name: t('source.tab.search') },
-    { id: 'library', name: t('source.tab.library') },
     { id: 'prefs', name: t('source.tab.preferences'), disabled: !_hasPrefs },
     { id: 'settings', name: t('source.tab.settings') },
   ];
@@ -825,33 +840,49 @@ export async function init(container, { id }) {
     _fetch(searchGridEl, searchPaginEl, true);
   }, 600));
 
-  render(html`<${PageSizeSelect}
-    options=${[18, 27, 36]}
-    value=${_pageSize}
-    ariaLabel=${t('common.page_size')}
-    onChange=${(/** @type {number} */ n) => {
-      _pageSize = n;
-      setLocal('kani_source_page_size', String(_pageSize));
-      _page = 1;
-      _updateUrl();
-      _fetch(searchGridEl, searchPaginEl, true);
-    }}
-  />`, searchSizeMountEl);
+  const _renderTileSize = () => {
+    for (const [mountEl, gridEl, paginEl, isSearch] of /** @type {Array<[HTMLElement, HTMLElement, HTMLElement, boolean]>} */ ([
+      [searchSizeMountEl, searchGridEl, searchPaginEl, true],
+      [popularSizeMountEl, popularGridEl, popularPaginEl, false],
+    ])) {
+      render(html`<${TileSizeSelect}
+        value=${_tileSize}
+        onChange=${(/** @type {import('../tile-size.js').TileSize} */ size) => {
+          _tileSize = size;
+          setTileSize(size);
+          _page = 1;
+          _updateUrl();
+          // The new track width only exists after the browser has laid the grid
+          // out again, so refetch on the next frame rather than this one.
+          requestAnimationFrame(() => {
+            _renderTileSize();
+            if (!isSearch) _popularFetched = false;
+            _fetch(gridEl, paginEl, isSearch);
+            if (!isSearch) _popularFetched = true;
+          });
+        }}
+      />`, mountEl);
+    }
+  };
+  _renderTileSize();
 
-  render(html`<${PageSizeSelect}
-    options=${[18, 27, 36]}
-    value=${_pageSize}
-    ariaLabel=${t('common.page_size')}
-    onChange=${(/** @type {number} */ n) => {
-      _pageSize = n;
-      setLocal('kani_source_page_size', String(_pageSize));
-      _page = 1;
-      _popularFetched = false; // force re-fetch
-      _updateUrl();
-      _fetch(popularGridEl, popularPaginEl, false);
-      _popularFetched = true;
-    }}
-  />`, popularSizeMountEl);
+  // Infinite mode does not fit: its batch is fixed, and refetching on resize
+  // would discard every batch already appended.
+  if (!_isInfinite()) {
+    for (const [gridEl, paginEl, isSearch] of /** @type {Array<[HTMLElement, HTMLElement, boolean]>} */ ([
+      [popularGridEl, popularPaginEl, false],
+      [searchGridEl, searchPaginEl, true],
+    ])) {
+      _stopColumnWatches.push(observeCapacity(gridEl, () => _mangaGridIn(gridEl), () => gridEl, () => {
+        // Only the visible tab refetches; the other measures again when shown.
+        if ((_activeTab === 'search') !== isSearch) return;
+        _page = 1;
+        if (!isSearch) _popularFetched = false;
+        _fetch(gridEl, paginEl, isSearch);
+        if (!isSearch) _popularFetched = true;
+      }, _pageSize));
+    }
+  }
 
   _filterDefs = [];
   _filterModalDestroy?.();
@@ -1024,59 +1055,14 @@ async function _mountSettings() {
 }
 
 
-let _libLoaded = false;
-
-/** @param {HTMLElement} gridEl @param {HTMLElement} paginEl */
-async function _fetchLibrary(gridEl, paginEl) {
-  if (_libLoaded) return;
-  _libLoaded = true;
-
-  _libAbort?.abort();
-  _libAbort = new AbortController();
-  _destroyLibPagination?.();
-  _destroyLibPagination = null;
-  paginEl.innerHTML = '';
-
-  const outcome = await fetchPagedGrid({
-    gridEl,
-    pageSize: _libPageSize,
-    fetchPage: () => api.getLibrary({ page: _libPage, page_size: _libPageSize, source_id: _sourceId }, /** @type {AbortController} */ (_libAbort).signal),
-    mapItems: (result) => Array.isArray(result?.items) ? result.items
-      : Array.isArray(result?.manga)            ? result.manga
-      : Array.isArray(result)                   ? result
-      : [],
-    renderCard: (m) => createMangaCard({
-      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null },
-      href: `/manga/${m.id}?from_source=${_sourceId}`,
-    }),
-    emptyIcon: iconSearch,
-    emptyTitle: t('source.library.empty'),
-    errorMessage: t('library.error.load'),
-    onRetry: () => { _libLoaded = false; _fetchLibrary(gridEl, paginEl); },
-  });
-  if (!outcome || 'error' in outcome) return;
-
-  const { result, items } = outcome;
-  const hasNext = hasNextPage(result, items.length, _libPageSize);
-  if (_libPage > 1 || hasNext) {
-    const { destroy } = renderPagination(paginEl, {
-      page: _libPage,
-      hasNext,
-      total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _libPage = p; _libLoaded = false; _updateUrl(); _fetchLibrary(gridEl, paginEl); scrollPageTop(); },
-    });
-    _destroyLibPagination = destroy;
-  }
-}
-
-
 /**
  * @param {HTMLElement} gridEl
  * @param {HTMLElement} paginEl
  * @param {boolean} isSearch - true = search_manga (query+filters), false = get_popular_manga
  */
 async function _fetch(gridEl, paginEl, isSearch) {
-  const infinite = getLocal('kani_source_pagination') === 'infinite';
+  _syncPageSize(gridEl);
+  const infinite = _isInfinite();
   const isAppend = infinite && _page > 1;
 
   _abort?.abort();
@@ -1092,9 +1078,6 @@ async function _fetch(gridEl, paginEl, isSearch) {
     _destroyPaginationPopular = null;
   }
   paginEl.innerHTML = '';
-  if (isAppend) {
-    paginEl.innerHTML = '<div class="h-14 mx-3 my-2 skeleton rounded-lg"></div>';
-  }
 
   const filtersJson = Object.keys(_filters).length > 0
     ? JSON.stringify(
@@ -1189,16 +1172,14 @@ function _setupSourceSentinel(gridEl, paginEl, hasNext, isSearch) {
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
+  for (const stop of _stopColumnWatches) stop();
+  _stopColumnWatches = [];
   _abort?.abort();
   _abort = null;
-  _libAbort?.abort();
-  _libAbort = null;
   _destroyPaginationSearch?.();
   _destroyPaginationSearch = null;
   _destroyPaginationPopular?.();
   _destroyPaginationPopular = null;
-  _destroyLibPagination?.();
-  _destroyLibPagination = null;
   _sentinelObserver?.disconnect();
   _sentinelObserver = null;
   if (_settingsMountEl) render(null, _settingsMountEl);
@@ -1208,8 +1189,6 @@ export function destroy(container) {
   _prefsMountEl = null;
   _prefsMounted = false;
   _hasPrefs = false;
-  _libLoaded = false;
-  _libPage = 1;
   _popularPanelEl = null;
   _searchPanelEl = null;
   _tabsUpdateFn = null;
@@ -1223,6 +1202,7 @@ export function destroy(container) {
   _unsubPrefVersion = null;
   mountIntoModalRoot(null);
   _addSourceBtn = null;
+  _headerActions = null;
   clearPageHeader();
   const pendingId = consumePendingSourceId();
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});

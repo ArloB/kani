@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
             post(toggle_auto_download),
         )
         .route("/manga/{id}/toggle_auto_scan", post(toggle_auto_scan_manga))
+        .route("/manga/{id}/relink", post(relink_manga))
         .route(
             "/manga/{id}/toggle_download_all_preferred",
             post(toggle_download_all_preferred),
@@ -59,6 +60,9 @@ pub fn router() -> Router<AppState> {
         .route("/manga/{id}/seen", patch(mark_manga_seen))
         .route("/manga/{id}/preview_migration", post(preview_migration))
         .route("/manga/{id}/migrate", post(migrate_manga_handler))
+        .route("/migrations/match", post(match_migration_targets))
+        .route("/migrations/bulk", post(submit_bulk_migration))
+        .route("/migrations/status", post(migration_statuses))
         .route(
             "/manga/{id}/download_rules",
             get(get_download_rules).post(add_download_rule),
@@ -293,7 +297,7 @@ pub(super) async fn get_local_manga_details(
     use crate::types::{MangaInfo, MangaStatus};
     let d = state.get_local_manga_details(id).await?;
     let cover_url = if d.manga.local_cover_path.is_some() {
-        Some(format!("/rest/manga/{}/cover", id))
+        Some(local_cover_url(id, "lg", d.manga.cover_hash.as_deref()))
     } else {
         d.manga
             .cover_url
@@ -341,6 +345,7 @@ pub(super) async fn get_local_manga_details(
         "notes":                       d.manga.notes,
         "cover_overridden":            d.manga.cover_overridden,
         "suppressed_chapter_count":    d.manga.suppressed_chapter_count,
+        "import_link_status":          d.import_link_status,
         "local_name":                  d.manga.local_name,
         "local_description":           d.manga.local_description,
         "local_status":                d.manga.local_status,
@@ -483,6 +488,25 @@ pub(super) async fn cancel_all_downloads(
 ) -> Result<impl IntoResponse, AppError> {
     svc.cancel_all_downloads(manga_id).await?;
     Ok(Json(json!({})))
+}
+
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/relink",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Linking job queued; returns job_id"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(super) async fn relink_manga(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = svc.queue_import_relink(id).await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 #[utoipa::path(
@@ -725,6 +749,107 @@ pub(super) async fn migrate_manga_handler(
         .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "job_id": job_id }))))
 }
+
+#[utoipa::path(
+    post, path = "/rest/migrations/match",
+    request_body = MatchMigrationTargetsRequest,
+    responses(
+        (status = 200, description = "A proposed target series for each title, with ranked candidates"),
+        (status = 400, description = "Too many titles in one request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(super) async fn match_migration_targets(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Json(body): Json<MatchMigrationTargetsRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if body.items.len() > MAX_MIGRATION_MATCH_BATCH {
+        return Err(AppError::ValidationError(format!(
+            "At most {MAX_MIGRATION_MATCH_BATCH} titles can be matched per request"
+        )));
+    }
+    let queries = body
+        .items
+        .into_iter()
+        .map(|i| kani_app::service::migration::MigrationMatchQuery {
+            manga_id: i.manga_id,
+            query: i.query,
+        })
+        .collect();
+    let matches = svc
+        .match_migration_targets(body.target_source_id, queries)
+        .await?;
+    Ok(Json(matches))
+}
+
+#[utoipa::path(
+    post, path = "/rest/migrations/bulk",
+    request_body = BulkMigrationRequest,
+    responses(
+        (status = 202, description = "One outcome per title: a job id to follow, or why it was refused"),
+        (status = 400, description = "Too many titles in one request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(super) async fn submit_bulk_migration(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Json(body): Json<BulkMigrationRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if body.items.len() > MAX_BULK_MIGRATION {
+        return Err(AppError::ValidationError(format!(
+            "At most {MAX_BULK_MIGRATION} titles can be migrated per request"
+        )));
+    }
+    let items = body
+        .items
+        .into_iter()
+        .map(|i| kani_app::service::migration::BulkMigrationItem {
+            manga_id: i.manga_id,
+            target_source_manga_id: i.target_source_manga_id,
+        })
+        .collect();
+    let outcomes = svc
+        .submit_bulk_migration(body.target_source_id, items, body.keep_orphaned_downloads)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(outcomes)))
+}
+
+#[utoipa::path(
+    post, path = "/rest/migrations/status",
+    request_body = MigrationStatusRequest,
+    responses(
+        (status = 200, description = "Status of each requested migration job; other job types are omitted"),
+        (status = 400, description = "Too many job ids in one request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(super) async fn migration_statuses(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Json(body): Json<MigrationStatusRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if body.job_ids.len() > MAX_BULK_MIGRATION {
+        return Err(AppError::ValidationError(format!(
+            "At most {MAX_BULK_MIGRATION} jobs can be read per request"
+        )));
+    }
+    let statuses = svc.migration_statuses(body.job_ids).await?;
+    Ok(Json(statuses))
+}
+
+const MAX_MIGRATION_MATCH_BATCH: usize = 20;
+const MAX_BULK_MIGRATION: usize = 500;
 
 #[utoipa::path(
     get, path = "/rest/manga/{id}/download_rules",
@@ -1057,6 +1182,28 @@ mod tests {
         ) -> kani_app::error::Result<kani_app::jobs::JobId> {
             unimplemented!()
         }
+        async fn match_migration_targets(
+            &self,
+            _target_source_id: i64,
+            _queries: Vec<kani_app::service::migration::MigrationMatchQuery>,
+        ) -> kani_app::error::Result<Vec<kani_app::service::migration::MigrationMatch>> {
+            unimplemented!()
+        }
+        async fn submit_bulk_migration(
+            &self,
+            _target_source_id: i64,
+            _items: Vec<kani_app::service::migration::BulkMigrationItem>,
+            _keep_orphaned_downloads: bool,
+        ) -> kani_app::error::Result<Vec<kani_app::service::migration::BulkMigrationSubmission>>
+        {
+            unimplemented!()
+        }
+        async fn migration_statuses(
+            &self,
+            _job_ids: Vec<kani_app::jobs::JobId>,
+        ) -> kani_app::error::Result<Vec<kani_app::service::traits::JobStatus>> {
+            unimplemented!()
+        }
         async fn add_download_rule(
             &self,
             _manga_id: MangaId,
@@ -1109,6 +1256,13 @@ mod tests {
         ) -> kani_app::error::Result<()> {
             unimplemented!()
         }
+        async fn queue_import_relink(
+            &self,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<uuid::Uuid> {
+            unimplemented!()
+        }
+
         async fn queue_manga_refresh(
             &self,
             _manga_id: MangaId,

@@ -49,6 +49,25 @@ function bumpPrefVersion(sourceId) {
  *   dirty?: boolean,
  * }} props
  */
+/**
+ * Reads a multi-value preference into a list.
+ *
+ * The server sends these as a JSON string, but once the user adds or removes an
+ * item the live value held in component state is a real array. `JSON.parse` on
+ * an array coerces it to a comma-joined string first, throws, and yields an
+ * empty list — which is why a just-added item disappeared until the page was
+ * refetched. `MultiSelect` already accepts an array directly; this is the same
+ * tolerance for `MultiValueList`.
+ *
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+function asStringList(value) {
+  if (Array.isArray(value)) return /** @type {string[]} */ (value);
+  const parsed = getJsonSafe(/** @type {any} */ (value));
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail, onDirtyChange, dirty = false }) {
   const key = descriptor.key;
   const title = descriptor.label ?? descriptor.title ?? '';
@@ -189,7 +208,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
         }}
       />`;
   } else if (kindName === 'MultiValueList') {
-    const list /** @type {string[]} */ = getJsonSafe(currentValue) || [];
+    const list /** @type {string[]} */ = asStringList(currentValue);
     const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? t('pref_row.add_item_placeholder');
 
     if (onOpenDetail) {
@@ -312,7 +331,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
   `;
 
   if (kindName === 'MultiValueList') {
-    const list = /** @type {string[]} */ (getJsonSafe(currentValue) || []);
+    const list = asStringList(currentValue);
     const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? t('pref_row.add_item_placeholder');
     return html`
       <div class="flex flex-col gap-3 py-3">

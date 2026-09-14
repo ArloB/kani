@@ -8,6 +8,102 @@ use kani_core::wasm::kani::extension::types::{
     FilterTypeTag, MangaInfo, MangaList, OptionState, PrefKind, PreferenceSpec, SortOption,
 };
 
+/// Ceiling on browser page loads spent on one logical page. A page size far
+/// larger than the site's own costs one navigation per capture.
+const MAX_BROWSER_CAPTURES_PER_PAGE: usize = 6;
+
+/// The span of the site's own pages one logical page is cut from.
+///
+/// A site's fixed page size rarely divides the size asked for, so a logical page
+/// starts mid-capture. Captures are fetched whole and then trimmed, which keeps
+/// consecutive pages gapless without overfilling either of them.
+#[derive(Clone, Copy)]
+struct PageWindow {
+    native: usize,
+    first_native: usize,
+    captures: usize,
+    skip: usize,
+    take: usize,
+}
+
+impl PageWindow {
+    fn new(logical_page: usize, requested: Option<usize>, native_page_size: usize) -> Self {
+        let native = native_page_size.max(1);
+        let requested = requested.unwrap_or(native).max(1);
+        let start = (logical_page.max(1) - 1) * requested;
+        let first_native = start / native;
+        let captures = ((start + requested - 1) / native - first_native + 1)
+            .min(MAX_BROWSER_CAPTURES_PER_PAGE);
+        let skip = start - first_native * native;
+        Self {
+            native,
+            first_native,
+            captures,
+            skip,
+            // A window wider than the capture ceiling is served short rather than
+            // misaligned: the rows still start where the page begins.
+            take: requested.min(captures * native - skip),
+        }
+    }
+
+    /// The site's own page index for one capture of this window, 0-based.
+    fn native_index(&self, capture: usize) -> usize {
+        self.first_native + capture
+    }
+
+    /// Cuts the fetched captures down to this page. Rows the window pulled in
+    /// beyond it belong to the next page, so they are reported as one rather
+    /// than shown here, and the site's page count is restated in these pages.
+    fn trim(&self, value: &mut serde_json::Value) {
+        let Some(rows) = value.get_mut("rows").and_then(|r| r.as_array_mut()) else {
+            return;
+        };
+        let skip = self.skip.min(rows.len());
+        rows.drain(..skip);
+        let surplus = rows.len() > self.take;
+        rows.truncate(self.take);
+
+        let Some(scalars) = value.get_mut("scalars").and_then(|s| s.as_object_mut()) else {
+            return;
+        };
+        if surplus {
+            scalars.insert("has_next_page".to_string(), serde_json::Value::Bool(true));
+        }
+        if let Some(native_total) = scalars
+            .get("total_pages")
+            .and_then(serde_json::Value::as_i64)
+            .filter(|n| *n > 0)
+        {
+            let items = native_total as usize * self.native;
+            scalars.insert(
+                "total_pages".to_string(),
+                serde_json::Value::from(items.div_ceil(self.take)),
+            );
+        }
+    }
+}
+
+/// Folds one capture's extraction into the running result: rows accumulate,
+/// and later captures win for the paging scalars they carry.
+fn merge_capture(merged: &mut Option<serde_json::Value>, value: serde_json::Value) {
+    let Some(acc) = merged.as_mut() else {
+        *merged = Some(value);
+        return;
+    };
+    if let Some(rows) = value.get("rows").and_then(|r| r.as_array()).cloned()
+        && let Some(acc_rows) = acc.get_mut("rows").and_then(|r| r.as_array_mut())
+    {
+        acc_rows.extend(rows);
+    }
+    if let (Some(acc_obj), Some(obj)) = (acc.as_object_mut(), value.as_object()) {
+        for (key, v) in obj {
+            if key != "rows" {
+                acc_obj.insert(key.clone(), v.clone());
+            }
+        }
+    }
+}
+
 pub struct YamlSource {
     pub config: Arc<kani_yaml::ValidatedExtension>,
     http: kani_core::http::SmartClient,
@@ -47,6 +143,7 @@ impl YamlSource {
             .unwrap_or(3);
 
         let hook_scripts = kani_core::scripting::HookScripts {
+            shared: config.pure_scripts.clone(),
             pre_request: config.pre_request.clone(),
             on_status: config.on_status.clone(),
             endpoint_pre_request: config.endpoint_pre_request.clone(),
@@ -281,46 +378,89 @@ impl YamlSource {
             ep.filter_format.as_ref(),
             filters,
         ));
-        let page_url = append_query_params(&page_url, &params);
 
-        let mut state = self.make_host_state()?;
-        let profile_key = state.browser_profile_key.clone();
-
-        // Enforce the source's AllowedHost policy on the browser target before any
-        // V8 dispatch, mirroring the HTTP path — a restricted source must not be
-        // able to point the browser at an arbitrary host.
-        let host = page_url
-            .parse::<url::Url>()
-            .ok()
-            .and_then(|u| u.host_str().map(str::to_string))
-            .ok_or_else(|| invalid(format!("browser_payload page_url has no host: {page_url}")))?;
-        state.allowed_host.allows_host(&host).map_err(invalid)?;
-
-        let payload = kani_core::v8_process::capture_page_payload_resilient(
-            &self.v8_process,
-            &self.http,
-            &page_url,
-            init_script,
-            ep.timeout_ms,
-            Some(&profile_key),
-            ep.auto_scroll,
-        )
-        .await
-        .map_err(|error| match error {
-            kani_core::v8_process::CapturePagePayloadError::Action { code, message }
-                if code.starts_with("solver_") =>
-            {
-                Error::BrowserCaptureUnavailable { code, message }
-            }
-            other => invalid(other.to_string()),
-        })?;
+        let pagination = ep.pagination.as_ref();
+        let logical_page = args
+            .get("page")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .max(1);
+        let window = pagination.map(|p| {
+            PageWindow::new(
+                logical_page,
+                args.get("page_size").and_then(|v| v.parse::<usize>().ok()),
+                p.native_page_size,
+            )
+        });
+        let captures = window.map_or(1, |w| w.captures);
 
         let req =
             Self::make_request(ep, &self.config, args, endpoint_name, &[]).map_err(invalid)?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
-        json_eval::extract_json_str(&mut state, &payload, &bp)
+
+        let mut merged: Option<serde_json::Value> = None;
+        for capture in 0..captures {
+            let mut params = params.clone();
+            if let (Some(p), Some(w)) = (pagination, window) {
+                let native_index = w.native_index(capture);
+                let offset = match p.offset_type {
+                    kani_yaml::yaml::schema::YamlOffsetType::Page => {
+                        (native_index + p.page_start as usize).to_string()
+                    }
+                    kani_yaml::yaml::schema::YamlOffsetType::Item => {
+                        (native_index * p.native_page_size.max(1)).to_string()
+                    }
+                };
+                params.push((p.offset_param.clone(), offset));
+            }
+            let page_url = append_query_params(&page_url, &params);
+
+            let mut state = self.make_host_state()?;
+            let profile_key = state.browser_profile_key.clone();
+
+            // Enforce the source's AllowedHost policy on the browser target before any
+            // V8 dispatch, mirroring the HTTP path — a restricted source must not be
+            // able to point the browser at an arbitrary host.
+            let host = page_url
+                .parse::<url::Url>()
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .ok_or_else(|| {
+                    invalid(format!("browser_payload page_url has no host: {page_url}"))
+                })?;
+            state.allowed_host.allows_host(&host).map_err(invalid)?;
+
+            let payload = kani_core::v8_process::capture_page_payload_resilient(
+                &self.v8_process,
+                &self.http,
+                &page_url,
+                init_script,
+                ep.timeout_ms,
+                Some(&profile_key),
+                ep.auto_scroll,
+            )
             .await
-            .map_err(invalid)
+            .map_err(|error| match error {
+                kani_core::v8_process::CapturePagePayloadError::Action { code, message }
+                    if code.starts_with("solver_") =>
+                {
+                    Error::BrowserCaptureUnavailable { code, message }
+                }
+                other => invalid(other.to_string()),
+            })?;
+
+            let value = json_eval::extract_json_str(&mut state, &payload, &bp)
+                .await
+                .map_err(invalid)?;
+            merge_capture(&mut merged, value);
+        }
+
+        let mut merged =
+            merged.ok_or_else(|| invalid("browser_payload produced no captures".to_string()))?;
+        if let Some(w) = window {
+            w.trim(&mut merged);
+        }
+        Ok(merged)
     }
 
     async fn eval_endpoint(
@@ -573,7 +713,8 @@ impl YamlSource {
                 "get_url not configured".to_string(),
             ))
         })?;
-        let args = Self::build_args(&[("manga_id", manga_id)]);
+        let mut args = Self::build_args(&[("manga_id", manga_id)]);
+        kani_yaml::resolve_get_url_manga_id(&self.config, &mut args);
         kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
             .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }
@@ -859,6 +1000,127 @@ impl YamlSource {
             max_hook_requests: 3,
             eval_limits: kani_core::evaluator::EvalLimits::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod browser_pagination_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::{PageWindow, merge_capture};
+
+    fn window(page: usize, requested: usize) -> PageWindow {
+        PageWindow::new(page, Some(requested), 28)
+    }
+
+    fn rows(from: usize, count: usize) -> serde_json::Value {
+        serde_json::json!({
+            "rows": (from..from + count).collect::<Vec<_>>(),
+            "scalars": { "has_next_page": true, "total_pages": 10 },
+        })
+    }
+
+    #[test]
+    fn a_page_inside_one_capture_costs_one() {
+        assert_eq!(window(1, 18).captures, 1);
+        assert_eq!(window(1, 28).captures, 1);
+    }
+
+    #[test]
+    fn a_page_straddling_two_captures_costs_two() {
+        assert_eq!(window(1, 32).captures, 2);
+        assert_eq!(window(2, 32).captures, 2);
+    }
+
+    #[test]
+    fn an_extreme_page_size_is_capped_and_served_short() {
+        let w = window(1, 10_000);
+        assert_eq!(w.captures, 6);
+        assert_eq!(w.take, 6 * 28);
+    }
+
+    #[test]
+    fn consecutive_pages_tile_the_items_without_gap_or_overlap() {
+        let mut seen: Vec<usize> = Vec::new();
+        for page in 1..=3 {
+            let w = window(page, 32);
+            let mut merged = None;
+            for capture in 0..w.captures {
+                merge_capture(&mut merged, rows(w.native_index(capture) * 28, 28));
+            }
+            let mut merged = merged.unwrap();
+            w.trim(&mut merged);
+            let page_rows: Vec<usize> = serde_json::from_value(merged["rows"].clone()).unwrap();
+            assert_eq!(
+                page_rows.len(),
+                32,
+                "page {page} must hold what was asked for"
+            );
+            seen.extend(page_rows);
+        }
+        assert_eq!(seen, (0..96).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_page_smaller_than_a_capture_still_advances_by_its_own_size() {
+        let w = window(2, 12);
+        let mut merged = None;
+        for capture in 0..w.captures {
+            merge_capture(&mut merged, rows(w.native_index(capture) * 28, 28));
+        }
+        let mut merged = merged.unwrap();
+        w.trim(&mut merged);
+        let page_rows: Vec<usize> = serde_json::from_value(merged["rows"].clone()).unwrap();
+        assert_eq!(page_rows, (12..24).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn rows_left_over_by_the_trim_are_reported_as_a_next_page() {
+        let w = window(1, 32);
+        let mut merged = None;
+        merge_capture(&mut merged, rows(0, 28));
+        merge_capture(
+            &mut merged,
+            serde_json::json!({
+                "rows": (28..56).collect::<Vec<_>>(),
+                "scalars": { "has_next_page": false, "total_pages": 2 },
+            }),
+        );
+        let mut merged = merged.unwrap();
+        w.trim(&mut merged);
+        assert_eq!(merged["rows"].as_array().unwrap().len(), 32);
+        assert_eq!(
+            merged["scalars"]["has_next_page"],
+            serde_json::json!(true),
+            "the site is out of pages but 24 fetched rows have not been shown"
+        );
+    }
+
+    #[test]
+    fn the_sites_page_count_is_restated_in_the_pages_being_served() {
+        let w = window(1, 14);
+        let mut merged = Some(rows(0, 28));
+        w.trim(merged.as_mut().unwrap());
+        assert_eq!(
+            merged.unwrap()["scalars"]["total_pages"],
+            serde_json::json!(20),
+            "10 site pages of 28 are 20 pages of 14"
+        );
+    }
+
+    #[test]
+    fn merging_accumulates_rows_and_takes_the_later_scalars() {
+        let mut merged = None;
+        merge_capture(
+            &mut merged,
+            serde_json::json!({ "rows": [1, 2], "has_next_page": true }),
+        );
+        merge_capture(
+            &mut merged,
+            serde_json::json!({ "rows": [3], "has_next_page": false }),
+        );
+        let merged = merged.unwrap();
+        assert_eq!(merged["rows"], serde_json::json!([1, 2, 3]));
+        assert_eq!(merged["has_next_page"], serde_json::json!(false));
     }
 }
 

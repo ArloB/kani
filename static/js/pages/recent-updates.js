@@ -7,6 +7,7 @@ import { renderPagination } from '../components/pagination.js';
 import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { scrollPageTop } from '../router.js';
 import { getMangaCoverUrl } from '../api.js';
+import { applyCoverQuality } from '../cover-quality.js';
 import { formatChapterTitle, hasNextPage, escapeHtml, deferredSkeleton, addPullToRefresh } from '../utils.js';
 import { skeletonUpdateList } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
@@ -134,7 +135,7 @@ async function _fetch(listEl, paginEl) {
     return;
   }
 
-  /** @type {Map<string, Map<number, { manga_id: number, manga_title: string, chapters: any[] }>>} */
+  /** @type {Map<string, Map<number, { manga_id: number, manga_title: string, cover_url: string | null, chapters: any[] }>>} */
   const byDate = new Map();
   /** Tracks the newest timestamp seen for each dateKey so we can sort groups newest-first. */
   const rawDates = /** @type {Map<string, number>} */ (new Map());
@@ -146,7 +147,7 @@ async function _fetch(listEl, paginEl) {
 
     if (!byDate.has(dateKey)) byDate.set(dateKey, new Map());
     const byManga = /** @type {Map<number, any>} */ (byDate.get(dateKey));
-    if (!byManga.has(mid)) byManga.set(mid, { manga_id: mid, manga_title: title, chapters: [] });
+    if (!byManga.has(mid)) byManga.set(mid, { manga_id: mid, manga_title: title, cover_url: item.cover_url ?? null, chapters: [] });
     byManga.get(mid).chapters.push({
       id: item.chapter_id ?? item.id,
       title: formatChapterTitle(item),
@@ -184,7 +185,7 @@ async function _fetch(listEl, paginEl) {
       const groupEl = document.createElement('div');
       groupEl.className = 'update-group';
 
-      const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
+      const coverUrl = applyCoverQuality(group.cover_url ?? getMangaCoverUrl(group.manga_id, 'sm'));
       const mangaHref = `/manga/${group.manga_id}`;
       const n = group.chapters.length;
       const nums = group.chapters

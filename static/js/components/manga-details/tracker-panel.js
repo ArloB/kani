@@ -60,6 +60,11 @@ function InternalTrackingCard({ dbId }) {
   async function handleNotifyChange(e) {
     const val = /** @type {HTMLInputElement} */ (e.target).checked;
     if (val && 'Notification' in window) {
+      if (!window.isSecureContext) {
+        setNotify(false);
+        await showAlert(t('manga.tracker.notify.insecure'), { title: t('manga.tracker.notify.blocked.title') });
+        return;
+      }
       if (Notification.permission === 'denied') {
         setNotify(false);
         await showAlert(t('manga.tracker.notify.blocked'), { title: t('manga.tracker.notify.blocked.title') });

@@ -2,7 +2,7 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{build_test_app, create_admin, test_state};
+use common::{build_test_app, create_admin, create_regular_user, test_state};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -157,18 +157,50 @@ async fn a_malformed_migration_body_is_rejected() {
     let app = build_test_app(state).await;
     let cookie = common::login(&app, u, p).await;
 
+    for path in [
+        format!("/rest/manga/{manga_id}/migrate"),
+        "/rest/migrations/match".to_string(),
+        "/rest/migrations/bulk".to_string(),
+        "/rest/migrations/status".to_string(),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(post(
+                &path,
+                Some(&cookie),
+                json!({ "target_source_id": "not a number" }),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            res.status().is_client_error(),
+            "{path}: expected a 4xx, got {}",
+            res.status()
+        );
+    }
+}
+
+#[tokio::test]
+async fn matching_is_capped_per_request_so_one_call_cannot_queue_the_whole_library() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let items: Vec<_> = (1..=21).map(|id| json!({ "manga_id": id })).collect();
     let res = app
         .oneshot(post(
-            &format!("/rest/manga/{manga_id}/migrate"),
+            "/rest/migrations/match",
             Some(&cookie),
-            json!({ "target_source_id": "not a number" }),
+            json!({ "target_source_id": 1, "items": items }),
         ))
         .await
         .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = common::body_json(res).await;
     assert!(
-        res.status().is_client_error(),
-        "expected a 4xx, got {}",
-        res.status()
+        body.to_string().contains("At most 20"),
+        "the refusal must name the limit, not fail on something else: {body}"
     );
 }
 
@@ -221,5 +253,81 @@ async fn the_chapter_listing_can_ask_for_orphans() {
     assert_eq!(
         rows[0]["is_orphaned"], true,
         "the row renders its Orphaned badge from this field"
+    );
+}
+
+async fn seed_job(db: &sqlx::SqlitePool, job_type: &str, result: serde_json::Value) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, priority, description, result_json, created_at, completed_at) \
+         VALUES (?, ?, 'completed', 1, 'seeded', ?, 0, 0)",
+    )
+    .bind(&id)
+    .bind(job_type)
+    .bind(result.to_string())
+    .execute(db)
+    .await
+    .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn a_user_who_can_migrate_can_read_the_migration_result() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let job_id = seed_job(
+        &db,
+        "migration",
+        json!({ "chapters_matched": 7, "chapters_orphaned": 1, "chapters_new": 2, "chapters_kept": 0 }),
+    )
+    .await;
+
+    let (u, p) = create_regular_user(&state, "reader").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            "/rest/migrations/status",
+            Some(&cookie),
+            json!({ "job_ids": [job_id] }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "migrating needs library:manage, so reading the outcome must not need admin:jobs"
+    );
+    let body = common::body_json(res).await;
+    assert_eq!(body[0]["id"], job_id, "{body}");
+    assert_eq!(body[0]["status"], "completed", "{body}");
+    assert_eq!(body[0]["result"]["chapters_matched"], 7, "{body}");
+}
+
+#[tokio::test]
+async fn the_migration_status_route_does_not_reveal_other_jobs() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let other = seed_job(&db, "backup", json!({ "path": "/secret/backup.zip" })).await;
+
+    let (u, p) = create_regular_user(&state, "reader").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            "/rest/migrations/status",
+            Some(&cookie),
+            json!({ "job_ids": [other] }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = common::body_json(res).await;
+    assert_eq!(
+        body,
+        json!([]),
+        "only migration jobs are readable here; anything else stays behind admin:jobs"
     );
 }

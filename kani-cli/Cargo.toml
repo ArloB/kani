@@ -1,6 +1,6 @@
 [package]
 name = "kani-cli"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.3"
 license.workspace = true
 repository.workspace = true
 edition = "2024"
@@ -32,6 +32,7 @@ flate2      = "1"
 kani-shared = { path = "../kani-shared", features = ["builder"] }
 kani-yaml   = { path = "../kani-yaml" }
 kani-core   = { path = "../kani-core" }
+tokio       = { version = "1.49.0", features = ["rt-multi-thread"] }
 reqwest   = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 sha2.workspace = true
 ed25519-dalek.workspace = true

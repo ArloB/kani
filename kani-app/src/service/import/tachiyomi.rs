@@ -10,6 +10,7 @@ use crate::ids::{MangaId, SourceId, UserId};
 use crate::service::AppService;
 use crate::service::backup::BackupManga as KaniBackupManga;
 use crate::service::backup::{BackupChapterProgress, BackupMangaTracking};
+use crate::service::import::progress::ImportedProgress;
 
 use super::tachiyomi_sources::{tachiyomi_source_to_kani_name, tachiyomi_sync_id_to_tracker_name};
 
@@ -21,6 +22,15 @@ pub struct TachiyomiPreview {
     pub category_count: u32,
     pub has_tracking: bool,
     pub has_chapter_progress: bool,
+    /// Chapters the backup carries. Zero alongside a non-zero manga count means
+    /// the file did not decode the way this proto expects, which is otherwise
+    /// indistinguishable from a library nobody has read.
+    pub chapter_count: u32,
+    /// Chapters carrying a read flag or a page position.
+    pub progress_entry_count: u32,
+    /// Tracker links the backup carries. Reading status is derived from these,
+    /// so a library with no tracker linked has none to import.
+    pub tracking_entry_count: u32,
     pub sources: Vec<TachiyomiSourceSummary>,
     pub pending_import_estimate: u32,
 }
@@ -55,23 +65,39 @@ impl Default for TachiyomiImportOptions {
 #[derive(Debug, Serialize)]
 pub struct TachiyomiImportResult {
     pub imported_manga: u32,
+    /// Read-progress entries whose chapter was not found in the library.
+    pub unmatched_progress: u32,
     pub skipped_manga: u32,
+    pub trashed_manga: u32,
     pub imported_categories: u32,
     pub pending_imports_added: u32,
     pub possible_duplicates: u32,
     pub warnings: Vec<String>,
 }
 
+/// The name a backup gives each source it references, by Mihon source id.
+fn backup_source_names(backup: &Backup) -> std::collections::HashMap<i64, String> {
+    backup
+        .backup_sources
+        .iter()
+        .filter(|s| !s.name.trim().is_empty())
+        .map(|s| (s.source_id, s.name.clone()))
+        .collect()
+}
+
 /// Resolve a Mihon/Tachiyomi source ID to a Kani source.
 ///
-/// First queries the DB for a source with a matching `mihon_source_id` (set when a
-/// WASM extension is installed). Falls back to the hardcoded name-map in
-/// `tachiyomi_sources.rs` for extensions that pre-date the declarative field.
+/// Tries `sources.mihon_source_id` (declared by an extension), then the
+/// hardcoded map in `tachiyomi_sources.rs`, then the name the backup itself
+/// carries — an installed source of the same name is the same source, which
+/// spares the table an entry per extension that ever ships.
 ///
-/// Returns `(Option<kani_source_id>, Option<display_name>)`.
+/// Returns `(Option<kani_source_id>, Option<display_name>)`; the name is
+/// returned even when nothing matched, so warnings can say what was missing.
 async fn resolve_kani_source(
     db: &sqlx::SqlitePool,
     mihon_id: i64,
+    backup_name: Option<&str>,
 ) -> Result<(Option<i64>, Option<String>)> {
     let by_mihon = sqlx::query!(
         "SELECT id, name FROM sources WHERE mihon_source_id = ? AND deleted_at IS NULL",
@@ -84,18 +110,40 @@ async fn resolve_kani_source(
         return Ok((Some(row.id), Some(row.name)));
     }
 
-    let kani_name = tachiyomi_source_to_kani_name(mihon_id);
-    if let Some(name) = kani_name {
+    let mapped = tachiyomi_source_to_kani_name(mihon_id);
+    if let Some(name) = mapped {
         let id = sqlx::query_scalar!(
             "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
             name
         )
         .fetch_optional(db)
         .await?;
-        Ok((id, Some(name.to_string())))
-    } else {
-        Ok((None, None))
+        if let Some(id) = id {
+            return Ok((Some(id), Some(name.to_string())));
+        }
     }
+
+    let backup_name = backup_name.map(str::trim).filter(|n| !n.is_empty());
+    if let Some(name) = backup_name {
+        let by_name: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id, name FROM sources WHERE name = ? COLLATE NOCASE AND deleted_at IS NULL",
+        )
+        .bind(name)
+        .fetch_optional(db)
+        .await?;
+        if let Some((id, installed_name)) = by_name {
+            return Ok((Some(id), Some(installed_name)));
+        }
+    }
+
+    // Nothing installed matches; name it as helpfully as we can so the warning
+    // says which source is missing rather than "Unknown".
+    Ok((
+        None,
+        mapped
+            .map(str::to_string)
+            .or_else(|| backup_name.map(str::to_string)),
+    ))
 }
 
 fn decode_backup(data: &[u8]) -> Result<Backup> {
@@ -143,23 +191,33 @@ impl AppService {
         let backup = decode_backup(data)?;
 
         let mut source_counts: std::collections::HashMap<i64, u32> = Default::default();
-        let mut has_tracking = false;
-        let mut has_chapter_progress = false;
         let mut pending_estimate: u32 = 0;
+        let mut tracking_entry_count: u32 = 0;
+        let mut chapter_count: u32 = 0;
+        let mut progress_entry_count: u32 = 0;
 
         for m in &backup.backup_manga {
             *source_counts.entry(m.source).or_insert(0) += 1;
-            if !m.tracking.is_empty() {
-                has_tracking = true;
-            }
-            if m.chapters.iter().any(|c| c.read || c.last_page_read > 0) {
-                has_chapter_progress = true;
-            }
+            tracking_entry_count += m.tracking.len() as u32;
+            chapter_count += m.chapters.len() as u32;
+            progress_entry_count += m
+                .chapters
+                .iter()
+                .filter(|c| c.read || c.last_page_read > 0)
+                .count() as u32;
         }
+        let has_chapter_progress = progress_entry_count > 0;
+        let has_tracking = tracking_entry_count > 0;
 
+        let names = backup_source_names(&backup);
         let mut sources = Vec::new();
         for (&source_id, &count) in &source_counts {
-            let (kani_db_id, display_name) = resolve_kani_source(&self.db, source_id).await?;
+            let (kani_db_id, display_name) = resolve_kani_source(
+                &self.db,
+                source_id,
+                names.get(&source_id).map(String::as_str),
+            )
+            .await?;
             let found = kani_db_id.is_some();
 
             if !found {
@@ -181,6 +239,9 @@ impl AppService {
             category_count: backup.backup_categories.len() as u32,
             has_tracking,
             has_chapter_progress,
+            chapter_count,
+            progress_entry_count,
+            tracking_entry_count,
             sources,
             pending_import_estimate: pending_estimate,
         })
@@ -196,7 +257,9 @@ impl AppService {
 
         let mut result = TachiyomiImportResult {
             imported_manga: 0,
+            unmatched_progress: 0,
             skipped_manga: 0,
+            trashed_manga: 0,
             imported_categories: 0,
             pending_imports_added: 0,
             possible_duplicates: 0,
@@ -228,6 +291,10 @@ impl AppService {
         }
 
         let mut new_manga_ids: Vec<i64> = Vec::new();
+        // One job per source so each batch runs under that source's own
+        // concurrency and rate limits.
+        let mut resolve_sources: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let names = backup_source_names(&backup);
 
         let total_manga = if opts.import_manga {
             backup.backup_manga.len() as u32
@@ -240,16 +307,23 @@ impl AppService {
                 total: total_manga,
             });
         }
-        for (processed, m) in (1_u32..).zip(backup.backup_manga.iter()) {
-            if !opts.import_manga {
-                break;
-            }
+        let mut title_index: std::collections::HashMap<
+            i64,
+            std::collections::HashMap<String, Vec<i64>>,
+        > = Default::default();
 
-            let (resolved_id, display_name) = resolve_kani_source(&self.db, m.source).await?;
+        for (processed, m) in (1_u32..).zip(backup.backup_manga.iter()) {
+            let (resolved_id, display_name) =
+                resolve_kani_source(&self.db, m.source, names.get(&m.source).map(String::as_str))
+                    .await?;
 
             let source_id = match resolved_id {
                 Some(id) => id,
                 None => {
+                    if !opts.import_manga {
+                        result.skipped_manga += 1;
+                        continue;
+                    }
                     let kani_hint = display_name.as_deref().unwrap_or("Unknown");
                     result.warnings.push(format!(
                         "Source '{}' (Tachiyomi ID {}) not installed — '{}' saved to pending imports",
@@ -272,13 +346,62 @@ impl AppService {
                 }
             };
 
-            let existing_id: Option<i64> = sqlx::query_scalar!(
+            let mut existing_id: Option<i64> = sqlx::query_scalar!(
                 "SELECT id FROM manga WHERE source_id = ? AND source_manga_id = ?",
                 source_id,
                 m.url
             )
             .fetch_optional(&self.db_read)
             .await?;
+
+            if existing_id.is_none() {
+                use std::collections::hash_map::Entry;
+                let index = match title_index.entry(source_id) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => e.insert(
+                        crate::service::dedup::source_title_index(&self.db_read, source_id).await?,
+                    ),
+                };
+                // An ambiguous title matches nothing: attaching a backup's
+                // progress to the wrong series is worse than a duplicate.
+                existing_id = index
+                    .get(&crate::service::dedup::normalise_title(&m.title))
+                    .filter(|ids| ids.len() == 1)
+                    .map(|ids| ids[0]);
+            }
+
+            if let Some(id) = existing_id {
+                let trashed: Option<i64> = sqlx::query_scalar!(
+                    "SELECT id FROM manga WHERE id = ? AND deleted_at IS NOT NULL",
+                    id
+                )
+                .fetch_optional(&self.db_read)
+                .await?;
+                if trashed.is_some() {
+                    result.trashed_manga += 1;
+                    let _ = self.refresh_tx.send(AppEvent::ImportProgress {
+                        origin: "tachiyomi".into(),
+                        completed: processed,
+                        total: total_manga,
+                        title: m.title.clone(),
+                    });
+                    continue;
+                }
+            }
+
+            // Without `import_manga` the run may only touch what is already in
+            // the library, so an entry with nothing to attach to is skipped
+            // rather than added under another option's name.
+            if existing_id.is_none() && !opts.import_manga {
+                result.skipped_manga += 1;
+                let _ = self.refresh_tx.send(AppEvent::ImportProgress {
+                    origin: "tachiyomi".into(),
+                    completed: processed,
+                    total: total_manga,
+                    title: m.title.clone(),
+                });
+                continue;
+            }
 
             let (manga_id, is_new) = if let Some(id) = existing_id {
                 (id, false)
@@ -339,6 +462,14 @@ impl AppService {
                     status
                 )
                 .fetch_one(&mut *tx)
+                .await?;
+
+                sqlx::query!(
+                    "INSERT OR REPLACE INTO manga_import_links (manga_id, status) \
+                     VALUES (?, 'pending')",
+                    id
+                )
+                .execute(&mut *tx)
                 .await?;
 
                 for &cat_idx in &m.categories {
@@ -402,9 +533,13 @@ impl AppService {
                 } else {
                     None
                 };
+                // Updated rather than replaced: REPLACE would reset every column the
+                // backup does not carry, including this user's reader settings.
                 sqlx::query!(
-                    "INSERT OR REPLACE INTO user_manga_tracking \
-                         (user_id, manga_id, status, score) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO user_manga_tracking \
+                         (user_id, manga_id, status, score) VALUES (?, ?, ?, ?) \
+                         ON CONFLICT(user_id, manga_id) DO UPDATE SET \
+                         status = excluded.status, score = excluded.score",
                     user_id,
                     manga_id,
                     kani_status,
@@ -493,41 +628,86 @@ impl AppService {
                 .await?;
             }
 
+            // Search indexing and a local cover. Chapters wait for the resolve
+            // job: the backup's id addresses nothing on this source, so asking
+            // for them now only produces extraction errors.
+            if is_new {
+                let cover = (!m.thumbnail_url.is_empty()).then_some(m.thumbnail_url.as_str());
+                self.after_manga_added(
+                    MangaId(manga_id),
+                    source_id,
+                    &m.url,
+                    &m.title,
+                    cover,
+                    false,
+                )
+                .await;
+                resolve_sources.insert(source_id);
+            }
+
             if opts.import_chapter_progress {
-                // For newly inserted manga, fetch chapters from the source first so that
-                // source_chapter_id values exist in the chapters table for progress matching.
-                if is_new
-                    && let Err(e) = self
-                        .fetch_and_store_chapters_silent(MangaId(manga_id))
-                        .await
-                {
-                    result
-                        .warnings
-                        .push(format!("Could not fetch chapters for '{}': {}", m.title, e));
-                }
-                for ch in &m.chapters {
-                    if !ch.read && ch.last_page_read == 0 {
-                        continue;
-                    }
-                    let chapter_id: Option<i64> = sqlx::query_scalar!(
-                        "SELECT id FROM chapters WHERE manga_id = ? AND source_chapter_id = ?",
-                        manga_id,
-                        ch.url
+                let entries: Vec<ImportedProgress> = m
+                    .chapters
+                    .iter()
+                    .filter(|ch| ch.read || ch.last_page_read != 0)
+                    .map(|ch| ImportedProgress {
+                        source_chapter_id: ch.url.clone(),
+                        chapter_number: f64::from(ch.chapter_number),
+                        is_read: ch.read,
+                        last_page_read: i64::from(ch.last_page_read),
+                    })
+                    .collect();
+
+                // A manga still carrying a link row is owed a chapter list, so
+                // its progress waits for one instead of matching nothing. A
+                // re-import is then the repair action for one that gave up.
+                let awaiting_link: Option<String> = if is_new {
+                    Some("pending".to_string())
+                } else {
+                    sqlx::query_scalar!(
+                        "SELECT status FROM manga_import_links WHERE manga_id = ?",
+                        manga_id
                     )
                     .fetch_optional(&self.db_read)
-                    .await?;
+                    .await?
+                };
 
-                    if let Some(ch_id) = chapter_id {
+                if let Some(status) = awaiting_link {
+                    self.store_import_progress(MangaId(manga_id), user_id, &entries)
+                        .await?;
+                    if status != "pending" {
                         sqlx::query!(
-                            "INSERT OR REPLACE INTO user_chapter_tracking \
-                             (user_id, chapter_id, is_read, last_page_read) VALUES (?, ?, ?, ?)",
-                            user_id,
-                            ch_id,
-                            ch.read,
-                            ch.last_page_read
+                            "INSERT OR REPLACE INTO manga_import_links (manga_id, status) \
+                             VALUES (?, 'pending')",
+                            manga_id
                         )
                         .execute(&self.db)
                         .await?;
+                        resolve_sources.insert(source_id);
+                    }
+                } else {
+                    let mut unmatched = 0u32;
+                    for e in &entries {
+                        let applied = self
+                            .apply_one_progress(
+                                MangaId(manga_id),
+                                user_id,
+                                &e.source_chapter_id,
+                                e.chapter_number,
+                                e.is_read,
+                                e.last_page_read,
+                            )
+                            .await?;
+                        if !applied {
+                            unmatched += 1;
+                        }
+                    }
+                    if unmatched > 0 {
+                        result.unmatched_progress += unmatched;
+                        result.warnings.push(format!(
+                            "Read progress for '{}': {unmatched} entries matched none of its chapters in the library.",
+                            m.title
+                        ));
                     }
                 }
             }
@@ -555,6 +735,12 @@ impl AppService {
             let job = crate::jobs::import_dedup::ImportDedupJob::new(new_manga_ids);
             if let Err(e) = self.job_manager.submit(job).await {
                 tracing::warn!("Failed to submit import dedup job: {e}");
+            }
+        }
+
+        for source_id in resolve_sources {
+            if let Err(e) = self.queue_import_resolve(Some(source_id)).await {
+                tracing::warn!("Failed to submit import resolve job: {e}");
             }
         }
 

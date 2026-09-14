@@ -1721,6 +1721,254 @@ async fn a_migration_that_matches_is_still_allowed() {
     );
 }
 
+/// A migration target that can also be searched, which is what bulk matching
+/// needs before any chapter listing is fetched.
+fn wire_searchable_migration_target(
+    svc: &kani_app::service::AppService,
+    source_id: i64,
+    base_url: &str,
+) {
+    let search = json_endpoint(
+        "/target/search",
+        "/results",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    let details = json_endpoint(
+        "/target/$manga_id$",
+        "/manga",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    let chapters = json_endpoint(
+        "/target/$manga_id$/chapters",
+        "/chapters",
+        vec![
+            json_field("id", "/id", false),
+            json_field("number", "/number", false),
+        ],
+    );
+    let ext = ValidatedExtension {
+        id: "searchable-target".into(),
+        name: "Searchable Target".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        search: Some(search),
+        manga_details: Some(details),
+        chapter_list: Some(chapters),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("searchable-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+#[tokio::test]
+async fn bulk_matching_proposes_the_closest_title_and_leaves_a_miss_unmatched() {
+    use kani_app::service::migration::MigrationMatchQuery;
+
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let close = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+    let miss = insert_manga(&svc.db, home_source, "m2", "Hello Season").await;
+
+    let target = insert_source(&svc.db, "searchable-target").await;
+    wire_searchable_migration_target(&svc, target, &origin.base());
+    insert_manga(&svc.db, target, "tgt-2", "Unrelated Story").await;
+    origin.set(
+        "/target/search",
+        Response::json(
+            r#"{"results":[{"id":"tgt-2","title":"Unrelated Story"},{"id":"tgt-1","title":"The Held Series"}]}"#,
+        ),
+    );
+
+    let matches = svc
+        .match_migration_targets(
+            target,
+            vec![
+                MigrationMatchQuery {
+                    manga_id: close,
+                    query: None,
+                },
+                MigrationMatchQuery {
+                    manga_id: miss,
+                    query: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        matches.len(),
+        2,
+        "one proposal per requested title: {matches:?}"
+    );
+    assert_eq!(
+        matches[0].manga_id, close,
+        "proposals keep the request order"
+    );
+    assert_eq!(
+        matches[0].best.as_deref(),
+        Some("tgt-1"),
+        "a title differing only by a leading article is the same series: {matches:?}"
+    );
+    assert_eq!(
+        matches[0].candidates.first().map(|c| c.id.as_str()),
+        Some("tgt-1"),
+        "candidates are ranked best first"
+    );
+    assert!(
+        matches[0]
+            .candidates
+            .iter()
+            .any(|c| c.id == "tgt-2" && c.in_library),
+        "a candidate already in the library from the target is flagged, since \
+         migrating onto it would collide: {matches:?}"
+    );
+    assert_eq!(matches[1].manga_id, miss);
+    assert_eq!(
+        matches[1]
+            .candidates
+            .first()
+            .map(|c| (c.id.as_str(), c.in_library)),
+        Some(("tgt-1", false)),
+        "the nearest candidate is free to take, so only its score can hold it back: {matches:?}"
+    );
+    assert_eq!(
+        matches[1].best, None,
+        "no candidate is close enough to propose without review: {matches:?}"
+    );
+    assert!(matches[1].error.is_none(), "a miss is not an error");
+}
+
+#[tokio::test]
+async fn a_bulk_batch_queues_one_migration_per_title_and_refuses_a_shared_target() {
+    use kani_app::service::migration::BulkMigrationItem;
+
+    let svc = test_service().await;
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let first = insert_manga(&svc.db, home_source, "m1", "First").await;
+    let second = insert_manga(&svc.db, home_source, "m2", "Second").await;
+    let third = insert_manga(&svc.db, home_source, "m3", "Third").await;
+    let target = insert_source(&svc.db, "target-source").await;
+
+    let submitted = svc
+        .submit_bulk_migration(
+            target,
+            vec![
+                BulkMigrationItem {
+                    manga_id: first,
+                    target_source_manga_id: "tgt-1".into(),
+                },
+                BulkMigrationItem {
+                    manga_id: second,
+                    target_source_manga_id: "tgt-2".into(),
+                },
+                BulkMigrationItem {
+                    manga_id: third,
+                    target_source_manga_id: "tgt-1".into(),
+                },
+            ],
+            true,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        submitted.len(),
+        3,
+        "every item gets an outcome: {submitted:?}"
+    );
+    assert!(
+        submitted[0].job_id.is_some() && submitted[0].error.is_none(),
+        "{submitted:?}"
+    );
+    assert!(
+        submitted[1].job_id.is_some() && submitted[1].error.is_none(),
+        "{submitted:?}"
+    );
+    assert!(
+        submitted[2].job_id.is_none() && submitted[2].error.is_some(),
+        "two titles migrated onto one target series would collide on the second, \
+         so it must be refused up front: {submitted:?}"
+    );
+
+    for outcome in &submitted[..2] {
+        let job_id = outcome.job_id.unwrap().to_string();
+        let (job_type, priority): (String, i64) =
+            sqlx::query_as("SELECT job_type, priority FROM jobs WHERE id = ?")
+                .bind(&job_id)
+                .fetch_one(&svc.db)
+                .await
+                .unwrap();
+        assert_eq!(
+            job_type, "migration",
+            "each accepted title is its own migration job, so the per-series guard still applies"
+        );
+        assert_eq!(
+            priority, 50,
+            "a batch queues at normal priority, or fifty migrations would starve every other job"
+        );
+    }
+
+    let busy = insert_manga(&svc.db, home_source, "m4", "Busy").await;
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, priority, description, params_json, created_at) \
+         VALUES (?, 'migration', 'running', 100, 'seeded', ?, 0)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(serde_json::json!({ "manga_id": busy.0 }).to_string())
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let again = svc
+        .submit_bulk_migration(
+            target,
+            vec![
+                BulkMigrationItem {
+                    manga_id: busy,
+                    target_source_manga_id: "tgt-3".into(),
+                },
+                BulkMigrationItem {
+                    manga_id: third,
+                    target_source_manga_id: "tgt-4".into(),
+                },
+            ],
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(
+        again[0].job_id.is_none()
+            && again[0]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("already in progress")),
+        "a title already migrating is refused per item: {again:?}"
+    );
+    assert!(
+        again[1].job_id.is_some(),
+        "and the refusal does not fail the rest of the batch: {again:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_manifest_survives_the_migration_rename() {
     let origin = TestOrigin::start().await;

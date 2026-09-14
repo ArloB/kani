@@ -375,6 +375,40 @@ pub(crate) struct MigrateMangaRequest {
 }
 
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub(crate) struct MigrationMatchItem {
+    #[schema(value_type = i64)]
+    pub manga_id: kani_app::ids::MangaId,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub(crate) struct MatchMigrationTargetsRequest {
+    pub target_source_id: i64,
+    pub items: Vec<MigrationMatchItem>,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub(crate) struct BulkMigrationRequestItem {
+    #[schema(value_type = i64)]
+    pub manga_id: kani_app::ids::MangaId,
+    pub target_source_manga_id: String,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub(crate) struct BulkMigrationRequest {
+    pub target_source_id: i64,
+    pub items: Vec<BulkMigrationRequestItem>,
+    pub keep_orphaned_downloads: bool,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub(crate) struct MigrationStatusRequest {
+    #[schema(value_type = Vec<String>)]
+    pub job_ids: Vec<uuid::Uuid>,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub(crate) struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,

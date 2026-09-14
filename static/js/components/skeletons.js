@@ -6,13 +6,22 @@
  * @returns {string}
  */
 export function skeletonGrid(count = 24) {
+  return `<div class="manga-grid">${skeletonGridItems(count)}</div>`;
+}
+
+/**
+ * Card skeletons for a grid element that already exists.
+ * @param {number} count
+ * @returns {string}
+ */
+export function skeletonGridItems(count = 24) {
   const card = `
     <div class="flex flex-col gap-2">
       <div class="skeleton w-full rounded-sm" style="aspect-ratio:2/3"></div>
       <div class="skeleton h-3 w-4/5 rounded"></div>
       <div class="skeleton h-3 w-3/5 rounded"></div>
     </div>`;
-  return `<div class="manga-grid">${card.repeat(count)}</div>`;
+  return card.repeat(count);
 }
 
 /**

@@ -19,3 +19,24 @@ pub(crate) fn tachiyomi_sync_id_to_tracker_name(sync_id: i32) -> Option<&'static
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unmapped_id_maps_to_nothing() {
+        assert_eq!(tachiyomi_source_to_kani_name(1), None);
+    }
+
+    #[test]
+    fn every_cubari_alias_maps() {
+        for id in [
+            6338219619148105941,
+            1470847599087460255,
+            2013845246758512290,
+        ] {
+            assert_eq!(tachiyomi_source_to_kani_name(id), Some("Cubari"));
+        }
+    }
+}

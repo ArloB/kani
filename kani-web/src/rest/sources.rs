@@ -749,8 +749,7 @@ pub(super) async fn check_in_library(
     State(state): State<AppState>,
     Path((source_id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let decoded = kani_shared::decode_manga_id(&manga_id);
-    let db_id = state.check_in_library(source_id, &decoded).await?;
+    let db_id = state.check_in_library(source_id, &manga_id).await?;
     Ok(Json(json!({ "db_id": db_id })))
 }
 

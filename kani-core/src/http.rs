@@ -287,6 +287,10 @@ pub enum SolverCaptureError {
     Unsupported,
     Unauthorized,
     Unreachable,
+    /// The solver ran the script but it never called `passPayload`. Distinct
+    /// from `Failed` because the solver itself is healthy: a caller retrying a
+    /// harvest should treat this as "try again", not "the solver is broken".
+    ScriptProducedNothing(String),
     Failed(String),
 }
 
@@ -305,6 +309,7 @@ impl std::fmt::Display for SolverCaptureError {
                  the solver's API_KEY"
             ),
             Self::Unreachable => write!(f, "no solver is reachable at the configured URL"),
+            Self::ScriptProducedNothing(message) => write!(f, "{message}"),
             Self::Failed(message) => write!(f, "{message}"),
         }
     }
@@ -1662,6 +1667,11 @@ impl SmartClient {
 
         let message = response["message"].as_str().unwrap_or("no message");
         if response["status"].as_str().unwrap_or("") != "ok" {
+            if message.contains("passPayload was not called") {
+                return Err(SolverCaptureError::ScriptProducedNothing(
+                    message.to_string(),
+                ));
+            }
             return Err(SolverCaptureError::Failed(format!(
                 "FlareSolverr capture failed: {message}"
             )));
@@ -1673,6 +1683,22 @@ impl SmartClient {
             .ok_or_else(|| {
                 SolverCaptureError::Failed("FlareSolverr capture returned no payload".to_string())
             })?;
+
+        // Where a capture's wall-clock went: navigate, solve, reload, poll.
+        // Behind the same operator toggle as script-engine request logging, so
+        // an instance does not narrate every capture by default.
+        if crate::v8_process::v8_debug_logging_enabled() {
+            let solution = &response["solution"];
+            tracing::info!(
+                url,
+                session = use_session,
+                timings = %solution["timings"],
+                rechallenged = solution["reChallenged"].as_bool().unwrap_or(false),
+                payload_bytes = payload.len(),
+                "solver capture completed"
+            );
+        }
+
         self.solver_capture_support
             .store(if use_session { 3 } else { 1 }, Ordering::Relaxed);
         if use_session && let Some(key) = session_key.as_ref() {
@@ -2480,6 +2506,47 @@ mod tests {
             SmartClient::solver_session_id(&other)
         );
         assert_eq!(SmartClient::solver_session_id(&first).len(), 69);
+    }
+
+    #[tokio::test]
+    async fn a_script_that_never_submits_is_distinguished_from_a_broken_solver() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "msg": "ready",
+                "capabilities": ["kani.capture/1", "kani.capture/2"]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_partial_json(
+                serde_json::json!({"cmd": "kani.capture"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "error",
+                "message": "passPayload was not called within 1000 ms."
+            })))
+            .mount(&server)
+            .await;
+        let client = SmartClient::new(Some(server.uri())).unwrap();
+
+        let error = client
+            .solver_capture(
+                "https://sub.example.com/a",
+                "// never submits",
+                1000,
+                None,
+                false,
+            )
+            .await
+            .expect_err("a capture that never submits must fail");
+
+        assert!(
+            matches!(error, SolverCaptureError::ScriptProducedNothing(_)),
+            "a healthy solver running a script that never submits must not look \
+             like a broken solver, got: {error:?}"
+        );
     }
 
     #[tokio::test]

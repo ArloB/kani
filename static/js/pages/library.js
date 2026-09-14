@@ -6,9 +6,10 @@ import * as api from '../api.js';
 import { hasPermission } from '../session.js';
 import { getState, setState, updateState, subscribe } from '../cache.js';
 import { navigate, scrollPageTop } from '../router.js';
-import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, deferredSkeleton, addPullToRefresh, withBusy } from '../utils.js';
+import { debounce, hasNextPage, deferredSkeleton, addPullToRefresh, withBusy } from '../utils.js';
+import { getTileSize, setTileSize } from '../tile-size.js';
 import { showConfirm } from '../components/modal.js';
-import { PageSizeSelect } from '../components/page-size-select.js';
+import { TileSizeSelect } from '../components/tile-size-select.js';
 import { BulkBar } from '../components/bulk-bar.js';
 import { mountSavedSearches } from '../components/library/saved-searches.js';
 import { showCategoryAssignModal } from '../components/library/category-assign-modal.js';
@@ -22,9 +23,11 @@ import { Select } from '../components/form/select.js';
 import { createSearchInput } from '../components/form/search-input.js';
 import { mountDisplayMenu } from '../components/library/display-menu.js';
 import { renderCategoryTabs } from '../components/tabs.js';
+import { openBulkMigrationDialogue } from '../components/bulk-migration-dialogue.js';
 import { renderPagination } from '../components/pagination.js';
-import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress, setNewChapterCount } from '../components/manga-card.js';
-import { skeletonGrid } from '../components/skeletons.js';
+import { renderMangaGrid, createMangaCard, mangaGridCell, setMangaCardScanning, setMangaCardDownloadProgress, setNewChapterCount } from '../components/manga-card.js';
+import { skeletonGridItems } from '../components/skeletons.js';
+import { FALLBACK_PAGE_SIZE, MAX_PAGE_SIZE, gridCapacity, gridFitEnabled, observeCapacity } from '../grid-columns.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
@@ -33,6 +36,7 @@ import { showToast, showApiError } from '../components/toast.js';
 import { showContextMenu } from '../components/menu.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { t } from '../i18n.js';
+import { prefersInfiniteScroll } from '../pagination-mode.js';
 const html = htm.bind(h);
 
 
@@ -41,6 +45,7 @@ let _statusFilter = /** @type {string|null} */ (null);
 let _tagFilter    = /** @type {number|null} */ (null);
 let _authorFilter = /** @type {number|null} */ (null);
 let _artistFilter = /** @type {number|null} */ (null);
+let _sourceFilter = /** @type {number|null} */ (null);
 let _catFilter        = /** @type {number|null} */ (null);
 let _collectionFilter = /** @type {number|null} */ (null);
 let _readingStatusFilter = /** @type {number|null} */ (null);
@@ -49,6 +54,48 @@ let _hideCompletedStatus = false;
 let _sortOrder = 'up';
 let _page = 1;
 let _pageSize = 0;
+/** @type {import('../tile-size.js').TileSize} */
+let _tileSize = 'md';
+
+/**
+ * A search matches titles, alternative titles, descriptions and credited
+ * people. Only a match the user cannot see on the card needs saying.
+ * @param {{ match_field?: string | null, match_text?: string | null }} m
+ * @returns {string | null}
+ */
+function _matchCaption(m) {
+  if (!m.match_field || !m.match_text) return null;
+  if (m.match_field === 'author') return t('library.match.author', { name: m.match_text });
+  if (m.match_field === 'description') return t('library.match.description', { text: m.match_text });
+  return null;
+}
+/** @type {(() => void)|null} */ let _stopColumnWatch = null;
+
+/** @returns {HTMLElement|null} */
+function _mangaGridEl() {
+  return /** @type {HTMLElement|null} */ (_gridEl?.querySelector('.manga-grid') ?? null);
+}
+
+/** @returns {HTMLElement|null} The element the grid may not overflow. */
+function _boundsEl() {
+  return /** @type {HTMLElement|null} */ (_container?.querySelector('.js-scroll') ?? null);
+}
+
+/**
+ * The page holds exactly what fits. Where the shell does not pin the page to
+ * the viewport the question has no answer, so a fixed batch is used instead.
+ */
+function _syncPageSize() {
+  const next = gridFitEnabled() && !_isInfinite()
+    ? gridCapacity(_mangaGridEl(), _boundsEl())
+    : 0;
+  if (next > 0) _pageSize = Math.min(next, MAX_PAGE_SIZE);
+  else if (_pageSize < 1) _pageSize = FALLBACK_PAGE_SIZE;
+}
+
+function _isInfinite() {
+  return prefersInfiniteScroll('kani_library_pagination');
+}
 
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {(() => void)|null} */   let _removePullToRefresh = null;
@@ -63,10 +110,13 @@ let _pageSize = 0;
 let _scanInProgress = false;
 /** @type {(() => void)|null} */   let _destroyPagination = null;
 /** @type {(() => void)|null} */   let _destroyTabs = null;
+/** @type {Map<number, { id: number, title: string, cover_url: string | null }>} */
+const _mangaById = new Map();
 /** @type {IntersectionObserver|null} */ let _sentinelObserver = null;
 /** @type {HTMLElement|null} */    let _authorContainer = null;
 /** @type {HTMLElement|null} */    let _artistContainer = null;
 /** @type {HTMLElement|null} */    let _tagsContainer = null;
+/** @type {HTMLElement|null} */    let _sourceContainer = null;
 /** @type {HTMLElement[]} */       let _sortMountEls = [];
 /** @type {HTMLElement|null} */    let _statusMountEl = null;
 /** @type {HTMLElement|null} */    let _readingStatusMountEl = null;
@@ -96,7 +146,7 @@ const CONTEXT_MENU_AFTER_LONG_PRESS_GUARD_MS = 500;
 function _hasActiveFilters() {
   return !!(_search || _statusFilter || _readingStatusFilter != null ||
     _hideNoUnread || _hideCompletedStatus || _tagFilter != null ||
-    _authorFilter != null || _artistFilter != null);
+    _authorFilter != null || _artistFilter != null || _sourceFilter != null);
 }
 
 function _clearAllFilters() {
@@ -108,6 +158,7 @@ function _clearAllFilters() {
   _tagFilter = null;
   _authorFilter = null;
   _artistFilter = null;
+  _sourceFilter = null;
   _catFilter = null;
   _collectionFilter = null;
   _page = 1;
@@ -125,7 +176,7 @@ function _clearAllFilters() {
 export async function init(container) {
   _container = container;
   document.title = t('library.title');
-  _pageSize = getLocalInt('kani_library_page_size', 24);
+  _tileSize = getTileSize();
 
   // Restore filter state from URL params
   _page       = parseInt(getParam('page') ?? '1', 10) || 1;
@@ -134,6 +185,7 @@ export async function init(container) {
   _tagFilter  = getParam('tag_id')    ? Number(getParam('tag_id'))    : null;
   _authorFilter = getParam('author_id') ? Number(getParam('author_id')) : null;
   _artistFilter = getParam('artist_id') ? Number(getParam('artist_id')) : null;
+  _sourceFilter = getParam('source_id') ? Number(getParam('source_id')) : null;
   _catFilter        = getParam('cat_id')        ? Number(getParam('cat_id'))        : null;
   _collectionFilter = getParam('collection_id') ? Number(getParam('collection_id')) : null;
   _readingStatusFilter = getParam('reading_status') ? Number(getParam('reading_status')) : null;
@@ -195,7 +247,7 @@ export async function init(container) {
     <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4 page-body-host page-col">
 
       <!-- Category tabs (horizontal scroll on mobile) -->
-      <div class="js-tabs overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"></div>
+      <div class="js-tabs shrink-0 overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"></div>
 
       <!-- Search bar (mobile only — on desktop it lives inline in the controls row) -->
       <div class="js-search-slot-mobile lg:hidden"></div>
@@ -216,7 +268,7 @@ export async function init(container) {
           <span class="icon-sm text-text-muted transition-transform js-filter-chevron">${iconChevronDown}</span>
         </button>
         <div class="js-sort-mount hidden lg:block shrink-0"></div>
-        <div class="js-page-size-mount hidden sm:block w-20 shrink-0"></div>
+        <div class="js-tile-size-mount hidden sm:block w-28 shrink-0"></div>
         <div class="js-display-mount shrink-0"></div>
       </div>
 
@@ -225,7 +277,7 @@ export async function init(container) {
         <!-- Sort + page size (mobile only — inline in the controls row on desktop) -->
         <div class="flex items-center gap-2 lg:hidden">
           <div class="js-sort-mount flex-1"></div>
-          <div class="js-page-size-mount w-20 shrink-0 sm:hidden"></div>
+          <div class="js-tile-size-mount w-28 shrink-0 sm:hidden"></div>
         </div>
         <div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
           <div class="js-status-mount w-full lg:w-auto shrink-0"></div>
@@ -233,6 +285,7 @@ export async function init(container) {
           <div class="js-tags-combobox w-full lg:w-auto lg:min-w-36 lg:max-w-48"></div>
           <div class="js-author-combobox w-full lg:w-auto lg:max-w-44"></div>
           <div class="js-artist-combobox w-full lg:w-auto lg:max-w-44"></div>
+          <div class="js-source-combobox w-full lg:w-auto lg:max-w-44"></div>
           <div class="js-saved-searches flex items-center gap-2 lg:ml-auto"></div>
         </div>
       </div>
@@ -245,7 +298,7 @@ export async function init(container) {
         <div class="js-shelf"></div>
 
         <!-- Grid -->
-        <div class="js-grid" aria-live="polite" aria-busy="false"></div>
+        <div class="js-grid" aria-live="polite" aria-busy="false"><div class="manga-grid"></div></div>
       </div>
 
       <!-- Pagination -->
@@ -258,6 +311,7 @@ export async function init(container) {
   _authorContainer = /** @type {HTMLElement} */ (container.querySelector('.js-author-combobox'));
   _artistContainer = /** @type {HTMLElement} */ (container.querySelector('.js-artist-combobox'));
   _tagsContainer   = /** @type {HTMLElement} */ (container.querySelector('.js-tags-combobox'));
+  _sourceContainer = /** @type {HTMLElement} */ (container.querySelector('.js-source-combobox'));
 
   const tabsEl           = /** @type {HTMLElement} */ (container.querySelector('.js-tabs'));
 
@@ -281,7 +335,7 @@ export async function init(container) {
   _statusMountEl        = /** @type {HTMLElement} */ (container.querySelector('.js-status-mount'));
   _readingStatusMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-reading-status-mount'));
   _displayMountEls      = [...container.querySelectorAll('.js-display-mount')].map(el => /** @type {HTMLElement} */ (el));
-  const sizeMountEls     = /** @type {NodeListOf<HTMLElement>} */ (container.querySelectorAll('.js-page-size-mount'));
+  const sizeMountEls     = /** @type {NodeListOf<HTMLElement>} */ (container.querySelectorAll('.js-tile-size-mount'));
   const shelfEl          = /** @type {HTMLElement} */ (container.querySelector('.js-shelf'));
   const filterToggle    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-toggle'));
   const filtersEl       = /** @type {HTMLElement} */ (container.querySelector('.js-filters'));
@@ -337,7 +391,7 @@ export async function init(container) {
 
   function _updateFilterCount() {
     if (!filterCountEl) return;
-    const count = [_statusFilter, _readingStatusFilter != null ? true : null, _hideNoUnread || null, _hideCompletedStatus || null, _tagFilter != null ? true : null, _authorFilter != null ? true : null, _artistFilter != null ? true : null].filter(Boolean).length;
+    const count = [_statusFilter, _readingStatusFilter != null ? true : null, _hideNoUnread || null, _hideCompletedStatus || null, _tagFilter != null ? true : null, _authorFilter != null ? true : null, _artistFilter != null ? true : null, _sourceFilter != null ? true : null].filter(Boolean).length;
     if (count > 0) {
       filterCountEl.textContent = String(count);
       filterCountEl.classList.remove('hidden');
@@ -366,11 +420,24 @@ export async function init(container) {
   });
 
   // Show skeleton only if data takes > 150 ms
-  _cancelInitSkeleton = deferredSkeleton(() => { if (_gridEl) _gridEl.innerHTML = skeletonGrid(_pageSize); });
+  _syncPageSize();
+  _cancelInitSkeleton = deferredSkeleton(() => {
+    const grid = _mangaGridEl();
+    if (grid) grid.innerHTML = skeletonGridItems(_pageSize);
+  });
+  // Infinite mode does not fit: its batch is fixed, and refetching on resize
+  // would discard every batch already appended.
+  if (!_isInfinite()) {
+    _stopColumnWatch = observeCapacity(_gridEl, _mangaGridEl, _boundsEl, () => {
+      _syncPageSize();
+      _page = 1;
+      _fetchLibrary();
+    }, _pageSize);
+  }
 
-  const [tags, authors, artists, categories, collectionsRaw] = await Promise.allSettled([
+  const [tags, authors, artists, categories, collectionsRaw, sourcesRaw] = await Promise.allSettled([
     api.getTags(), api.getAuthors(), api.getArtists(), api.getCategories(),
-    api.listCollections(),
+    api.listCollections(), api.getSources(),
   ]).then(r => r.map(s => s.status === 'fulfilled' ? s.value : []));
 
   const catList = Array.isArray(categories) ? categories : [];
@@ -415,6 +482,7 @@ export async function init(container) {
   const tagOptions    = (Array.isArray(tags)    ? tags    : []).map(t => ({ id: t.id ?? t, name: t.name ?? t }));
   const authorOptions = (Array.isArray(authors) ? authors : []).map(a => ({ id: a.id, name: a.name }));
   const artistOptions = (Array.isArray(artists) ? artists : []).map(a => ({ id: a.id, name: a.name }));
+  const sourceOptions = (Array.isArray(sourcesRaw) ? sourcesRaw : []).map(src => ({ id: src.id, name: src.name }));
 
   function _mountComboboxes() {
     if (_tagsContainer) {
@@ -440,6 +508,14 @@ export async function init(container) {
         onChange=${(id) => { _artistFilter = id; _page = 1; _mountComboboxes(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
         placeholder=${t('library.filter.artist')}
       />`, _artistContainer);
+    }
+    if (_sourceContainer) {
+      render(html`<${Combobox}
+        options=${sourceOptions}
+        value=${_sourceFilter}
+        onChange=${(id) => { _sourceFilter = id; _page = 1; _mountComboboxes(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
+        placeholder=${t('library.filter.source')}
+      />`, _sourceContainer);
     }
   }
   _mountComboboxesFn = _mountComboboxes;
@@ -522,23 +598,26 @@ export async function init(container) {
   _renderFilterControlsFn = _renderFilterControls;
   _renderFilterControls();
 
-  const _renderPageSize = () => {
+  const _renderTileSize = () => {
     for (const mountEl of sizeMountEls) {
-      render(html`<${PageSizeSelect}
-        options=${[12, 24, 48, 96]}
-        value=${_pageSize}
-        ariaLabel=${t('library.items_per_page')}
-        onChange=${(/** @type {number} */ n) => {
-          _pageSize = n;
-          setLocal('kani_library_page_size', String(_pageSize));
-          _page = 1;
-          _renderPageSize();
-          _fetchLibrary();
+      render(html`<${TileSizeSelect}
+        value=${_tileSize}
+        onChange=${(/** @type {import('../tile-size.js').TileSize} */ size) => {
+          _tileSize = size;
+          setTileSize(size);
+          // The new track width only exists after the browser has laid the grid
+          // out again, so measure on the next frame rather than this one.
+          requestAnimationFrame(() => {
+            _syncPageSize();
+            _page = 1;
+            _renderTileSize();
+            _fetchLibrary();
+          });
         }}
       />`, mountEl);
     }
   };
-  _renderPageSize();
+  _renderTileSize();
 
   refreshBtn?.addEventListener('click', async () => {
     if (refreshBtn) refreshBtn.disabled = true;
@@ -666,6 +745,7 @@ function _updateUrl(replace = false) {
     tag_id:          _tagFilter                   ?? null,
     author_id:       _authorFilter                ?? null,
     artist_id:       _artistFilter                ?? null,
+    source_id:       _sourceFilter                ?? null,
     cat_id:          _catFilter                   ?? null,
     collection_id:   _collectionFilter            ?? null,
     reading_status:  _readingStatusFilter != null ? _readingStatusFilter : null,
@@ -680,7 +760,7 @@ function _updateUrl(replace = false) {
 
 function _fetchLibrary() {
   if (!_gridEl || !_paginEl) return;
-  const infinite = getLocal('kani_library_pagination') === 'infinite';
+  const infinite = _isInfinite();
   const isAppend = infinite && _page > 1;
   _placePagination(infinite);
 
@@ -711,6 +791,7 @@ function _fetchLibrary() {
     tag_filter: _tagFilter ?? undefined,
     author_filter: _authorFilter ?? undefined,
     artist_filter: _artistFilter ?? undefined,
+    source_id: _sourceFilter ?? undefined,
     category_filter: _catFilter ?? undefined,
     collection_id: _collectionFilter ?? undefined,
     sort_by: _sortOrder,
@@ -723,6 +804,7 @@ function _fetchLibrary() {
       : Array.isArray(result?.manga)            ? result.manga
       : Array.isArray(result)                   ? result
       : [];
+    for (const m of items) _mangaById.set(Number(m.id), { id: Number(m.id), title: m.title, cover_url: m.cover_url ?? null });
 
     // Clear old content only once new data is ready — prevents blank-flash flicker
     _cancelInitSkeleton?.();
@@ -746,9 +828,9 @@ function _fetchLibrary() {
         _appendMangaCards(_gridEl, items);
       } else {
         renderMangaGrid(_gridEl, {
-          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null })),
+          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null, match_field: m.match_field ?? null, match_text: m.match_text ?? null, import_link_status: m.import_link_status ?? null, is_orphaned: m.is_orphaned ?? false })),
           getHref: (m) => `/manga/${m.id}`,
-          large: true,
+          getCaption: _matchCaption,
           onCardClick: (m) => {
             const cardEl = /** @type {HTMLElement} */ (_gridEl.querySelector(`[data-manga-id="${m.id}"]`));
             if (cardEl) _onCardClick(m, cardEl);
@@ -799,15 +881,15 @@ function _fetchLibrary() {
 
 /** Appends manga cards to the persistent grid inside `_gridEl`. */
 function _appendMangaCards(gridEl, items) {
-  let grid = /** @type {HTMLElement|null} */ (gridEl.querySelector('.manga-grid--large'));
+  let grid = /** @type {HTMLElement|null} */ (gridEl.querySelector('.manga-grid'));
   if (!grid) {
     grid = document.createElement('div');
-    grid.className = 'manga-grid--large';
+    grid.className = 'manga-grid';
     gridEl.appendChild(grid);
   }
   for (const m of items) {
-    grid.appendChild(createMangaCard({
-      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null },
+    const card = createMangaCard({
+      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null, import_link_status: m.import_link_status ?? null, is_orphaned: m.is_orphaned ?? false },
       href: `/manga/${m.id}`,
       onCardClick: (manga) => {
         const cardEl = /** @type {HTMLElement} */ (gridEl.querySelector(`[data-manga-id="${manga.id}"]`));
@@ -820,7 +902,8 @@ function _appendMangaCards(gridEl, items) {
         _showMangaContextMenu({ id: manga.id, title: manga.title }, rect.left, rect.bottom + 4, cardEl);
       },
       onResumeClick: _onResumeClick,
-    }));
+    });
+    grid.appendChild(mangaGridCell(card, _matchCaption(m)));
   }
 }
 
@@ -1014,6 +1097,12 @@ function _renderBulkBar() {
     _fetchLibrary();
   };
 
+  const _onMigrate = () => {
+    const manga = [..._selected].map(Number).map(id => _mangaById.get(id) ?? { id, title: String(id), cover_url: null });
+    _exitSelectMode();
+    openBulkMigrationDialogue({ manga, onMigrated: () => { _page = 1; _fetchLibrary(); } });
+  };
+
   const hasSelection = _selected.size > 0;
   render(html`<${BulkBar}
     countLabel=${t('library.bulk.selected', { count: _selected.size })}
@@ -1024,6 +1113,7 @@ function _renderBulkBar() {
       { label: t('library.bulk.mark_read'), onClick: _onMarkRead, disabled: !hasSelection },
       { label: t('library.bulk.mark_unread'), onClick: _onMarkUnread, disabled: !hasSelection },
       { label: t('library.bulk.categories'), onClick: _onCategories, disabled: !hasSelection },
+      ...(hasPermission('library:manage') ? [{ label: t('library.bulk.migrate'), title: t('library.bulk.migrate.title'), onClick: _onMigrate, disabled: !hasSelection }] : []),
       { label: t('library.bulk.delete'), kind: 'danger', onClick: _onDelete, disabled: !hasSelection },
     ]}
     onCancel=${_exitSelectMode}
@@ -1117,6 +1207,7 @@ export function destroy(container) {
   _sentinelObserver = null;
   _destroyTabs?.();
   _destroyTabs = null;
+  _mangaById.clear();
   if (_tagsContainer)   render(null, _tagsContainer);
   if (_authorContainer) render(null, _authorContainer);
   if (_artistContainer) render(null, _artistContainer);
@@ -1127,12 +1218,15 @@ export function destroy(container) {
   if (_savedSearchesEl)      render(null, _savedSearchesEl);
   _savedSearchesEl = null;
   _tagsContainer   = null;
+  _sourceContainer = null;
   _authorContainer = null;
   _artistContainer = null;
   _sortMountEls = [];
   _statusMountEl = null;
   _readingStatusMountEl = null;
   _displayMountEls = [];
+  _stopColumnWatch?.();
+  _stopColumnWatch = null;
   _gridEl = null;
   _paginEl = null;
   _searchEls = null;
@@ -1165,6 +1259,7 @@ function _applySearchQuery(queryJson) {
     _tagFilter        = q.tag_filter ?? null;
     _authorFilter     = q.author_filter ?? null;
     _artistFilter     = q.artist_filter ?? null;
+    _sourceFilter     = q.source_id ?? null;
     _catFilter        = q.category_filter ?? null;
     _collectionFilter = null;
     _page = 1;
@@ -1187,6 +1282,7 @@ function _currentFiltersForSavedSearch() {
     tag_filter: _tagFilter ?? undefined,
     author_filter: _authorFilter ?? undefined,
     artist_filter: _artistFilter ?? undefined,
+    source_id: _sourceFilter ?? undefined,
     category_filter: _catFilter ?? undefined,
   };
 }

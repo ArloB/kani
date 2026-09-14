@@ -629,6 +629,18 @@ pub trait MangaDomain: Send + Sync {
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,
     ) -> Result<crate::jobs::JobId>;
+    async fn match_migration_targets(
+        &self,
+        target_source_id: i64,
+        queries: Vec<crate::service::migration::MigrationMatchQuery>,
+    ) -> Result<Vec<crate::service::migration::MigrationMatch>>;
+    async fn submit_bulk_migration(
+        &self,
+        target_source_id: i64,
+        items: Vec<crate::service::migration::BulkMigrationItem>,
+        keep_orphaned_downloads: bool,
+    ) -> Result<Vec<crate::service::migration::BulkMigrationSubmission>>;
+    async fn migration_statuses(&self, job_ids: Vec<crate::jobs::JobId>) -> Result<Vec<JobStatus>>;
     async fn get_download_rules(&self, manga_id: MangaId) -> Result<Vec<DownloadRule>>;
     async fn add_download_rule(&self, manga_id: MangaId, kind: DownloadRuleKind) -> Result<i64>;
     async fn delete_download_rule(&self, rule_id: i64) -> Result<()>;
@@ -647,6 +659,7 @@ pub trait MangaDomain: Send + Sync {
         manga_id: MangaId,
         opts: crate::models::RefreshOptions,
     ) -> Result<uuid::Uuid>;
+    async fn queue_import_relink(&self, manga_id: MangaId) -> Result<uuid::Uuid>;
     async fn list_trash(&self) -> Result<Vec<Manga>>;
     async fn purge_all_trash(&self) -> Result<u64>;
 }
@@ -818,6 +831,29 @@ impl MangaDomain for AppService {
         .await
     }
 
+    async fn match_migration_targets(
+        &self,
+        target_source_id: i64,
+        queries: Vec<crate::service::migration::MigrationMatchQuery>,
+    ) -> Result<Vec<crate::service::migration::MigrationMatch>> {
+        self.match_migration_targets(target_source_id, queries)
+            .await
+    }
+
+    async fn submit_bulk_migration(
+        &self,
+        target_source_id: i64,
+        items: Vec<crate::service::migration::BulkMigrationItem>,
+        keep_orphaned_downloads: bool,
+    ) -> Result<Vec<crate::service::migration::BulkMigrationSubmission>> {
+        self.submit_bulk_migration(target_source_id, items, keep_orphaned_downloads)
+            .await
+    }
+
+    async fn migration_statuses(&self, job_ids: Vec<crate::jobs::JobId>) -> Result<Vec<JobStatus>> {
+        self.migration_statuses(job_ids).await
+    }
+
     async fn get_download_rules(&self, manga_id: MangaId) -> Result<Vec<DownloadRule>> {
         self.get_download_rules(manga_id).await
     }
@@ -869,6 +905,22 @@ impl MangaDomain for AppService {
             ));
         }
         self.untrash_manga(manga_id, user_id).await
+    }
+
+    async fn queue_import_relink(&self, manga_id: MangaId) -> Result<uuid::Uuid> {
+        let row = sqlx::query!("SELECT source_id FROM manga WHERE id = ?", manga_id)
+            .fetch_optional(&self.db_read)
+            .await?
+            .ok_or_else(|| {
+                crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found"))
+            })?;
+        sqlx::query!(
+            "INSERT OR REPLACE INTO manga_import_links (manga_id, status) VALUES (?, 'pending')",
+            manga_id
+        )
+        .execute(&self.db)
+        .await?;
+        self.queue_import_resolve(Some(row.source_id)).await
     }
 
     async fn queue_manga_refresh(
@@ -1728,6 +1780,27 @@ mod tests {
         ) -> Result<crate::jobs::JobId> {
             unimplemented!()
         }
+        async fn match_migration_targets(
+            &self,
+            _target_source_id: i64,
+            _queries: Vec<crate::service::migration::MigrationMatchQuery>,
+        ) -> Result<Vec<crate::service::migration::MigrationMatch>> {
+            unimplemented!()
+        }
+        async fn submit_bulk_migration(
+            &self,
+            _target_source_id: i64,
+            _items: Vec<crate::service::migration::BulkMigrationItem>,
+            _keep_orphaned_downloads: bool,
+        ) -> Result<Vec<crate::service::migration::BulkMigrationSubmission>> {
+            unimplemented!()
+        }
+        async fn migration_statuses(
+            &self,
+            _job_ids: Vec<crate::jobs::JobId>,
+        ) -> Result<Vec<JobStatus>> {
+            unimplemented!()
+        }
         async fn add_download_rule(
             &self,
             _manga_id: MangaId,
@@ -1764,6 +1837,10 @@ mod tests {
         async fn untrash_by_token(&self, _token: uuid::Uuid, _user_id: UserId) -> Result<()> {
             unimplemented!()
         }
+        async fn queue_import_relink(&self, _: MangaId) -> Result<uuid::Uuid> {
+            Ok(uuid::Uuid::nil())
+        }
+
         async fn queue_manga_refresh(
             &self,
             _manga_id: MangaId,

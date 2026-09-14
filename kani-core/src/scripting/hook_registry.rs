@@ -9,6 +9,9 @@ use super::bindings::{
 
 #[derive(Default)]
 pub struct HookScripts {
+    /// Function definitions prepended to every hook body, so `pre_request` and
+    /// `on_status` can share logic instead of repeating it.
+    pub shared: std::collections::BTreeMap<String, String>,
     pub pre_request: Option<String>,
     pub on_status: std::collections::BTreeMap<String, String>,
     pub endpoint_pre_request: std::collections::BTreeMap<String, String>,
@@ -42,15 +45,32 @@ impl HookRegistry {
             && self.endpoint_on_status.is_empty()
     }
 
+    fn prelude(scripts: &HookScripts) -> String {
+        scripts
+            .shared
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub fn compile(scripts: &HookScripts) -> Result<Self, String> {
         let engine = make_hook_sandbox();
+        let prelude = Self::prelude(scripts);
+        let with_prelude = |src: &str| {
+            if prelude.is_empty() {
+                src.to_string()
+            } else {
+                format!("{prelude}\n{src}")
+            }
+        };
 
         let global_pre_request = scripts
             .pre_request
             .as_deref()
             .map(|src| {
                 engine
-                    .compile(src)
+                    .compile(with_prelude(src))
                     .map_err(|e| format!("pre_request compile error: {e}"))
             })
             .transpose()?;
@@ -58,7 +78,7 @@ impl HookRegistry {
         let mut global_on_status = HashMap::new();
         for (key, src) in &scripts.on_status {
             let ast = engine
-                .compile(src)
+                .compile(with_prelude(src))
                 .map_err(|e| format!("on_status[{key}] compile error: {e}"))?;
             global_on_status.insert(key.clone(), ast);
         }
@@ -66,7 +86,7 @@ impl HookRegistry {
         let mut endpoint_pre_request = HashMap::new();
         for (endpoint_id, src) in &scripts.endpoint_pre_request {
             let ast = engine
-                .compile(src)
+                .compile(with_prelude(src))
                 .map_err(|e| format!("endpoint '{endpoint_id}' pre_request compile error: {e}"))?;
             endpoint_pre_request.insert(endpoint_id.clone(), ast);
         }
@@ -75,7 +95,7 @@ impl HookRegistry {
         for (endpoint_id, status_map) in &scripts.endpoint_on_status {
             let mut map = HashMap::new();
             for (key, src) in status_map {
-                let ast = engine.compile(src).map_err(|e| {
+                let ast = engine.compile(with_prelude(src)).map_err(|e| {
                     format!("endpoint '{endpoint_id}' on_status[{key}] compile error: {e}")
                 })?;
                 map.insert(key.clone(), ast);
@@ -92,7 +112,7 @@ impl HookRegistry {
         })
     }
 
-    pub(crate) fn run_pre_request(
+    pub fn run_pre_request(
         &self,
         req: &mut ScriptableRequest,
         ctx: ScriptableCtx,
@@ -130,7 +150,7 @@ impl HookRegistry {
     pub(crate) fn run_on_status(
         &self,
         req: &ScriptableRequest,
-        resp: &ScriptableResponse,
+        resp: &mut ScriptableResponse,
         ctx: ScriptableCtx,
     ) -> Result<HookAction, String> {
         let endpoint_id = req.endpoint_id.as_deref().unwrap_or("");
@@ -155,6 +175,10 @@ impl HookRegistry {
             .engine
             .eval_ast_with_scope::<Dynamic>(&mut scope, ast)
             .map_err(|e| format!("on_status hook error: {e}"))?;
+
+        if let Some(mutated) = scope.get_value::<ScriptableResponse>("resp") {
+            *resp = mutated;
+        }
 
         Ok(result.try_cast::<HookAction>().unwrap_or(HookAction {
             kind: HookActionKind::Proceed,
@@ -208,6 +232,7 @@ mod tests {
         ScriptableResponse {
             status,
             headers: Vec::new(),
+            body: String::new(),
         }
     }
 
@@ -287,8 +312,10 @@ mod tests {
         };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
-        let resp = dummy_resp(401);
-        let action = registry.run_on_status(&req, &resp, dummy_ctx()).unwrap();
+        let mut resp = dummy_resp(401);
+        let action = registry
+            .run_on_status(&req, &mut resp, dummy_ctx())
+            .unwrap();
         assert!(matches!(action.kind, HookActionKind::Retry));
     }
 
@@ -302,8 +329,10 @@ mod tests {
         };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
-        let resp = dummy_resp(503);
-        let action = registry.run_on_status(&req, &resp, dummy_ctx()).unwrap();
+        let mut resp = dummy_resp(503);
+        let action = registry
+            .run_on_status(&req, &mut resp, dummy_ctx())
+            .unwrap();
         assert!(matches!(
             action.kind,
             HookActionKind::RetryAfter { seconds: 10 }
@@ -323,8 +352,10 @@ mod tests {
         };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
-        let resp = dummy_resp(429);
-        let action = registry.run_on_status(&req, &resp, dummy_ctx()).unwrap();
+        let mut resp = dummy_resp(429);
+        let action = registry
+            .run_on_status(&req, &mut resp, dummy_ctx())
+            .unwrap();
         assert!(matches!(action.kind, HookActionKind::Fail { .. }));
     }
 
@@ -332,9 +363,157 @@ mod tests {
     fn no_matching_hook_proceeds() {
         let registry = HookRegistry::compile(&HookScripts::default()).unwrap();
         let req = dummy_req(None);
-        let resp = dummy_resp(401);
-        let action = registry.run_on_status(&req, &resp, dummy_ctx()).unwrap();
+        let mut resp = dummy_resp(401);
+        let action = registry
+            .run_on_status(&req, &mut resp, dummy_ctx())
+            .unwrap();
         assert!(matches!(action.kind, HookActionKind::Proceed));
+    }
+
+    /// A signing hook must be able to read the query parameters it has to cover,
+    /// and append the signature it computes from them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_hook_can_read_and_append_query_parameters() {
+        let scripts = HookScripts {
+            pre_request: Some(
+                r#"
+                let parts = [];
+                for pair in req.queries { parts.push(pair[0] + "=" + pair[1]); }
+                parts.sort(|a, b| if a < b { -1 } else if a > b { 1 } else { 0 });
+                req.push_query("_", parts.reduce(|sum, p| if sum == () { p } else { sum + "&" + p }));
+                proceed()
+                "#
+                .to_string(),
+            ),
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        let mut req = dummy_req(None);
+        req.queries = vec![
+            ("page".to_string(), "1".to_string()),
+            ("limit".to_string(), "28".to_string()),
+        ];
+
+        tokio::task::block_in_place(|| registry.run_pre_request(&mut req, dummy_ctx())).unwrap();
+
+        let signed = req
+            .queries
+            .iter()
+            .find(|(k, _)| k == "_")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            signed,
+            Some("limit=28&page=1"),
+            "hook could not read queries and append a signature: {:?}",
+            req.queries
+        );
+    }
+
+    /// A source whose payloads arrive wrapped or encoded must be able to unwrap
+    /// them before the blueprint sees the body.
+    /// Signing and decryption hooks share the same cached material, so the code
+    /// that parses it should exist once rather than in each hook body.
+    /// A source that signs its requests needs a canonical query string: sorted,
+    /// with repeated keys given explicit indices. Both matter — a server that
+    /// recomputes the signature will reject anything else.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_hook_can_build_a_sorted_canonical_query_string() {
+        let shared: std::collections::BTreeMap<String, String> =
+            [("canonical".to_string(), "fn canonical_query(path, queries) {\n    let flat = [];\n    let counters = #{};\n    for pair in queries {\n        let k = pair[0];\n        if k.ends_with(\"[]\") {\n            let base = k.sub_string(0, k.len() - 2);\n            let n = if counters.contains(base) { counters[base] } else { 0 };\n            counters[base] = n + 1;\n            flat.push(base + \"[\" + n + \"]=\" + pair[1]);\n        } else {\n            flat.push(k + \"=\" + pair[1]);\n        }\n    }\n    flat.sort(|a, b| if a < b { -1 } else if a > b { 1 } else { 0 });\n    let qs = \"\";\n    for part in flat { qs = if qs == \"\" { part } else { qs + \"&\" + part }; }\n    if qs == \"\" { path } else { path + \"?\" + qs }\n}".to_string())]
+                .into_iter()
+                .collect();
+        let scripts = HookScripts {
+            shared,
+            pre_request: Some(
+                r#"req.set_header("X-Canonical", canonical_query("/items", req.queries)); proceed()"#
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        let mut req = dummy_req(None);
+        // Deliberately unsorted, with one key repeated.
+        req.queries = vec![
+            ("sort[name]".into(), "desc".into()),
+            ("page".into(), "1".into()),
+            ("limit".into(), "28".into()),
+            ("tag[]".into(), "alpha".into()),
+            ("tag[]".into(), "beta".into()),
+            ("keyword".into(), "test".into()),
+        ];
+
+        tokio::task::block_in_place(|| registry.run_pre_request(&mut req, dummy_ctx())).unwrap();
+
+        let got = req
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-Canonical")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            got,
+            Some("/items?keyword=test&limit=28&page=1&sort[name]=desc&tag[0]=alpha&tag[1]=beta"),
+            "canonical form is not sorted with indexed repeats"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_hook_can_call_a_shared_function() {
+        let scripts = HookScripts {
+            shared: [(
+                "seed_for".to_string(),
+                "fn seed_for(round) { [189, 133, 32][round] }".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            pre_request: Some(
+                r#"req.set_header("X-Seed", "" + seed_for(0)); proceed()"#.to_string(),
+            ),
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        let mut req = dummy_req(None);
+
+        tokio::task::block_in_place(|| registry.run_pre_request(&mut req, dummy_ctx())).unwrap();
+
+        let seen = req
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-Seed")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            seen,
+            Some("189"),
+            "hook could not call a shared pure function: {:?}",
+            req.headers
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_hook_can_rewrite_the_response_body() {
+        let scripts = HookScripts {
+            on_status: [(
+                "2xx".to_string(),
+                r#"resp.body = bytes_to_utf8(bytes_from_base64url(resp.body)); proceed()"#
+                    .to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        let req = dummy_req(None);
+        let mut resp = dummy_resp(200);
+        resp.body = "eyJvayI6dHJ1ZX0".to_string();
+
+        let action =
+            tokio::task::block_in_place(|| registry.run_on_status(&req, &mut resp, dummy_ctx()))
+                .unwrap();
+
+        assert!(matches!(action.kind, HookActionKind::Proceed));
+        assert_eq!(
+            resp.body, r#"{"ok":true}"#,
+            "hook could not rewrite the response body"
+        );
     }
 
     #[test]

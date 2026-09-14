@@ -28,6 +28,7 @@ pub(super) fn compile_hook_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::HookRegistry>> {
     let scripts = kani_core::scripting::HookScripts {
+        shared: metadata.scripts.clone(),
         pre_request: metadata.pre_request.clone(),
         on_status: metadata.on_status.clone(),
         endpoint_pre_request: metadata.endpoint_pre_request.clone(),
@@ -424,6 +425,52 @@ impl AppService {
         }
     }
 
+    /// Fills in the filter defaults an extension declares but the caller left
+    /// unset.
+    ///
+    /// A `default:` is what the source's own UI submits. Sending nothing lets
+    /// the site apply its own default instead, so an identical query can come
+    /// back in a different order and with a different set.
+    async fn with_filter_defaults(
+        &self,
+        id: i64,
+        mut active: Vec<kani_shared::types::ActiveFilter>,
+    ) -> Vec<kani_shared::types::ActiveFilter> {
+        let defaults = match self.cache.get_filter_defaults(id) {
+            Some(cached) => cached,
+            None => {
+                let Some(backend) = self.sources.get_backend(id) else {
+                    return active;
+                };
+                // Deliberately not `self.get_filter_list`: that records source
+                // health, and a local config read is not evidence a source works.
+                let Ok((list, _)) = backend.get_filter_list_with_options().await else {
+                    return active;
+                };
+                let defaults: Vec<kani_shared::types::ActiveFilter> = list
+                    .filters
+                    .into_iter()
+                    .filter_map(|def| {
+                        def.default_value
+                            .map(|state| kani_shared::types::ActiveFilter {
+                                filter_name: def.id,
+                                state: state.into(),
+                            })
+                    })
+                    .collect();
+                self.cache.insert_filter_defaults(id, defaults.clone());
+                defaults
+            }
+        };
+
+        for default in defaults {
+            if !active.iter().any(|f| f.filter_name == default.filter_name) {
+                active.push(default);
+            }
+        }
+        active
+    }
+
     pub async fn get_popular_manga(
         &self,
         id: i64,
@@ -438,6 +485,7 @@ impl AppService {
             .filter(|s| !s.is_empty())
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
+        let active_filters = self.with_filter_defaults(id, active_filters).await;
         let sources = self.sources.clone();
         let svc = self.clone();
 
@@ -477,6 +525,7 @@ impl AppService {
             .filter(|s| !s.is_empty())
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
+        let active_filters = self.with_filter_defaults(id, active_filters).await;
         let sources = self.sources.clone();
         let svc = self.clone();
         let q = query.to_string();
@@ -580,13 +629,12 @@ impl AppService {
 
     pub async fn get_source_url(&self, id: i64, manga_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
-        let manga_id_d = decode_manga_id(manga_id);
         let backend = self
             .sources
             .get_backend(id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
         backend
-            .get_source_url(&manga_id_d)
+            .get_source_url(manga_id)
             .await
             .map_err(ServiceError::Core)
     }
@@ -594,16 +642,24 @@ impl AppService {
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
-        let manga_id_d = decode_manga_id(manga_id);
+        let manga_id_d = manga_id.to_string();
+
+        let svc = self.clone();
 
         self.cache
             .get_or_fetch_manga_details(id, &manga_id_d.clone(), async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend.get_manga_details(&manga_id_d).await?;
-                serde_json::to_string(&convert_to_shared_manga_info(result))
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend.get_manga_details(&manga_id_d).await?;
+                    serde_json::to_string(&convert_to_shared_manga_info(result))
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -613,8 +669,8 @@ impl AppService {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
         let svc = self.clone();
-        let manga_id_d = decode_manga_id(manga_id);
-        let chapter_id_d = decode_manga_id(chapter_id);
+        let manga_id_d = manga_id.to_string();
+        let chapter_id_d = chapter_id.to_string();
 
         self.cache
             .get_or_fetch_pages(id, &manga_id_d.clone(), &chapter_id_d.clone(), async move {
@@ -646,7 +702,7 @@ impl AppService {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
         let svc = self.clone();
-        let manga_id_d = decode_manga_id(manga_id);
+        let manga_id_d = manga_id.to_string();
         let sort_key = sort.clone().unwrap_or_default();
 
         self.cache
@@ -696,7 +752,7 @@ impl AppService {
             .collect())
     }
 
-    async fn require_source_active(&self, id: i64) -> Result<()> {
+    pub(super) async fn require_source_active(&self, id: i64) -> Result<()> {
         if self.sources.contains_key(id) {
             return Ok(());
         }
@@ -787,6 +843,7 @@ impl AppService {
                                 source_name,
                                 has_next_page: manga_list.has_next_page,
                                 manga: manga_list.manga,
+                                error: None,
                             });
                         }
                         Err(e) => {
@@ -802,6 +859,7 @@ impl AppService {
                         source_name: ids_to_search.get(&source_id).cloned().unwrap_or_default(),
                         has_next_page: false,
                         manga: vec![],
+                        error: Some(e.to_string()),
                     });
                 }
                 Err(join_err) => {
@@ -835,11 +893,11 @@ impl AppService {
     /// Records health for a call whose result we already have.
     ///
     /// All source operations must report through this path to keep health complete.
-    pub(crate) async fn record_source_call<T>(
+    pub(crate) async fn record_source_call<T, E>(
         &self,
         source_id: i64,
         started: std::time::Instant,
-        result: &Result<T>,
+        result: &std::result::Result<T, E>,
     ) {
         match result {
             Ok(_) => {
@@ -1361,13 +1419,14 @@ impl AppService {
 
     pub async fn reload_source(&self, id: i64) -> Result<()> {
         let source = self.get_source(id).await?;
+        let storage_path = self.settings.read().await.wasm_storage_path.clone();
 
-        let wasm_path = self
-            .settings
-            .read()
-            .await
-            .wasm_storage_path
-            .join(format!("{}.wasm", source.name));
+        let yaml_path = storage_path.join(format!("{}.yaml", source.name));
+        if yaml_path.exists() {
+            return self.reload_yaml_source(id, &source.name, &yaml_path).await;
+        }
+
+        let wasm_path = storage_path.join(format!("{}.wasm", source.name));
 
         let bytes = tokio::fs::read(&wasm_path)
             .await
@@ -1441,6 +1500,60 @@ impl AppService {
         self.cache.invalidate_source(id);
 
         tracing::info!("Reloaded extension {} ({})", id, source.name);
+        Ok(())
+    }
+
+    async fn reload_yaml_source(
+        &self,
+        id: i64,
+        source_name: &str,
+        yaml_path: &std::path::Path,
+    ) -> Result<()> {
+        let text = tokio::fs::read_to_string(yaml_path)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("Failed to read YAML: {e}")))?;
+
+        let validated = tokio::task::spawn_blocking(move || {
+            stacker::grow(16 * 1024 * 1024, || {
+                kani_yaml::parse_and_validate(&text, std::path::Path::new("extension.yaml"))
+            })
+        })
+        .await
+        .map_err(|e| ServiceError::Internal(format!("YAML validation task panicked: {e}")))?
+        .map_err(|errs| {
+            let msg = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            ServiceError::Validation(format!("Invalid YAML extension: {msg}"))
+        })?;
+
+        sqlx::query!(
+            "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+            validated.version,
+            validated.base_url,
+            validated.unrestricted_http,
+            id
+        )
+        .execute(&self.db)
+        .await?;
+
+        let prefs = self.load_pref_map(id).await.unwrap_or_default();
+        let browser_enabled = self.browser_enabled_flag(id).await;
+        let ns = format!("{}:", validated.id);
+        let backend = loader::build_yaml_source(
+            std::sync::Arc::new(validated),
+            self.smart_client.clone(),
+            std::sync::Arc::clone(&self.ext_cache),
+            ns,
+            prefs,
+            browser_enabled,
+        );
+        self.sources.hot_swap(id, backend).await;
+        self.cache.invalidate_source(id);
+
+        tracing::info!("Reloaded extension {} ({})", id, source_name);
         Ok(())
     }
 }

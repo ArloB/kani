@@ -7,6 +7,7 @@ import { navigate } from '../router.js';
 import { showCheatsheet } from '../shortcuts.js';
 import { modKeyLabel } from '../utils.js';
 import { SECTION_SEARCH_PREFIXES, buildSettingsSearchIndex } from '../settings-search-index.js';
+import { isPhoneLayout, PAGINATION_SETTINGS_PREFIX } from '../pagination-mode.js';
 
 const CATEGORY_LABELS = {
   nav: () => t('palette.category.nav'),
@@ -55,10 +56,21 @@ const _SECTION_LABELS = new Map(
   SETTINGS_ITEMS.map(item => [item.id.replace(/^s-/, ''), item.label])
 );
 
-/** Built once — the settings-search index is keyed off the static catalog, not user data. */
-const _SETTINGS_SEARCH_INDEX = buildSettingsSearchIndex(
-  Object.keys(SECTION_SEARCH_PREFIXES).map(id => ({ id }))
-);
+/** @type {Map<boolean, ReturnType<typeof buildSettingsSearchIndex>>} */
+const _settingsSearchIndexes = new Map();
+
+function _settingsSearchIndex() {
+  const phone = isPhoneLayout();
+  let idx = _settingsSearchIndexes.get(phone);
+  if (!idx) {
+    idx = buildSettingsSearchIndex(
+      Object.keys(SECTION_SEARCH_PREFIXES).map(id => ({ id })),
+      { exclude: phone ? [PAGINATION_SETTINGS_PREFIX] : [] },
+    );
+    _settingsSearchIndexes.set(phone, idx);
+  }
+  return idx;
+}
 
 const _MAX_SETTING_HITS = 8;
 
@@ -69,7 +81,7 @@ const _MAX_SETTING_HITS = 8;
 function _matchIndividualSettings(query) {
   /** @type {Array<{ id: string, label: string, description: string, category: string, path: string }>} */
   const hits = [];
-  for (const [sectionId, items] of _SETTINGS_SEARCH_INDEX) {
+  for (const [sectionId, items] of _settingsSearchIndex()) {
     const sectionLabel = _SECTION_LABELS.get(sectionId);
     if (!sectionLabel) continue;
     for (const { label: text } of items) {

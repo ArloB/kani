@@ -78,19 +78,24 @@ pages. Each source's browser toggle disables its browser endpoints.
 
 The `solver` service in `docker-compose.yml` already runs this image. To set it up:
 
-1. Start both services. The compose file binds the solver to `127.0.0.1:8191`, so nothing outside
-   the host can reach it.
+1. Start both services. The compose file does not publish the solver's port to the host at all —
+   only the `kani` container can reach it, over the compose network's service DNS. `Test
+   connection` (step 3) works the same way, since it's a server-side call from `kani-web`, not
+   your browser.
 2. In **Settings → Advanced**, set the solver URL to `http://solver:8191/v1` — `solver` is the
-   compose service name, reachable from the Kani container. Outside Docker, use
-   `http://127.0.0.1:8191/v1`.
+   compose service name. If you've uncommented the `ports:` block to debug it directly from the
+   host instead, use `http://127.0.0.1:8191/v1` there.
 3. Press **Test connection**. It reports *Browser sources supported* for this image, or
    *Challenge solving only* for a stock FlareSolverr. The same state appears under
    **Diagnostics → Browser runtime**.
-4. If anything other than Kani can reach the solver, set its `API_KEY` and the matching
-   `KANI_SOLVER_SECRET` on the Kani service. Both are commented out in the compose file.
+4. If something other than Kani needs to reach the solver, set its `API_KEY` and the matching
+   `KANI_SOLVER_SECRET` on the Kani service (both commented out in the compose file) — and
+   re-publish its port, since nothing outside the compose network can reach it otherwise.
 
 **Keep this solver private.** `/v1` executes caller-supplied JavaScript against named browser
-profiles, so an exposed instance is remote code execution against your host.
+profiles, so an exposed instance is remote code execution against your host. `API_KEY` gates only
+`/v1` — `/` and `/health` stay open for capability checks and container healthchecks, which carry
+no secrets.
 
 ## Capacity and diagnostics
 

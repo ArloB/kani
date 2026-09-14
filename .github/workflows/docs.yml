@@ -36,7 +36,7 @@ jobs:
         run: cd docs && mkdocs build --strict
 
       - name: Markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@v19
+        uses: DavidAnson/markdownlint-cli2-action@v24
         with:
           globs: "docs/**/*.md"
           config: ".markdownlint.yml"
@@ -45,7 +45,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: docs/site
 

@@ -146,6 +146,28 @@ impl DownloaderManager {
     pub fn subscribe(&self) -> broadcast::Receiver<DownloadProgressEvent> {
         self.progress_tx.subscribe()
     }
+
+    /// Announce a finished chapter. The caller owns the timing: a subscriber
+    /// re-reads the chapter as soon as this lands, so it must not be sent until
+    /// the row records the download.
+    pub fn emit_chapter_completed(
+        &self,
+        chapter_id: i64,
+        chapter_name: String,
+        manga_id: i64,
+        manga_title: String,
+        successful_pages: usize,
+    ) {
+        let _ = self
+            .progress_tx
+            .send(DownloadProgressEvent::ChapterCompleted {
+                chapter_id,
+                chapter_name,
+                manga_id,
+                manga_title,
+                successful_pages,
+            });
+    }
 }
 
 pub(crate) const DEFAULT_CONCURRENT_PAGES: usize = 4;
@@ -828,16 +850,6 @@ impl DownloaderManager {
                     s.completed_pages = successful_len;
                 })
                 .await;
-                Self::send_event(
-                    &tx,
-                    DownloadProgressEvent::ChapterCompleted {
-                        chapter_id,
-                        chapter_name: name.clone(),
-                        manga_id,
-                        manga_title: manga_title.clone(),
-                        successful_pages: successful_len,
-                    },
-                );
                 Self::schedule_active_cleanup(active_ref.clone(), chapter_id);
                 let mut delay = Duration::from_millis(200);
                 let mut retries = 0u32;

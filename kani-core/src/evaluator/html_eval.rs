@@ -443,6 +443,7 @@ pub async fn extract_html_paginated(
     let mut current_chunk_offset = first_chunk_offset;
     let mut all_rows: Vec<serde_json::Value> = Vec::new();
     let has_next_page;
+    let mut last_scalars = serde_json::Map::new();
 
     loop {
         let mut chunk_bp = blueprint.clone();
@@ -480,6 +481,9 @@ pub async fn extract_html_paginated(
         all_rows.extend_from_slice(&rows[skip..skip + to_take]);
         remaining -= to_take;
 
+        if let Some(map) = chunk_result["scalars"].as_object() {
+            last_scalars = map.clone();
+        }
         let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
         let chunk_full = chunk_len >= native_size;
 
@@ -495,10 +499,11 @@ pub async fn extract_html_paginated(
         current_chunk_offset += native_size;
     }
 
-    Ok(serde_json::json!({
-        "rows": all_rows,
-        "scalars": { "has_next_page": has_next_page }
-    }))
+    let mut scalars = last_scalars;
+    scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
+    crate::evaluator::json_eval::rescale_total_pages(&mut scalars, native_size, page_size as usize);
+
+    Ok(serde_json::json!({ "rows": all_rows, "scalars": scalars }))
 }
 
 /// Evaluates an expression in an HTML document context.

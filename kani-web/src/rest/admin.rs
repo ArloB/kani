@@ -1386,6 +1386,28 @@ pub(super) async fn admin_put_backup_schedule(
     State(state): State<AppState>,
     Json(body): Json<kani_app::service::backup_scheduler::BackupScheduleConfig>,
 ) -> Result<impl IntoResponse, AppError> {
+    // Prove the destination is usable while the admin is looking at the form.
+    // Only for an enabled schedule: a disabled one may name a volume that is
+    // not mounted yet.
+    if body.enabled {
+        let kani_app::service::backup_scheduler::BackupDestination::Local { path } =
+            &body.destination;
+        tokio::fs::create_dir_all(path).await.map_err(|e| {
+            AppError::ValidationError(format!(
+                "The backup directory {} could not be created: {e}",
+                path.display()
+            ))
+        })?;
+        let probe = path.join(".kani-backup-write-test");
+        tokio::fs::write(&probe, b"").await.map_err(|e| {
+            AppError::ValidationError(format!(
+                "The backup directory {} is not writable: {e}",
+                path.display()
+            ))
+        })?;
+        let _ = tokio::fs::remove_file(&probe).await;
+    }
+
     if body.passphrase.as_deref() == Some("***") {
         let existing = state.service.get_backup_schedule().await?;
         let mut config = body;

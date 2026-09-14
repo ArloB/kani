@@ -3,6 +3,7 @@
 
 import { initPermissions, getState, setState, subscribe, hasPermission } from './session.js';
 import { initTheme, syncServerThemes } from './theme.js';
+import { initTileSize } from './tile-size.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate, rememberIntendedDestination } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
@@ -24,6 +25,7 @@ import { openCommandPalette } from './components/command-palette.js';
 
 (async () => {
   initTheme();
+  initTileSize();
 
   if (['/login', '/register', '/setup'].includes(location.pathname)) {
     const appEl = document.getElementById('app');
@@ -216,7 +218,7 @@ function _renderDesktopNav(el) {
   _updateDesktopActive(el, location.pathname);
 
   onNavigate(path => {
-    if (['/login', '/register', '/setup'].includes(path)) { _hideChrome(); return; }
+    if (['/login', '/register', '/setup', '/onboarding'].includes(path)) { _hideChrome(); return; }
     _showChrome();
     _updateDesktopActive(el, path);
   });
@@ -362,7 +364,7 @@ function _renderBottomNav(el) {
   _updateTabActive(el, location.pathname);
 
   onNavigate(path => {
-    if (['/login', '/register', '/setup'].includes(path)) { el.style.display = 'none'; return; }
+    if (['/login', '/register', '/setup', '/onboarding'].includes(path)) { el.style.display = 'none'; return; }
     el.style.display = '';
     _updateTabActive(el, path);
   });

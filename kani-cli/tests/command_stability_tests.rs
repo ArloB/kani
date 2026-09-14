@@ -101,3 +101,30 @@ fn archive_verify_stays_stable() {
         "archive-verify is the export promise users run when Kani itself will not start"
     );
 }
+
+/// `-o` after the positional arguments must still bind to `output`. A trailing
+/// var-arg would swallow it into `args`, silently writing the default path.
+#[test]
+fn record_output_flag_binds_after_positional_arguments() {
+    use clap::Parser;
+    use kani_cli::commands::{Command, ReplCommand};
+
+    let cli = Cli::try_parse_from([
+        "kani-cli",
+        "repl",
+        "record",
+        "ext.yaml",
+        "popular",
+        "page=1",
+        "-o",
+        "chosen.har",
+    ])
+    .expect("record args parse");
+
+    let Command::Repl(ReplCommand::Record { output, args, .. }) = cli.command else {
+        panic!("expected repl record");
+    };
+
+    assert_eq!(output, "chosen.har", "-o did not bind; args were {args:?}");
+    assert_eq!(args, vec!["page=1".to_string()]);
+}

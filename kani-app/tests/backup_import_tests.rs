@@ -455,3 +455,56 @@ async fn a_backup_written_before_the_v8_rename_still_restores() {
         "the old browser_max_memory_mb value must land in the renamed column"
     );
 }
+
+#[tokio::test]
+async fn restoring_progress_only_reaches_manga_already_in_the_library() {
+    let svc = test_service().await;
+    let uid = insert_user(&svc.db, "reader").await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga = insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
+    let ch = common::insert_chapter(&svc.db, manga, "c1", 1.0).await;
+
+    sqlx::query(
+        "INSERT INTO user_chapter_tracking (user_id, chapter_id, is_read, last_page_read) \
+         VALUES (?, ?, 1, 5)",
+    )
+    .bind(uid)
+    .bind(ch.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let zip = svc.export_backup(uid, true, None).await.unwrap();
+
+    sqlx::query("DELETE FROM user_chapter_tracking")
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let opts = RestoreOptions {
+        merge: true,
+        import_manga: false,
+        import_categories: false,
+        import_download_rules: false,
+        import_tracking: false,
+        import_chapter_progress: true,
+        import_settings: false,
+        import_repos: false,
+    };
+    svc.restore_backup(uid, &zip, opts, None).await.unwrap();
+
+    let restored: Option<(bool, i64)> = sqlx::query_as(
+        "SELECT is_read, last_page_read FROM user_chapter_tracking \
+         WHERE user_id = ? AND chapter_id = ?",
+    )
+    .bind(uid)
+    .bind(ch.0)
+    .fetch_optional(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        restored,
+        Some((true, 5)),
+        "a progress-only restore must reach the library that is already there"
+    );
+}

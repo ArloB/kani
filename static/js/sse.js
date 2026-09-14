@@ -112,7 +112,50 @@ function _scheduleReconnect() {
   }, delay);
 }
 
+/**
+ * Drops a chapter's progress entry. Entries otherwise live for the tab's
+ * lifetime, so a later attempt on the same chapter would read the previous
+ * attempt's terminal state as its own.
+ * @param {number} chapterId
+ */
+export function clearChapterProgress(chapterId) {
+  updateState('chaptersProgress', (map) => {
+    if (!map.has(chapterId)) return map;
+    const m = new Map(map);
+    m.delete(chapterId);
+    return m;
+  });
+}
+
 /** @param {any} data */
+/**
+ * Applies `update` to a chapter's progress entry, creating one when the
+ * `chapter_started` that would have seeded it never arrived — a download that
+ * fails while fetching the page list emits only its terminal event.
+ *
+ * @param {unknown} chapterId
+ * @param {string | undefined} chapterName
+ * @param {(entry: any) => any} update
+ */
+function _updateChapterEntry(chapterId, chapterName, update) {
+  updateState('chaptersProgress', (map) => {
+    const m = new Map(map);
+    const id = Number(chapterId);
+    const entry = m.get(id) ?? {
+      id,
+      name: chapterName ?? '',
+      mangaId: 0,
+      mangaTitle: '',
+      totalPages: 0,
+      completedPages: 0,
+      status: 'in_progress',
+      jobId: null,
+    };
+    m.set(id, update(entry));
+    return m;
+  });
+}
+
 function _handleEvent(data) {
   const type = data.type;
 
@@ -145,6 +188,7 @@ function _handleEvent(data) {
   }
 
   if (type === 'chapter_started') {
+
     updateState('chaptersProgress', (map) => {
       const m = new Map(map);
       m.set(Number(data.chapter_id), {
@@ -163,53 +207,33 @@ function _handleEvent(data) {
   }
 
   if (type === 'page_completed') {
-    updateState('chaptersProgress', (map) => {
-      const m = new Map(map);
-      const id = Number(data.chapter_id);
-      const entry = m.get(id);
-      if (entry) {
-        // Only advance — out-of-order events must not move the bar backward.
-        const next = data.page_index + 1;
-        if (next > entry.completedPages) {
-          m.set(id, { ...entry, completedPages: next });
-        }
-      }
-      return m;
+    _updateChapterEntry(data.chapter_id, data.chapter_name, (entry) => {
+      // Only advance — out-of-order events must not move the bar backward.
+      const next = Number(data.page_index) + 1;
+      return next > entry.completedPages ? { ...entry, completedPages: next } : entry;
     });
     return;
   }
 
   if (type === 'chapter_completed') {
-    updateState('chaptersProgress', (map) => {
-      const m = new Map(map);
-      const id = Number(data.chapter_id);
-      const entry = m.get(id);
-      if (entry) m.set(id, { ...entry, status: 'completed', completedPages: entry.totalPages });
-      return m;
-    });
-    _maybeAutoCache(Number(data.chapter_id), Number(data.successful_pages ?? 0));
+    const pages = Number(data.successful_pages ?? 0);
+    _updateChapterEntry(data.chapter_id, data.chapter_name, (entry) => ({
+      ...entry,
+      status: 'completed',
+      totalPages: entry.totalPages || pages,
+      completedPages: entry.totalPages || pages,
+    }));
+    _maybeAutoCache(Number(data.chapter_id), pages);
     return;
   }
 
   if (type === 'chapter_failed') {
-    updateState('chaptersProgress', (map) => {
-      const m = new Map(map);
-      const id = Number(data.chapter_id);
-      const entry = m.get(id);
-      if (entry) m.set(id, { ...entry, status: 'failed' });
-      return m;
-    });
+    _updateChapterEntry(data.chapter_id, data.chapter_name, (entry) => ({ ...entry, status: 'failed' }));
     return;
   }
 
   if (type === 'chapter_cancelled') {
-    updateState('chaptersProgress', (map) => {
-      const m = new Map(map);
-      const id = Number(data.chapter_id);
-      const entry = m.get(id);
-      if (entry) m.set(id, { ...entry, status: 'cancelled' });
-      return m;
-    });
+    _updateChapterEntry(data.chapter_id, data.chapter_name, (entry) => ({ ...entry, status: 'cancelled' }));
     return;
   }
 

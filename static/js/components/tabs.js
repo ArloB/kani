@@ -34,7 +34,7 @@ export function Tabs({ tabs, activeId, onSelect, variant = 'underline', stretch 
             + (isActive ? ' bg-surface text-text shadow-sm' : ' text-text-muted hover:text-text');
         } else {
           cls += ' px-4 py-2 rounded-t-md'
-            + (stretch ? ' flex-1 justify-center' : '')
+            + (stretch ? ' flex-1 justify-center' : ' shrink-0 whitespace-nowrap')
             + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
         }
         if (tab.disabled) cls += ' opacity-40 cursor-not-allowed';

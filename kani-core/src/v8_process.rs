@@ -14,6 +14,14 @@ pub fn set_v8_debug_logging(enabled: bool) {
     V8_DEBUG_LOGGING.store(enabled, Ordering::Relaxed);
 }
 
+/// Whether the operator has turned on script-engine debug logging in settings.
+/// Read by the other half of the browser-capture path — the solver client in
+/// [`crate::http`] — so one toggle covers both engines rather than each growing
+/// its own switch.
+pub fn v8_debug_logging_enabled() -> bool {
+    V8_DEBUG_LOGGING.load(Ordering::Relaxed)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct V8Config {
     pub max_memory_mb: u32,
@@ -581,6 +589,13 @@ pub async fn capture_page_payload_resilient(
                 message: error.to_string(),
             })
         }
+        Err(error @ crate::http::SolverCaptureError::ScriptProducedNothing(_)) => {
+            record_browser_solver_result(false);
+            Err(CapturePagePayloadError::Action {
+                code: "solver_capture_empty".to_string(),
+                message: error.to_string(),
+            })
+        }
         Err(error @ crate::http::SolverCaptureError::Unreachable) => {
             record_browser_solver_result(false);
             Err(CapturePagePayloadError::Action {
@@ -735,8 +750,10 @@ mod tests {
     fn set_v8_debug_logging_toggles_flag() {
         set_v8_debug_logging(true);
         assert!(V8_DEBUG_LOGGING.load(Ordering::Relaxed));
+        assert!(v8_debug_logging_enabled());
         set_v8_debug_logging(false);
         assert!(!V8_DEBUG_LOGGING.load(Ordering::Relaxed));
+        assert!(!v8_debug_logging_enabled());
     }
 
     #[test]

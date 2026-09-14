@@ -308,14 +308,31 @@ pub enum ReplCommand {
         url_contains: Option<String>,
     },
     /// Make a live HTTP request to an endpoint and save the response as a HAR file
+    /// Resolve an endpoint's request and print it without sending anything
+    Request {
+        /// Path to the YAML extension file
+        file: String,
+        /// Endpoint name: popular, search, manga_details, chapter_list, pages
+        endpoint: String,
+        /// Arguments for route placeholders and query params (e.g. manga_id=abc page=1)
+        args: Vec<String>,
+        /// Override a filter, repeatable (e.g. --filter content_rating=safe,suggestive)
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+        /// Also run the pre_request hook and show the request it produces
+        #[arg(long)]
+        with_hooks: bool,
+    },
     Record {
         /// Path to the YAML extension file
         file: String,
         /// Endpoint name: popular, search, manga_details, chapter_list, pages
         endpoint: String,
         /// Arguments for route placeholders and query params (e.g. manga_id=abc page=1)
-        #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+        /// Override a filter, repeatable (e.g. --filter content_rating=safe,suggestive)
+        #[arg(long = "filter")]
+        filters: Vec<String>,
         /// Output HAR file path
         #[arg(long, short, default_value = "recorded.har")]
         output: String,
@@ -448,12 +465,20 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 &expected,
                 url_contains.as_deref(),
             ),
+            ReplCommand::Request {
+                file,
+                endpoint,
+                args,
+                filters,
+                with_hooks,
+            } => crate::repl::request::run(&file, &endpoint, &args, &filters, with_hooks),
             ReplCommand::Record {
                 file,
                 endpoint,
                 args,
+                filters,
                 output,
-            } => crate::repl::record::run(&file, &endpoint, &args, &output),
+            } => crate::repl::record::run(&file, &endpoint, &args, &filters, &output),
         },
     }
 }

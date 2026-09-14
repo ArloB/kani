@@ -110,7 +110,7 @@ pub(super) async fn get_library_filtered(
         .into_iter()
         .map(|r| {
             let cover_url = if r.local_cover_path.is_some() {
-                Some(format!("/rest/manga/{}/cover", r.id))
+                Some(local_cover_url(r.id, "sm", r.cover_hash.as_deref()))
             } else {
                 r.cover_url
                     .map(|url| sign_image_url(&url, &r.base_url, &state, None))
@@ -129,6 +129,10 @@ pub(super) async fn get_library_filtered(
                 cover_url,
                 new_chapter_count: r.new_chapter_count,
                 resume,
+                match_field: r.match_field,
+                match_text: r.match_text,
+                import_link_status: r.import_link_status,
+                is_orphaned: r.is_orphaned,
             }
         })
         .collect();
@@ -209,7 +213,11 @@ pub(super) async fn get_continue_reading_shelf(
         .into_iter()
         .map(|item| {
             let cover_url = if item.local_cover_path.is_some() {
-                Some(format!("/rest/manga/{}/cover", item.manga_id))
+                Some(local_cover_url(
+                    item.manga_id,
+                    "sm",
+                    item.cover_hash.as_deref(),
+                ))
             } else {
                 item.cover_url
                     .map(|url| sign_image_url(&url, &item.base_url, &state, None))
@@ -722,7 +730,7 @@ pub(super) async fn get_recent_updates(
     let (mut items, has_next_page, total_pages) = state.get_recent_updates(q.page).await?;
     for u in &mut items {
         u.cover_url = if u.local_cover_path.is_some() {
-            Some(format!("/rest/manga/{}/cover", u.manga_id))
+            Some(local_cover_url(u.manga_id, "sm", u.cover_hash.as_deref()))
         } else if let Some(ref url) = u.cover_url.clone() {
             Some(sign_image_url(url, &u.base_url, &state, None))
         } else {
