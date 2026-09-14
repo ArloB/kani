@@ -20,6 +20,7 @@ pub enum RecurringJobKind {
     UpdateCheck,
     IntegrityScrubQuick,
     IntegrityScrubDeep,
+    ImportRelinkSweep,
 }
 
 impl RecurringJobKind {
@@ -38,6 +39,7 @@ impl RecurringJobKind {
             Self::UpdateCheck => "update_check",
             Self::IntegrityScrubQuick => "integrity_scrub_quick",
             Self::IntegrityScrubDeep => "integrity_scrub_deep",
+            Self::ImportRelinkSweep => "import_relink_sweep",
         }
     }
 
@@ -56,6 +58,7 @@ impl RecurringJobKind {
             Self::UpdateCheck => 24 * 60 * 60,
             Self::IntegrityScrubQuick => 24 * 60 * 60,
             Self::IntegrityScrubDeep => 7 * 24 * 60 * 60,
+            Self::ImportRelinkSweep => 60 * 60,
         }
     }
 
@@ -74,6 +77,7 @@ impl RecurringJobKind {
             Self::UpdateCheck,
             Self::IntegrityScrubQuick,
             Self::IntegrityScrubDeep,
+            Self::ImportRelinkSweep,
         ]
     }
 
@@ -204,6 +208,17 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
         RecurringJobKind::IntegrityScrubQuick | RecurringJobKind::IntegrityScrubDeep
     ) && integrity_scrub_job_active(&svc.db).await
     {
+        return;
+    }
+
+    // Nothing is waiting on an id, so the sweep would submit an empty pass.
+    if kind == RecurringJobKind::ImportRelinkSweep && svc.pending_import_link_count().await == 0 {
+        if let Err(e) = record_run(&svc.db, kind, None).await {
+            tracing::warn!(
+                "Failed to record recurring job reschedule for {:?}: {e}",
+                kind
+            );
+        }
         return;
     }
 
@@ -350,6 +365,7 @@ async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<cra
                 .submit(crate::jobs::update_check::UpdateCheckJob::new())
                 .await
         }
+        RecurringJobKind::ImportRelinkSweep => svc.queue_import_resolve(None).await,
     }
 }
 

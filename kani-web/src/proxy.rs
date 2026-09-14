@@ -32,7 +32,10 @@ pub fn canonical_proxy_key(url: &str) -> String {
 type HmacSha256 = Hmac<Sha256>;
 
 const NONCE_LEN: usize = 12;
-const TOKEN_TTL_SECS: i64 = 3600;
+
+/// Leads the sealed plaintext. The nonce is carried in the token and used as
+/// supplied, so an unversioned token still decrypts; this marker is what refuses it.
+const TOKEN_VERSION: &str = "v2";
 
 /// Load the proxy secret from `KANI_PROXY_SECRET` (base64-encoded 32 bytes), read/persist it
 /// from `data_dir/proxy.key`, or generate and persist a new one on first boot.
@@ -84,11 +87,9 @@ pub(crate) fn load_or_persist_secret(data_dir: &std::path::Path) -> [u8; 32] {
     secret
 }
 
-/// Seal a (url, referer) pair into an opaque, time-limited token.
+/// Seal a (url, referer) pair into an opaque token.
 pub(crate) fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let expiry = ((now / TOKEN_TTL_SECS) + 1) * TOKEN_TTL_SECS;
-    let plaintext = format!("{}|{}|{}", url, referer, expiry);
+    let plaintext = format!("{TOKEN_VERSION}|{url}|{referer}");
 
     let mut mac =
         <HmacSha256 as hmac::Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
@@ -111,7 +112,7 @@ pub(crate) fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> S
     URL_SAFE_NO_PAD.encode(token)
 }
 
-/// Unseal a token, returning `(url, referer)` if it is valid and unexpired.
+/// Unseal a token, returning `(url, referer)` if it is authentic.
 pub(crate) fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, String)> {
     let raw = URL_SAFE_NO_PAD.decode(token).ok()?;
     if raw.len() <= NONCE_LEN {
@@ -125,16 +126,11 @@ pub(crate) fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(Stri
     let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;
     let s = String::from_utf8(plaintext).ok()?;
 
-    let mut parts = s.splitn(2, '|');
-    let url = parts.next()?.to_string();
-    let tail = parts.next()?;
-    let sep = tail.rfind('|')?;
-    let referer = tail[..sep].to_string();
-    let expiry: i64 = tail[sep + 1..].parse().ok()?;
+    let body = s.strip_prefix(TOKEN_VERSION)?.strip_prefix('|')?;
 
-    if time::OffsetDateTime::now_utc().unix_timestamp() > expiry {
-        return None;
-    }
+    let mut parts = body.splitn(2, '|');
+    let url = parts.next()?.to_string();
+    let referer = parts.next()?.to_string();
 
     Some((url, referer))
 }
@@ -203,7 +199,7 @@ impl Default for ProxyConfig {
             retry_after_cap: std::time::Duration::from_secs(60),
             request_timeout: std::time::Duration::from_secs(35),
             per_host_concurrency: 5,
-            min_host_interval: std::time::Duration::from_millis(100),
+            min_host_interval: std::time::Duration::from_millis(20),
             max_image_bytes: 50 * 1024 * 1024,
         }
     }
@@ -399,6 +395,51 @@ mod tests {
         let s = secret();
         let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
         assert!(unseal_proxy_token(&token, &s).is_some());
+    }
+
+    fn seal_legacy_expiring_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
+        let expiry = time::OffsetDateTime::now_utc().unix_timestamp() + 3600;
+        let plaintext = format!("{}|{}|{}", url, referer, expiry);
+
+        let mut mac =
+            <HmacSha256 as hmac::Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
+        mac.update(b"nonce|");
+        mac.update(plaintext.as_bytes());
+        let digest = mac.finalize().into_bytes();
+        let nonce_bytes: [u8; NONCE_LEN] = digest[..NONCE_LEN].try_into().expect("HMAC is >= 12");
+
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let cipher = ChaCha20Poly1305::new(secret.into());
+        let ciphertext = cipher
+            .encrypt(nonce, plaintext.as_bytes())
+            .expect("infallible");
+
+        let mut token = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+        token.extend_from_slice(&nonce_bytes);
+        token.extend_from_slice(&ciphertext);
+        URL_SAFE_NO_PAD.encode(token)
+    }
+
+    #[test]
+    fn a_token_is_byte_identical_however_often_it_is_minted() {
+        let s = secret();
+        let first = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
+        let second = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
+        assert_eq!(
+            first, second,
+            "the same (url, referer) must always produce the same token"
+        );
+    }
+
+    #[test]
+    fn a_legacy_expiring_token_is_refused_rather_than_misread() {
+        let s = secret();
+        let legacy = seal_legacy_expiring_token("https://img.example.com/a.jpg", "ref", &s);
+        assert_eq!(
+            unseal_proxy_token(&legacy, &s),
+            None,
+            "a legacy token must be rejected outright"
+        );
     }
 
     #[test]

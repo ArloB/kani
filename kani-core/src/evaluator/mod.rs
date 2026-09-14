@@ -3,7 +3,7 @@
 pub mod html_eval;
 pub mod id_encoding;
 pub mod json_eval;
-pub(crate) mod shared;
+pub mod shared;
 
 pub use shared::EvalLimits;
 /// Marker prefix on an evaluator error carrying an HTTP status to classify.

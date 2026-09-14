@@ -49,6 +49,12 @@ pub struct EvalBudget {
     pub limits: EvalLimits,
 }
 
+impl Default for EvalBudget {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvalBudget {
     pub fn new() -> Self {
         Self::with_limits(EvalLimits::default())
@@ -328,7 +334,7 @@ impl std::fmt::Debug for Value {
 }
 
 /// Arc-backed environment: clone is O(1); mutation (set) triggers copy-on-write.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Env(Arc<HashMap<String, Value>>);
 
 impl Env {
@@ -1041,7 +1047,7 @@ fn compare_sort_key(a: &Value, b: &Value) -> std::cmp::Ordering {
 }
 
 /// Fetch a URL and return the response body as a String.
-pub(super) async fn fetch_body(
+pub async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
@@ -1136,15 +1142,27 @@ pub(super) async fn fetch_body(
         // default below defers to it.
         let mut proceeded = false;
 
+        const MAX_BYTES: usize = 15 * 1024 * 1024;
+        let resp_headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        let raw_body = response
+            .bytes_limited(MAX_BYTES)
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec();
+
+        // Only a source with hooks sees a lossily-decoded body; without them the
+        // strict conversion below still rejects a non-UTF-8 payload.
+        let mut hook_body: Option<String> = None;
+
         if let Some(ref registry) = hook_registry {
-            let resp_headers: Vec<(String, String)> = response
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect();
-            let scriptable_resp = ScriptableResponse {
+            let mut scriptable_resp = ScriptableResponse {
                 status: status.as_u16() as i64,
                 headers: resp_headers,
+                body: String::from_utf8_lossy(&raw_body).into_owned(),
             };
             let ctx = ScriptableCtx {
                 cache_backend: Arc::clone(&state.ext_cache),
@@ -1156,8 +1174,9 @@ pub(super) async fn fetch_body(
                 browser_profile_key: Some(state.browser_profile_key.clone()),
             };
             let action = registry
-                .run_on_status(&working, &scriptable_resp, ctx)
+                .run_on_status(&working, &mut scriptable_resp, ctx)
                 .map_err(|e| format!("on_status hook: {e}"))?;
+            hook_body = Some(scriptable_resp.body);
 
             match action.kind {
                 HookActionKind::Proceed => {
@@ -1188,13 +1207,11 @@ pub(super) async fn fetch_body(
             return Err(format!("{HTTP_STATUS_ERR_PREFIX}{code}:{ra}"));
         }
 
-        const MAX_BYTES: usize = 15 * 1024 * 1024;
-        let body = response
-            .bytes_limited(MAX_BYTES)
-            .await
-            .map_err(|e| e.to_string())?
-            .to_vec();
-        return String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string());
+        return match hook_body {
+            Some(body) => Ok(body),
+            None => String::from_utf8(raw_body)
+                .map_err(|_| "Invalid UTF-8 in response body".to_string()),
+        };
     }
 }
 
@@ -1712,7 +1729,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complex_comix_arena_preserves_control_flow_and_collections() {
+    async fn a_multi_binding_arena_preserves_control_flow_and_collections() {
         use crate::evaluator::json_eval;
         use crate::wasm::HostState;
         use kani_shared::ast::{BlueprintBuilder, Expr};
@@ -1735,8 +1752,8 @@ merge([
   [if $alts == "" then "" else format("Alternative names:\n{}", $alts)],
   [$facts]
 ]).filter($item != "").join("\n\n")"#;
-        let parsed = kani_yaml::dsl::parse(source).expect("parse Comix expression");
-        let expression = Expr::try_from(parsed).expect("lower Comix expression");
+        let parsed = kani_yaml::dsl::parse(source).expect("parse the expression");
+        let expression = Expr::try_from(parsed).expect("lower the expression");
         assert!(matches!(expression, Expr::Arena { .. }));
         let blueprint = BlueprintBuilder::new("/items")
             .field("description", expression)
@@ -1760,7 +1777,7 @@ merge([
             .insert("extra_info_in_description".into(), "true".into());
         let result = json_eval::extract_json_str(&mut state, &document.to_string(), &blueprint)
             .await
-            .expect("evaluate Comix arena");
+            .expect("evaluate the arena");
         let description = result["rows"][0]["description"].as_str().unwrap();
         assert!(description.contains("Summary"));
         assert!(description.contains("Alternative names:\nAlternative"));

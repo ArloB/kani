@@ -1,5 +1,5 @@
 
-import { skeletonGrid } from './skeletons.js';
+import { skeletonGrid, skeletonGridItems } from './skeletons.js';
 import { createEmptyState } from './empty-state.js';
 import { createErrorState } from './error-state.js';
 import { startLoading, finishLoading } from './page-loading-bar.js';
@@ -42,7 +42,17 @@ import { startLoading, finishLoading } from './page-loading-bar.js';
 export async function fetchPagedGrid(opts) {
   const { gridEl, pageSize, append = false, fetchPage, mapItems, renderCard, emptyIcon, emptyTitle, errorMessage, onError, onRetry } = opts;
 
+  /** @type {Element[]} */
+  let placeholders = [];
   if (append) {
+    const grid = gridEl.querySelector('.manga-grid');
+    if (grid) {
+      const holder = document.createElement('div');
+      holder.innerHTML = skeletonGridItems(pageSize);
+      placeholders = [...holder.children];
+      grid.append(...placeholders);
+    }
+    gridEl.setAttribute('aria-busy', 'true');
   } else {
     gridEl.innerHTML = skeletonGrid(pageSize);
     gridEl.setAttribute('aria-busy', 'true');
@@ -54,10 +64,11 @@ export async function fetchPagedGrid(opts) {
   try {
     result = await fetchPage();
   } catch (e) {
+    for (const p of placeholders) p.remove();
     if (/** @type {any} */ (e)?.name === 'AbortError') return null;
+    gridEl.setAttribute('aria-busy', 'false');
     if (!append) {
       gridEl.innerHTML = '';
-      gridEl.setAttribute('aria-busy', 'false');
       gridEl.classList.remove('opacity-50', 'pointer-events-none');
     }
     finishLoading();
@@ -68,9 +79,10 @@ export async function fetchPagedGrid(opts) {
   }
 
   finishLoading();
+  for (const p of placeholders) p.remove();
+  gridEl.setAttribute('aria-busy', 'false');
   if (!append) {
     gridEl.innerHTML = '';
-    gridEl.setAttribute('aria-busy', 'false');
     gridEl.classList.remove('opacity-50', 'pointer-events-none');
   }
 

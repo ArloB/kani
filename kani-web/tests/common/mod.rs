@@ -54,6 +54,9 @@ pub async fn test_state() -> AppState {
         restart_requested: Arc::new(AtomicBool::new(false)),
         log_handle,
         idempotency: kani_web::idempotency::IdempotencyStore::new(),
+        session_touch_seen: moka::future::Cache::builder()
+            .time_to_live(kani_web::state::SESSION_TOUCH_WINDOW)
+            .build(),
     }
 }
 

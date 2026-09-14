@@ -33,11 +33,27 @@ import { mountCategoryPicker } from '../components/manga-details/category-picker
 import { mountDownloadRulesPanel } from '../components/manga-details/download-rules-panel.js';
 import { mountScanlatorPrefsPanel } from '../components/manga-details/scanlator-prefs-panel.js';
 import { mountSuppressedBanner } from '../components/manga-details/suppressed-banner.js';
+import { mountImportLinkBanner } from '../components/manga-details/import-link-banner.js';
 import { mkSectionHeader, mkCard, mkTitledCard, mkRow, mkItem } from '../components/manga-details/_shared.js';
 import { subscribeJob } from '../sse.js';
 import { t } from '../i18n.js';
+import { prefersInfiniteScroll } from '../pagination-mode.js';
 const html = htm.bind(h);
 
+
+/** Opens the migration dialogue for the manga on screen. */
+function _openMigrationDialogue() {
+  if (!_sid || !_dbId) return;
+  _unmountMigration = mountMigrationDialogue({
+    dbId: _dbId,
+    currentSourceId: _sid,
+    currentSourceName: _mangaData?.source_name ?? '',
+    currentTitle: _mangaData?.title ?? '',
+    currentCoverUrl: api.getMangaCoverUrl(_dbId, 'lg'),
+    onComplete: (newSid, newMid) => { _unmountMigration?.(); navigate(`/source/${newSid}/manga/${encodeURIComponent(newMid)}`); },
+    onClose: () => { _unmountMigration?.(); _unmountMigration = null; },
+  });
+}
 
 function _updateUrl() {
   replaceState({
@@ -69,6 +85,7 @@ let _scanlatorMode = 'priority';
 let _downloadAllPreferredOnly = true;
 let _upgradeAutoReplace = false;
 let _suppressedCount = 0;
+let _importLinkStatus = /** @type {string|null} */ (null);
 let _filterDownloaded = false;
 let _filterUnread = false;
 let _filterOrphaned = false;
@@ -225,6 +242,7 @@ export async function init(container, params) {
       _downloadAllPreferredOnly = res.download_all_preferred_only ?? true;
       _upgradeAutoReplace = res.upgrade_auto_replace ?? false;
       _suppressedCount = res.suppressed_chapter_count ?? 0;
+      _importLinkStatus = res.import_link_status ?? null;
       if (info) {
         if (res.notes !== undefined) info.notes = res.notes;
         info.cover_overridden   = res.cover_overridden ?? false;
@@ -322,9 +340,9 @@ export async function init(container, params) {
   // The page had no heading at all — the title only appeared in the breadcrumb.
   // The backdrop sits behind the top of the content so the cover (first child of
   // leftCol) floats on it.
-  const heroCoverUrl = _isLocal
-    ? api.getMangaCoverUrl(_dbId, 'lg')
-    : (info?.cover_url ?? info?.cover_image_url ?? null);
+  const heroCoverUrl = info?.cover_url
+    ?? info?.cover_image_url
+    ?? (_isLocal ? api.getMangaCoverUrl(_dbId, 'lg') : null);
 
   const hero = document.createElement('div');
   hero.className = 'manga-hero';
@@ -363,6 +381,14 @@ export async function init(container, params) {
   // and sits next to the list it is talking about.
   if (_isLocal && _dbId && _suppressedCount > 0) {
     mountSuppressedBanner(rightCol, _dbId, _suppressedCount);
+  }
+
+  // An imported entry has no chapters until its id is matched to the source,
+  // which otherwise reads as an empty series.
+  if (_isLocal && _dbId && _importLinkStatus) {
+    mountImportLinkBanner(rightCol, _dbId, _importLinkStatus, source?.name ?? '', {
+      onMigrate: (hasPermission('library:manage') && _sid) ? _openMigrationDialogue : null,
+    });
   }
 
   const { destroy: destroyHeader } = mountMangaHeader(leftCol, info, source, {
@@ -777,18 +803,7 @@ async function _renderManageTab(contentEl) {
       migrateBtn.type = 'button';
       migrateBtn.className = 'btn-ghost btn-sm';
       migrateBtn.textContent = t('manga.details.migrate');
-      migrateBtn.addEventListener('click', () => {
-        const coverUrl = api.getMangaCoverUrl(_dbId, 'lg');
-        _unmountMigration = mountMigrationDialogue({
-          dbId: _dbId,
-          currentSourceId: _sid,
-          currentSourceName: _mangaData?.source_name ?? '',
-          currentTitle: _mangaData?.title ?? '',
-          currentCoverUrl: coverUrl,
-          onComplete: (newSid, newMid) => { _unmountMigration?.(); navigate(`/source/${newSid}/manga/${encodeURIComponent(newMid)}`); },
-          onClose: () => { _unmountMigration?.(); _unmountMigration = null; },
-        });
-      });
+      migrateBtn.addEventListener('click', _openMigrationDialogue);
       card.appendChild(mkItem(mkRow(t('manga.details.migrate.row'), t('manga.details.migrate.row.desc'), migrateBtn)));
     }
 
@@ -1091,7 +1106,7 @@ function _openChapterNotesModal() {
 
 /** @param {HTMLElement} sectionEl */
 async function _fetchChapters(sectionEl) {
-  const infinite = getLocal('kani_chapter_pagination') === 'infinite';
+  const infinite = prefersInfiniteScroll('kani_chapter_pagination');
 
   if (_listContainerEl) { render(null, _listContainerEl); _listContainerEl = null; }
   for (const el of _toolbarMounts) render(null, el);
@@ -1365,7 +1380,9 @@ async function _fetchChapters(sectionEl) {
       const { destroy } = renderPagination(paginEl, {
         page: _page,
         hasNext,
-        total: result?.total_pages ?? undefined,
+        total: !_isLocal && _allRemoteChapters !== null
+          ? Math.ceil(_allRemoteChapters.length / _chapterPageSize)
+          : result?.total_pages ?? undefined,
         onPageChange: (p) => { _page = p; _updateUrl(); _fetchChapters(sectionEl); },
       });
       _destroyPagination = destroy;

@@ -133,8 +133,10 @@ impl AppService {
             || f.hide_completed_status;
 
         let mut qb = sqlx::QueryBuilder::new(
-            "SELECT m.id, COALESCE(m.local_name, m.name) AS name, m.cover_url, m.local_cover_path, s.base_url, \
+            "SELECT m.id, COALESCE(m.local_name, m.name) AS name, m.cover_url, m.local_cover_path, m.cover_hash, s.base_url, \
              m.is_orphaned, \
+             (SELECT il.status FROM manga_import_links il WHERE il.manga_id = m.id) \
+               AS import_link_status, \
              COUNT(*) OVER() AS total_count, \
              (SELECT COUNT(*) FROM chapters c2 \
               LEFT JOIN user_manga_tracking umt2 ON umt2.manga_id = m.id AND umt2.user_id = ",
@@ -272,6 +274,10 @@ impl AppService {
         let has_next_page = records.len() == limit as usize;
         let total_count = records.first().map(|r| r.total_count).unwrap_or(0);
         records.truncate(page_size as usize);
+
+        if let Some(ref term) = f.search {
+            self.attribute_search_matches(term, &mut records).await;
+        }
         let ps = page_size as i64;
         let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
 
@@ -286,6 +292,63 @@ impl AppService {
             .await;
 
         Ok((records, has_next_page, total_pages))
+    }
+
+    /// Records which indexed field each row matched on, for rows the search did
+    /// not match by title.
+    ///
+    /// Runs as its own query because FTS5's `highlight`/`snippet` are refused in
+    /// the listing query, which uses a window function for its total count.
+    /// Failure leaves the captions unset rather than failing the listing.
+    async fn attribute_search_matches(
+        &self,
+        term: &str,
+        records: &mut [crate::models::LibraryManga],
+    ) {
+        if records.is_empty() {
+            return;
+        }
+        let fts_term = format!("\"{}\"*", term.replace('"', "\"\""));
+
+        let mut qb = sqlx::QueryBuilder::new(
+            "SELECT manga_id, \
+               CASE WHEN instr(highlight(manga_fts, 1, char(2), char(3)), char(2)) > 0 \
+                      OR instr(highlight(manga_fts, 2, char(2), char(3)), char(2)) > 0 THEN NULL \
+                    WHEN instr(highlight(manga_fts, 4, char(2), char(3)), char(2)) > 0 THEN 'author' \
+                    WHEN instr(highlight(manga_fts, 3, char(2), char(3)), char(2)) > 0 THEN 'description' \
+                    ELSE NULL END AS match_field, \
+               CASE WHEN instr(highlight(manga_fts, 1, char(2), char(3)), char(2)) > 0 \
+                      OR instr(highlight(manga_fts, 2, char(2), char(3)), char(2)) > 0 THEN NULL \
+                    WHEN instr(highlight(manga_fts, 4, char(2), char(3)), char(2)) > 0 \
+                      THEN snippet(manga_fts, 4, '', '', '…', 6) \
+                    WHEN instr(highlight(manga_fts, 3, char(2), char(3)), char(2)) > 0 \
+                      THEN snippet(manga_fts, 3, '', '', '…', 12) \
+                    ELSE NULL END AS match_text \
+             FROM manga_fts WHERE manga_fts MATCH ",
+        );
+        qb.push_bind(fts_term);
+        qb.push(" AND manga_id IN (");
+        let mut sep = qb.separated(", ");
+        for record in records.iter() {
+            sep.push_bind(record.id.0);
+        }
+        qb.push(")");
+
+        let attributed: Vec<(i64, Option<String>, Option<String>)> =
+            match qb.build_query_as().fetch_all(&self.db_read).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    tracing::warn!(%e, "could not attribute library search matches");
+                    return;
+                }
+            };
+
+        for (manga_id, field, text) in attributed {
+            if let Some(record) = records.iter_mut().find(|r| r.id.0 == manga_id) {
+                record.match_field = field;
+                record.match_text = text;
+            }
+        }
     }
 
     /// Returns full manga details including parsed authors, artists, and tags.
@@ -413,6 +476,14 @@ impl AppService {
             local_tags: loc_tags,
             has_local_people: record.has_local_people,
             has_local_tags: record.has_local_tags,
+            import_link_status: sqlx::query_scalar!(
+                "SELECT status FROM manga_import_links WHERE manga_id = ?",
+                id
+            )
+            .fetch_optional(&self.db_read)
+            .await
+            .ok()
+            .flatten(),
             chapter_count: sqlx::query_scalar!(
                 "SELECT COUNT(*) FROM chapters WHERE manga_id = ? AND is_orphaned = FALSE",
                 id
@@ -443,7 +514,7 @@ impl AppService {
         let offset = (page - 1) * 50;
         let mut items = sqlx::query_as!(
             kani_shared::types::RecentUpdateItem,
-            "SELECT m.id as manga_id, COALESCE(m.local_name, m.name) as manga_name, m.cover_url, m.local_cover_path,
+            "SELECT m.id as manga_id, COALESCE(m.local_name, m.name) as manga_name, m.cover_url, m.local_cover_path, m.cover_hash,
                     s.base_url, c.id as chapter_id, c.chapter_number,
                     c.name as chapter_name, c.discovered_at,
                     (c.download_status = 2) as \"is_downloaded: bool\"

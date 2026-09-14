@@ -185,6 +185,7 @@ export const COMPONENTS = [
     "module": "components/manga-card.js",
     "exports": [
       "createMangaCard",
+      "mangaGridCell",
       "renderMangaGrid",
       "setMangaCardDownloadProgress",
       "setMangaCardScanning",
@@ -211,6 +212,12 @@ export const COMPONENTS = [
     "module": "components/manga-details/download-rules-panel.js",
     "exports": [
       "mountDownloadRulesPanel"
+    ]
+  },
+  {
+    "module": "components/manga-details/import-link-banner.js",
+    "exports": [
+      "mountImportLinkBanner"
     ]
   },
   {
@@ -456,6 +463,7 @@ export const COMPONENTS = [
     "module": "components/skeletons.js",
     "exports": [
       "skeletonGrid",
+      "skeletonGridItems",
       "skeletonKeyValueRows",
       "skeletonMangaHero",
       "skeletonSettingsCards",
@@ -514,6 +522,12 @@ export const COMPONENTS = [
     "exports": [
       "ThemeEditor",
       "ThemePreviewSwatch"
+    ]
+  },
+  {
+    "module": "components/tile-size-select.js",
+    "exports": [
+      "TileSizeSelect"
     ]
   },
   {

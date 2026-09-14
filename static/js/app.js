@@ -3,6 +3,7 @@
 
 import { initPermissions, getState, setState, subscribe, hasPermission } from './session.js';
 import { initTheme, syncServerThemes } from './theme.js';
+import { initTileSize } from './tile-size.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate, rememberIntendedDestination } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
@@ -24,6 +25,7 @@ import { openCommandPalette } from './components/command-palette.js';
 
 (async () => {
   initTheme();
+  initTileSize();
 
   if (['/login', '/register', '/setup'].includes(location.pathname)) {
     const appEl = document.getElementById('app');

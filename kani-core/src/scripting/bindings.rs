@@ -17,6 +17,7 @@ pub struct ScriptableRequest {
 pub struct ScriptableResponse {
     pub status: i64,
     pub headers: Vec<(String, String)>,
+    pub body: String,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,30 @@ fn req_get_headers(req: &mut ScriptableRequest) -> rhai::Map {
         .collect()
 }
 
+/// Query parameters as `[key, value]` pairs, preserving order and duplicates —
+/// a map would collapse repeated keys such as `content_rating[]`.
+fn req_get_queries(req: &mut ScriptableRequest) -> rhai::Array {
+    req.queries
+        .iter()
+        .map(|(k, v)| Dynamic::from_array(vec![Dynamic::from(k.clone()), Dynamic::from(v.clone())]))
+        .collect()
+}
+
+fn req_push_query(req: &mut ScriptableRequest, key: String, value: String) {
+    req.queries.push((key, value));
+}
+
+fn req_set_query(req: &mut ScriptableRequest, key: String, value: String) {
+    match req.queries.iter_mut().find(|(k, _)| k == &key) {
+        Some(entry) => entry.1 = value,
+        None => req.queries.push((key, value)),
+    }
+}
+
+fn req_remove_query(req: &mut ScriptableRequest, key: String) {
+    req.queries.retain(|(k, _)| k != &key);
+}
+
 fn req_set_header(req: &mut ScriptableRequest, key: String, value: String) {
     match req.headers.iter_mut().find(|(k, _)| k == &key) {
         Some(entry) => entry.1 = value,
@@ -86,6 +111,14 @@ fn req_remove_header(req: &mut ScriptableRequest, key: String) {
 
 fn resp_get_status(resp: &mut ScriptableResponse) -> i64 {
     resp.status
+}
+
+fn resp_get_body(resp: &mut ScriptableResponse) -> String {
+    resp.body.clone()
+}
+
+fn resp_set_body(resp: &mut ScriptableResponse, body: String) {
+    resp.body = body;
 }
 
 fn resp_get_headers(resp: &mut ScriptableResponse) -> rhai::Map {
@@ -102,7 +135,14 @@ fn ctx_pref(ctx: &mut ScriptableCtx, key: String) -> Dynamic {
         .unwrap_or_else(|| Dynamic::from(()))
 }
 
+/// Scopes a script-supplied namespace under the source's own, so two extensions
+/// naming the same namespace cannot read or overwrite each other's entries.
+fn scoped_namespace(ctx: &ScriptableCtx, namespace: &str) -> String {
+    format!("{}{}", ctx.cache_namespace, namespace)
+}
+
 fn ctx_cache_get(ctx: &mut ScriptableCtx, namespace: String, key: String) -> Dynamic {
+    let namespace = scoped_namespace(ctx, &namespace);
     let result = tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(ctx.cache_backend.get(&namespace, &key))
     });
@@ -119,6 +159,7 @@ fn ctx_cache_put(
     value: String,
     ttl_secs: i64,
 ) {
+    let namespace = scoped_namespace(ctx, &namespace);
     let dur = Duration::from_secs(ttl_secs.max(0) as u64);
     tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(ctx.cache_backend.put(
@@ -131,6 +172,7 @@ fn ctx_cache_put(
 }
 
 fn ctx_cache_delete(ctx: &mut ScriptableCtx, namespace: String, key: String) {
+    let namespace = scoped_namespace(ctx, &namespace);
     tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(ctx.cache_backend.delete(&namespace, &key))
     });
@@ -141,6 +183,16 @@ fn ctx_capture_page_payload(
     page_url: String,
     script_name: String,
     timeout_ms: i64,
+) -> Result<Dynamic, Box<rhai::EvalAltResult>> {
+    ctx_capture_page_payload_scrolled(ctx, page_url, script_name, timeout_ms, true)
+}
+
+fn ctx_capture_page_payload_scrolled(
+    ctx: &mut ScriptableCtx,
+    page_url: String,
+    script_name: String,
+    timeout_ms: i64,
+    auto_scroll: bool,
 ) -> Result<Dynamic, Box<rhai::EvalAltResult>> {
     let handle = ctx.v8_process.as_ref().ok_or_else(|| {
         Box::<rhai::EvalAltResult>::from("browser runtime unavailable in this context")
@@ -167,7 +219,7 @@ fn ctx_capture_page_payload(
                 init_script,
                 timeout,
                 profile_key.as_deref(),
-                true,
+                auto_scroll,
             ),
         )
     });
@@ -184,13 +236,19 @@ pub(crate) fn register_hook_bindings(engine: &mut Engine) {
         .register_set("url", req_set_url)
         .register_get("endpoint_id", req_get_endpoint_id)
         .register_get("headers", req_get_headers)
+        .register_get("queries", req_get_queries)
         .register_fn("set_header", req_set_header)
-        .register_fn("remove_header", req_remove_header);
+        .register_fn("remove_header", req_remove_header)
+        .register_fn("push_query", req_push_query)
+        .register_fn("set_query", req_set_query)
+        .register_fn("remove_query", req_remove_query);
 
     engine
         .register_type_with_name::<ScriptableResponse>("Response")
         .register_get("status", resp_get_status)
-        .register_get("headers", resp_get_headers);
+        .register_get("headers", resp_get_headers)
+        .register_get("body", resp_get_body)
+        .register_set("body", resp_set_body);
 
     engine
         .register_type_with_name::<ScriptableCtx>("Ctx")
@@ -198,7 +256,8 @@ pub(crate) fn register_hook_bindings(engine: &mut Engine) {
         .register_fn("cache_get", ctx_cache_get)
         .register_fn("cache_put", ctx_cache_put)
         .register_fn("cache_delete", ctx_cache_delete)
-        .register_fn("capture_page_payload", ctx_capture_page_payload);
+        .register_fn("capture_page_payload", ctx_capture_page_payload)
+        .register_fn("capture_page_payload", ctx_capture_page_payload_scrolled);
 
     engine.register_type_with_name::<HookAction>("HookAction");
 
@@ -249,6 +308,69 @@ mod tests {
             ))),
             browser_profile_key: Some("test-source".to_string()),
         }
+    }
+
+    fn ctx_in(backend: &Arc<dyn crate::cache::CacheBackend>, namespace: &str) -> ScriptableCtx {
+        ScriptableCtx {
+            cache_backend: Arc::clone(backend),
+            cache_namespace: namespace.to_string(),
+            prefs: HashMap::new(),
+            v8_process: None,
+            http: None,
+            browser_scripts: None,
+            browser_profile_key: None,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_sources_cache_entry_is_invisible_to_another() {
+        let backend: Arc<dyn crate::cache::CacheBackend> =
+            Arc::new(crate::cache::InMemoryCache::new());
+        let mut a = ctx_in(&backend, "source-a:");
+        let mut b = ctx_in(&backend, "source-b:");
+
+        ctx_cache_put(&mut a, "shared".into(), "k".into(), "secret-a".into(), 60);
+        let leaked = ctx_cache_get(&mut b, "shared".into(), "k".into());
+
+        assert!(
+            leaked.is_unit(),
+            "source-b read source-a's entry under the same script namespace: {leaked:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_source_reads_back_its_own_entry() {
+        let backend: Arc<dyn crate::cache::CacheBackend> =
+            Arc::new(crate::cache::InMemoryCache::new());
+        let mut a = ctx_in(&backend, "source-a:");
+
+        ctx_cache_put(&mut a, "ns".into(), "k".into(), "value".into(), 60);
+        assert_eq!(
+            ctx_cache_get(&mut a, "ns".into(), "k".into())
+                .into_string()
+                .ok(),
+            Some("value".to_string())
+        );
+
+        ctx_cache_delete(&mut a, "ns".into(), "k".into());
+        assert!(ctx_cache_get(&mut a, "ns".into(), "k".into()).is_unit());
+    }
+
+    #[test]
+    fn capture_page_payload_accepts_an_auto_scroll_argument() {
+        let mut c = ctx(None, &[("fetch", "passPayload('{}')")]);
+        let err = ctx_capture_page_payload_scrolled(
+            &mut c,
+            "https://example.com".into(),
+            "fetch".into(),
+            1000,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unavailable"),
+            "expected browser-unavailable error, got: {err}"
+        );
     }
 
     #[test]

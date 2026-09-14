@@ -3249,6 +3249,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tiny-skia",
+ "tokio",
  "zip 7.2.0",
 ]
 

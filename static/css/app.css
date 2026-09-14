@@ -128,6 +128,12 @@
      consume it. Chapter rows are virtualised and need a fixed height. */
   --density: 1;
   --chapter-row-h: 60px;
+
+  /* Cover tile width. Grids fit whole tiles to the space they have and search
+     rails size their items from it, so one value drives every cover surface.
+     A tile's height follows: the cover is fixed at aspect-ratio 2/3. */
+  --tile-min-w: 180px;
+  --tile-row-h: calc(var(--tile-min-w) * 1.5);
 }
 
 
@@ -191,6 +197,9 @@
   --density: 0.55;
   --chapter-row-h: 48px;
 }
+
+[data-tile-size="sm"] { --tile-min-w: 140px; }
+[data-tile-size="lg"] { --tile-min-w: 240px; }
 
 
 @layer base {
@@ -595,22 +604,12 @@
   }
   .manga-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.75rem;
   }
   @media (min-width: 480px) {
     .manga-grid {
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 1rem;
-    }
-  }
-  .manga-grid--large {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.75rem;
-  }
-  @media (min-width: 480px) {
-    .manga-grid--large {
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-w), 1fr));
       gap: 1rem;
     }
   }
@@ -620,7 +619,7 @@
     @apply relative flex flex-col cursor-pointer;
     contain: layout style paint;
     content-visibility: auto;
-    contain-intrinsic-size: auto 260px;
+    contain-intrinsic-size: auto var(--tile-row-h);
   }
   .manga-card a {
     @apply block;
@@ -744,7 +743,10 @@
     display: flex;
     gap: 0.75rem;
     overflow-x: auto;
-    padding-bottom: 0.5rem;
+    /* No padding-bottom: the bar renders at the bottom of the padding box, and
+       any padding here detaches it from the covers it belongs to. */
+    min-height: var(--tile-row-h);
+    scroll-snap-type: x proximity;
     scrollbar-width: none;
     @media (min-width: 768px) {
       scrollbar-width: thin;
@@ -759,12 +761,41 @@
     }
   }
   .manga-row__item {
-    flex: 0 0 120px;
-    width: 120px;
+    flex: 0 0 var(--tile-min-w);
+    width: var(--tile-min-w);
+    scroll-snap-align: start;
+  }
+  /* Fills the rail so an empty or failed source is the same height as one with
+     covers, rather than collapsing to a line of text. */
+  .manga-row__notice {
+    flex: 1 1 auto;
+    min-height: var(--tile-row-h);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
   }
   .manga-row-wrapper {
     position: relative;
     min-width: 0;
+    margin-bottom: 0.5rem;
+  }
+  /* Fades the edge the rail can still scroll towards. A sliced cover is a
+     weaker signal, and the arrows only exist for pointers at lg and up. */
+  .manga-row.is-scrollable-start.is-scrollable-end {
+    mask-image: linear-gradient(to right, transparent, #000 2rem, #000 calc(100% - 2rem), transparent);
+  }
+  .manga-row.is-scrollable-start:not(.is-scrollable-end) {
+    mask-image: linear-gradient(to right, transparent, #000 2rem);
+  }
+  .manga-row.is-scrollable-end:not(.is-scrollable-start) {
+    mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
   }
   .manga-row-nav {
     position: absolute;
@@ -780,7 +811,7 @@
     transition: background var(--motion-fast);
     font-size: 1.25rem;
     &:hover { background: color-mix(in srgb, var(--color-surface) 70%, transparent); }
-    &:disabled { opacity: 0.4; cursor: default; }
+    &:disabled { opacity: 0; pointer-events: none; cursor: default; }
     &[data-dir="left"]  { left: 0; }
     &[data-dir="right"] { right: 0; }
   }
@@ -1911,6 +1942,10 @@
 
   @media (min-width: 1024px) and (min-height: 700px) {
 
+    /* Published so JS can ask whether the fit-to-viewport shell is active
+       without restating this query's breakpoints. */
+    :root { --grid-fit: 1; }
+
     #page-content.page-fixed { overflow: hidden; }
     #page-content.page-fixed > .page-body-host { flex: 1 1 auto; min-height: 0; }
     .page-fixed {
@@ -1924,10 +1959,17 @@
       display: flex;
       flex-direction: column;
     }
+    /* A tab panel that fills the shell. `:not(.hidden)` outranks the utility,
+       so a hidden panel keeps `display: none` instead of being laid out. */
+    .page-panel { flex: 1 1 auto; min-height: 0; }
+    .page-panel:not(.hidden) { display: flex; flex-direction: column; }
     .page-body {
       flex: 1 1 auto;
       min-height: 0;
       overflow-y: auto;
+      /* Reserved rather than conjured: a grid measures its own tracks, and a
+         scrollbar appearing mid-measurement narrows them. */
+      scrollbar-gutter: stable;
     }
     /* Sized to its content, capped by the space available — a short list must
        not stretch into an empty box with its footer stranded below. */
@@ -1997,7 +2039,8 @@
 
 
   .tile-btn {
-    width: 2.125rem; height: 2.125rem;
+    min-width: 2.125rem; height: 2.125rem;
+    padding-inline: 0.375rem;
     display: grid; place-items: center;
     border-radius: var(--radius-md);
     border: 1px solid var(--color-border);
@@ -2005,7 +2048,7 @@
     flex-shrink: 0;
   }
   @media (hover: none) {
-    .tile-btn { width: 2.5rem; height: 2.5rem; }
+    .tile-btn { min-width: 2.5rem; height: 2.5rem; }
   }
 }
 
@@ -2033,8 +2076,11 @@
 
 
 @media (prefers-reduced-motion: no-preference) {
+  /* The cross-fade sits between the user and the page they asked for, so it is
+     deliberately quick. `--motion-slow` reads as sluggish here even though it
+     suits larger, self-contained motion elsewhere. */
   ::view-transition-old(root),
   ::view-transition-new(root) {
-    animation-duration: var(--motion-slow);
+    animation-duration: var(--motion-fast);
   }
 }

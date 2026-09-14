@@ -16,6 +16,12 @@ message BackupHistory {
 message Backup {
   repeated BackupManga backupManga = 1;
   repeated BackupCategory backupCategories = 2;
+  repeated BackupSource backupSources = 101;
+}
+
+message BackupSource {
+  string name = 1;
+  int64 sourceId = 2;
 }
 
 message BackupManga {

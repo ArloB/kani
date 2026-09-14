@@ -19,7 +19,6 @@ use crate::error::{Result, ServiceError};
 use crate::events::{AppEvent, RefreshProgressEvent};
 use crate::ids::MangaId;
 use crate::models::{DownloadRuleRow, Settings};
-use kani_shared::decode_manga_id;
 use kani_shared::types::{
     ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList,
     MigrationPreview, MigrationResult, SearchScope, Source,
@@ -46,12 +45,13 @@ pub mod encryption;
 pub mod export;
 mod filters;
 pub mod fs_browse;
+mod id_repair;
 pub mod import;
 pub mod integrity;
 pub mod library;
 pub mod manifest_capture;
 pub mod metadata_provider;
-mod migration;
+pub mod migration;
 mod migration_checksums;
 pub mod opds;
 pub mod password_policy;
@@ -517,9 +517,27 @@ impl AppService {
             }
         });
 
+        // Resolved and created with the other storage directories so a missing
+        // or unwritable path surfaces at boot, not when the scheduled job fires
+        // in the middle of the night.
+        let backup_dir: std::path::PathBuf = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT backup_schedule_json FROM settings WHERE id = 'singleton'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<backup_scheduler::BackupScheduleConfig>(&json).ok())
+        .map(|cfg| match cfg.destination {
+            backup_scheduler::BackupDestination::Local { path } => path,
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from(backup_scheduler::DEFAULT_BACKUP_DIR));
+
         for (label, dir) in [
             ("WASM storage", settings.wasm_storage_path.as_path()),
             ("library", settings.library_path.as_path()),
+            ("backup", backup_dir.as_path()),
         ] {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 degradation_registry.register(
@@ -758,6 +776,11 @@ impl AppService {
             sources_registry.insert(source.id, backend);
         }
         tracing::info!("Sources loaded");
+
+        // Ids stored before the host kept them opaque decode to nothing, which
+        // strips a request of its composite placeholders. Idempotent, so it
+        // runs on every boot rather than needing a one-shot flag.
+        id_repair::repair_composite_ids(&pool, &sources_registry).await;
         wasm_runtime.prune_module_cache(&live_wasm_hashes);
 
         let downloader = DownloaderManager::new(
@@ -834,6 +857,7 @@ impl AppService {
         job_registry.register::<crate::jobs::pending_delete_retry::PendingDeleteRetryJob>();
         job_registry.register::<crate::jobs::thumbnail::ThumbnailGenerationJob>();
         job_registry.register::<crate::jobs::import_dedup::ImportDedupJob>();
+        job_registry.register::<crate::jobs::import_resolve::ImportResolveJob>();
         job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
         job_registry.register::<crate::jobs::v8_reap::V8ReapJob>();

@@ -242,3 +242,56 @@ async fn an_upstream_that_ignores_range_still_serves_the_reader() {
         "the reader still receives the whole usable image"
     );
 }
+
+#[tokio::test]
+async fn a_cached_image_skips_the_upstream_throttle() {
+    const INTERVAL: Duration = Duration::from_millis(300);
+
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/img.jpg",
+        Response::image(kani_shared_test::origin::jpeg_page(16, 16, false, 80)),
+    );
+    let mut state = test_state().await;
+    state.proxy_config = ProxyConfig {
+        min_host_interval: INTERVAL,
+        ..fast_proxy_config()
+    };
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    let first = app
+        .clone()
+        .oneshot(signed_get(&state, &origin.url("/img.jpg"), &cookie))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let started = std::time::Instant::now();
+    let second = app
+        .clone()
+        .oneshot(signed_get(&state, &origin.url("/img.jpg"), &cookie))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(second.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(second.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        &body[..],
+        &kani_shared_test::origin::jpeg_page(16, 16, false, 80)[..],
+        "the cached image was served intact"
+    );
+    assert_eq!(
+        origin.hits("/img.jpg"),
+        1,
+        "the second request was served from cache, not refetched"
+    );
+    assert!(
+        elapsed < INTERVAL,
+        "a cache hit waited {elapsed:?}, which is at least the {INTERVAL:?} host interval it does not owe"
+    );
+}

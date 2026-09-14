@@ -6,6 +6,7 @@ import { navigate } from '../router.js';
 import { getLocal, getLocalJson, setLocalJson, formatChapterTitle } from '../utils.js';
 import { t } from '../i18n.js';
 import { getState, subscribe } from '../cache.js';
+import { clearChapterProgress } from '../sse.js';
 import { registerShortcuts, getShortcuts, setF1Override } from '../shortcuts.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { loadReaderPrefs, setReaderPref, cancelReaderPrefsSync } from '../reader-prefs.js';
@@ -322,6 +323,82 @@ export async function init(container, { id }) {
    * @param {number} chId
    * @param {number} [targetPage] — 0-based page index to jump to on arrival
    */
+  /** Silence from a download this long means asking the server outright. */
+  const DOWNLOAD_STALL_MS = 20000;
+
+  /**
+   * Shows the download overlay for `chId` and settles once the download does.
+   *
+   * Shared by both ways into an undownloaded chapter — opening the reader on
+   * one, and paging into one — so they behave identically. `onCancel` runs when
+   * the reader is dismissed from the overlay.
+   *
+   * @param {number} chId
+   * @param {{ onCancel: () => void, started?: Promise<boolean> }} handlers
+   * @returns {Promise<'completed'|'failed'|'cancelled'|'aborted'|'unmounted'>}
+   */
+  function _awaitChapterDownload(chId, { onCancel, started }) {
+    return new Promise((resolve) => {
+      let done = false;
+      let stall = /** @type {any} */ (null);
+      /** @param {'completed'|'failed'|'cancelled'|'aborted'|'unmounted'} outcome */
+      const finish = (outcome) => {
+        if (done) return;
+        done = true;
+        clearTimeout(stall);
+        unsub();
+        resolve(outcome);
+      };
+
+      // A download the server declines to retry emits no terminal event, so a
+      // silent stretch is resolved by asking for the pages directly rather than
+      // waiting on an event that is not coming.
+      const armStall = () => {
+        clearTimeout(stall);
+        stall = setTimeout(async () => {
+          if (done) return;
+          try {
+            await api.getChapterPages(chId);
+            finish('completed');
+          } catch {
+            finish('failed');
+          }
+        }, DOWNLOAD_STALL_MS);
+      };
+      const showDl = (/** @type {any} */ p) => _dlOverlay.showLoading({
+        progress: p,
+        onCancel: () => { finish('aborted'); onCancel(); },
+      });
+
+      const apply = (/** @type {Map<number,any>} */ map) => {
+        if (done) { unsub(); return; }
+        if (!pagesEl.isConnected) { finish('unmounted'); return; }
+        const p = map.get(chId);
+        if (!p) return;
+        if (p.status === 'completed' || p.status === 'failed' || p.status === 'cancelled') {
+          finish(p.status);
+          return;
+        }
+        armStall();
+        showDl(p);
+      };
+
+      showDl(/** @type {any} */ (getState('chaptersProgress').get(chId)) ?? null);
+      armStall();
+      const unsub = subscribe('chaptersProgress', apply);
+
+      // A fast download can settle between the request that started it and this
+      // subscription, and `subscribe` reports only later changes.
+      apply(getState('chaptersProgress'));
+
+      // A refused request emits no progress event, so waiting on one alone
+      // would hold the overlay open indefinitely.
+      started?.then((ok) => { if (!ok) finish('failed'); });
+
+      _cleanup.push(() => { done = true; unsub(); });
+    });
+  }
+
   async function _navigateChapter(chId, targetPage) {
     _pendingBarsVisible = _chrome.isBarsVisible() && !_isFinePointer();
     const suffix = targetPage != null && targetPage > 0 ? `?page=${targetPage}` : '';
@@ -337,42 +414,23 @@ export async function init(container, { id }) {
       }
     }
 
-    try { await api.downloadChapter(chId); } catch { }
+    clearChapterProgress(chId);
+    const started = api.downloadChapter(chId).then(() => true, () => false);
 
-    let _dlDone = false;
+    const _dismiss = () => { _dlOverlay.hide(); _engine.render(); };
+    const outcome = await _awaitChapterDownload(chId, { onCancel: _dismiss, started });
 
-    const _onDlCancel = () => { _dlDone = true; unsub(); _dlOverlay.hide(); _engine.render(); };
-    const _showDl = (/** @type {any} */ p) => _dlOverlay.showLoading({ progress: p, onCancel: _onDlCancel });
-
-    _showDl(/** @type {any} */ (getState('chaptersProgress').get(chId)) ?? null);
-
-    const unsub = subscribe('chaptersProgress', (/** @type {Map<number,any>} */ map) => {
-      if (_dlDone) { unsub(); return; }
-      const p = map.get(chId);
-      if (!p) return;
-
-      if (p.status === 'completed') {
-        _dlDone = true;
-        unsub();
-        navigate(`/reader/${chId}${suffix}`);
-        return;
-      }
-
-      if (p.status === 'failed' || p.status === 'cancelled') {
-        _dlDone = true;
-        unsub();
-        _dlOverlay.showError({
-          status: p.status,
-          onRetry: () => _navigateChapter(chId),
-          onBack:  () => { _dlOverlay.hide(); _engine.render(); },
-        });
-        return;
-      }
-
-      _showDl(p);
-    });
-
-    _cleanup.push(() => { _dlDone = true; unsub(); });
+    if (outcome === 'completed') {
+      navigate(`/reader/${chId}${suffix}`);
+      return;
+    }
+    if (outcome === 'failed' || outcome === 'cancelled') {
+      _dlOverlay.showError({
+        status: outcome,
+        onRetry: () => _navigateChapter(chId),
+        onBack: _dismiss,
+      });
+    }
   }
 
   /**
@@ -381,41 +439,13 @@ export async function init(container, { id }) {
    * chapter that has not been downloaded yet.
    * @returns {Promise<any>}
    */
-  function _downloadCurrentChapter() {
-    return new Promise((resolve, reject) => {
-      let _done = false;
-
-      const _onDlCancel = () => { _done = true; unsub(); reject(new Error('cancelled')); _navigateToManga(); };
-      const _showDl = (/** @type {any} */ p) => _dlOverlay.showLoading({ progress: p, onCancel: _onDlCancel });
-
-      api.downloadChapter(chapterId).catch(() => { });
-      _showDl(/** @type {any} */ (getState('chaptersProgress').get(chapterId)) ?? null);
-
-      const unsub = subscribe('chaptersProgress', (/** @type {Map<number,any>} */ map) => {
-        if (_done) { unsub(); return; }
-        if (!pagesEl.isConnected) { _done = true; unsub(); reject(new Error('unmounted')); return; }
-        const p = map.get(chapterId);
-        if (!p) return;
-
-        if (p.status === 'completed') {
-          _done = true;
-          unsub();
-          _dlOverlay.hide();
-          api.getChapterPages(chapterId).then(resolve, reject);
-          return;
-        }
-        if (p.status === 'failed' || p.status === 'cancelled') {
-          _done = true;
-          unsub();
-          _dlOverlay.hide();
-          reject(new Error(p.status));
-          return;
-        }
-        _showDl(p);
-      });
-
-      _cleanup.push(() => { _done = true; unsub(); });
-    });
+  async function _downloadCurrentChapter() {
+    clearChapterProgress(chapterId);
+    const started = api.downloadChapter(chapterId).then(() => true, () => false);
+    const outcome = await _awaitChapterDownload(chapterId, { onCancel: _navigateToManga, started });
+    _dlOverlay.hide();
+    if (outcome === 'completed') return api.getChapterPages(chapterId);
+    throw new Error(outcome);
   }
 
 

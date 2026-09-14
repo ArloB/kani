@@ -1,7 +1,7 @@
 use crate::error::CliError;
 use crate::repl::har;
 use crate::yaml::{
-    model::{FieldSource, ValidatedEndpoint, ValidatedPopular},
+    model::{ValidatedEndpoint, ValidatedExtension, ValidatedPopular},
     schema::{ResponseType, YamlExtension},
     validate,
 };
@@ -32,10 +32,10 @@ pub fn run_replay(
     expected_path: &str,
     url_contains: Option<&str>,
 ) -> Result<(), CliError> {
-    let ep = load_endpoint(file, endpoint)?;
+    let (ext, ep) = load_endpoint(file, endpoint)?;
     let har = har::load(har_path)?;
     let body = find_response_body(&har, &ep, url_contains)?;
-    let actual = extract_rows(&ep, &body)?;
+    let actual = extract_rows(&ext, &ep, endpoint, &body)?;
 
     let expected_src = std::fs::read_to_string(expected_path)?;
     let expected: serde_json::Value = serde_json::from_str(&expected_src)
@@ -65,30 +65,33 @@ fn evaluate_endpoint_count(
     endpoint: &str,
     url_contains: Option<&str>,
 ) -> Result<usize, CliError> {
-    let ep = load_endpoint(file, endpoint)?;
+    let (ext, ep) = load_endpoint(file, endpoint)?;
     let har = har::load(har_path)?;
     let body = find_response_body(&har, &ep, url_contains)?;
-    let rows = extract_rows(&ep, &body)?;
+    let rows = extract_rows(&ext, &ep, endpoint, &body)?;
     match rows {
         serde_json::Value::Array(arr) => Ok(arr.len()),
         _ => Ok(1),
     }
 }
 
-pub(crate) fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpoint, CliError> {
+pub fn load_endpoint(
+    file: &str,
+    endpoint: &str,
+) -> Result<(ValidatedExtension, ValidatedEndpoint), CliError> {
     let path = Path::new(file);
     let src = std::fs::read_to_string(path)?;
     let ext: YamlExtension = serde_yaml::from_str(&src)
         .map_err(|e| CliError::Other(format!("YAML parse error: {e}")))?;
-    let validated = validate::validate(&ext, &src, path).map_err(|errors| {
+    let mut validated = validate::validate(&ext, &src, path).map_err(|errors| {
         for e in &errors {
             eprintln!("  {e}");
         }
         CliError::Other(format!("{} validation error(s)", errors.len()))
     })?;
 
-    match endpoint {
-        "popular" => match validated.popular {
+    let selected = match endpoint {
+        "popular" => match validated.popular.take() {
             Some(ValidatedPopular::Full(ep)) => Ok(*ep),
             Some(ValidatedPopular::Delegated { delegate_to, .. }) => Err(CliError::Other(format!(
                 "popular endpoint delegates to {delegate_to}, not a direct fetch"
@@ -97,18 +100,24 @@ pub(crate) fn load_endpoint(file: &str, endpoint: &str) -> Result<ValidatedEndpo
         },
         "search" => validated
             .search
+            .take()
             .ok_or_else(|| CliError::Other("no search endpoint defined".into())),
         "manga_details" | "details" => validated
             .manga_details
+            .take()
             .ok_or_else(|| CliError::Other("no manga_details endpoint defined".into())),
         "chapter_list" | "chapters" => validated
             .chapter_list
+            .take()
             .ok_or_else(|| CliError::Other("no chapter_list endpoint defined".into())),
         "pages" => validated
             .pages
+            .take()
             .ok_or_else(|| CliError::Other("no pages endpoint defined".into())),
         other => Err(CliError::Other(format!("unknown endpoint: {other}"))),
-    }
+    }?;
+
+    Ok((validated, selected))
 }
 
 /// The literal parts of a route, in order, with `$placeholder$` spans removed.
@@ -185,54 +194,76 @@ fn find_response_body(
     })
 }
 
-fn extract_rows(ep: &ValidatedEndpoint, body: &str) -> Result<serde_json::Value, CliError> {
-    match ep.response_type {
-        ResponseType::Json => extract_json_rows(ep, body),
-        ResponseType::Html => Err(CliError::Other(
-            "HTML endpoint evaluation requires the full runtime; use JSON endpoints for CLI test/replay".into()
-        )),
+/// A host state wired with the extension's hooks and scripts, so a fixture run
+/// exercises the same request and extraction path the server would.
+pub(crate) fn host_state_for(
+    ext: &ValidatedExtension,
+) -> Result<kani_core::wasm::HostState, CliError> {
+    let solver = std::env::var("KANI_SOLVER_URL")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let http = kani_core::http::SmartClient::new(solver)
+        .map_err(|e| CliError::Other(format!("http client: {e}")))?;
+    let mut state = kani_core::wasm::HostState::new(
+        http,
+        kani_core::wasm::AllowedHost::Unrestricted,
+        std::sync::Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("{}:", ext.id),
+        kani_core::v8_process::new_handle(),
+    )
+    .map_err(|e| CliError::Other(format!("host state: {e}")))?;
+
+    let hooks = kani_core::scripting::HookScripts {
+        shared: ext.pure_scripts.clone(),
+        pre_request: ext.pre_request.clone(),
+        on_status: ext.on_status.clone(),
+        endpoint_pre_request: ext.endpoint_pre_request.clone(),
+        endpoint_on_status: ext.endpoint_on_status.clone(),
+    };
+    if !hooks.is_empty() {
+        state.hook_registry = Some(std::sync::Arc::new(
+            kani_core::scripting::HookRegistry::compile(&hooks).map_err(CliError::Other)?,
+        ));
     }
+    if !ext.pure_scripts.is_empty() {
+        state.pure_fn_registry = Some(std::sync::Arc::new(
+            kani_core::scripting::PureFunctionRegistry::compile(&ext.pure_scripts)
+                .map_err(CliError::Other)?,
+        ));
+    }
+    state.browser_scripts = Some(std::sync::Arc::new(
+        kani_core::scripting::BrowserScriptRegistry::from_map(&ext.browser_scripts),
+    ));
+
+    Ok(state)
 }
 
-fn extract_json_rows(ep: &ValidatedEndpoint, body: &str) -> Result<serde_json::Value, CliError> {
-    let doc: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| CliError::Other(format!("JSON parse error: {e}")))?;
+fn extract_rows(
+    ext: &ValidatedExtension,
+    ep: &ValidatedEndpoint,
+    endpoint_name: &str,
+    body: &str,
+) -> Result<serde_json::Value, CliError> {
+    use kani_core::evaluator::{html_eval, json_eval};
 
-    let container = if ep.container.is_empty() {
-        &doc
-    } else {
-        doc.pointer(&ep.container).ok_or_else(|| {
-            CliError::Other(format!(
-                "container {:?} not found in response",
-                ep.container
-            ))
-        })?
-    };
+    let blueprint = kani_yaml::build_blueprint_core(ep, ext, endpoint_name).build();
 
-    let items: Vec<&serde_json::Value> = match container {
-        serde_json::Value::Array(arr) => arr.iter().collect(),
-        single => vec![single],
-    };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| CliError::Other(format!("runtime: {e}")))?;
 
-    let field_names: Vec<&str> = ep
-        .fields
-        .iter()
-        .filter(|f| matches!(f.source, FieldSource::Blueprint(_)))
-        .map(|f| f.name.as_str())
-        .collect();
+    let output = runtime.block_on(async {
+        let mut state = host_state_for(ext)?;
 
-    let rows: Vec<serde_json::Value> = items
-        .iter()
-        .map(|item| {
-            let mut obj = serde_json::Map::new();
-            for name in &field_names {
-                obj.insert((*name).to_string(), item[*name].clone());
-            }
-            serde_json::Value::Object(obj)
-        })
-        .collect();
+        match ep.response_type {
+            ResponseType::Json => json_eval::extract_json_str(&mut state, body, &blueprint).await,
+            ResponseType::Html => html_eval::extract_html_str(&mut state, body, &blueprint).await,
+        }
+        .map_err(CliError::Other)
+    })?;
 
-    Ok(serde_json::Value::Array(rows))
+    Ok(output["rows"].clone())
 }
 
 #[cfg(test)]
@@ -275,7 +306,8 @@ mod tests {
     /// A real validated endpoint with its route swapped, so matching is exercised
     /// against the same type the commands pass in.
     fn route_ep(route: &str) -> ValidatedEndpoint {
-        let mut ep = load_endpoint("tests/fixtures/chapter_list.yaml", "chapter_list").unwrap();
+        let (_ext, mut ep) =
+            load_endpoint("tests/fixtures/chapter_list.yaml", "chapter_list").unwrap();
         ep.route = route.to_string();
         ep
     }

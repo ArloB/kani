@@ -9,7 +9,7 @@
 //! FlareSolverr. Run it with:
 //!
 //! ```text
-//! KANI_LIVE_URL='https://comix.to/browse?page=1&sort=score%3Adesc' \
+//! KANI_LIVE_URL='https://example.org/browse?page=1' \
 //! KANI_LIVE_INIT_SCRIPT_FILE=/path/to/capture_browse.js \
 //! KANI_LIVE_SOLVER_URL=http://127.0.0.1:8191/v1 \
 //! cargo test -p kani-app --test live_browser_capture_tests -- --ignored --nocapture

@@ -111,7 +111,7 @@ function MigrationDialogue({
       unsubscribeRef.current = subscribeJob(jobId, {
         onComplete: async () => {
           try {
-            const job = await api.getJob(jobId);
+            const [job] = await api.getMigrationStatuses([jobId]);
             setResult(job?.result ?? null);
             setStep('done');
           } catch {
@@ -327,7 +327,7 @@ function MigrationDialogue({
           <div class="flex flex-col border border-border rounded-lg overflow-hidden">
             <div class="flex items-center justify-between px-4 py-2 border-b border-border-subtle text-sm">
               <span class="text-text-muted">${t('migration.done.chapters_migrated')}</span>
-              <span class="font-semibold text-text">${result.chapters_migrated ?? 0}</span>
+              <span class="font-semibold text-text">${result.chapters_matched ?? 0}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-2 text-sm">
               <span class="text-text-muted">${t('migration.done.orphaned')}</span>

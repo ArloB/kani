@@ -11,6 +11,11 @@ pub enum BackupFrequency {
     Weekly { weekday: u8, hour: u8 },
 }
 
+/// Default destination for scheduled backups, relative like `library_path` and
+/// `wasm_storage_path`: the data volume under Docker, the working directory
+/// otherwise.
+pub const DEFAULT_BACKUP_DIR: &str = "./backups";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BackupDestination {
@@ -33,7 +38,7 @@ impl Default for BackupScheduleConfig {
             frequency: BackupFrequency::Daily { hour: 2 },
             retain_n: 7,
             destination: BackupDestination::Local {
-                path: PathBuf::from("/backups"),
+                path: PathBuf::from(DEFAULT_BACKUP_DIR),
             },
             passphrase: None,
         }

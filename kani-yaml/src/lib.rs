@@ -205,36 +205,67 @@ pub fn build_queries(
     kani_shared::request::build_queries(&specs, args)
 }
 
-/// Decode composite IDs referenced by `ep` and add the decoded sub-fields to `args`.
-pub fn resolve_composite_ids(
-    ep: &yaml::model::ValidatedEndpoint,
+/// Decode a single composite id `arg_name` in `args` against `entry`, inserting each
+/// decoded sub-field back into `args` as `<role>_<field>`. A no-op when `arg_name`
+/// isn't present, or when decoding fails (a malformed id is left for the caller's
+/// own build_url to reject as an unresolved placeholder).
+fn decode_composite_arg(
+    entry: &yaml::schema::IdEncodingEntry,
+    role: &str,
+    arg_name: &str,
     args: &mut std::collections::HashMap<String, String>,
 ) {
     use kani_shared::ast::IdEncoding;
     use yaml::schema::YamlIdEncoding;
 
-    for decode in &ep.composite_id_decodes {
-        let raw_id = match args.get(&decode.fn_arg) {
-            Some(v) => v.clone(),
-            None => continue,
-        };
-        let encoding = match decode.encoding {
-            YamlIdEncoding::Base64Url => IdEncoding::Base64Url,
-            YamlIdEncoding::Base64 => IdEncoding::Base64,
-            YamlIdEncoding::Passthrough => IdEncoding::Passthrough,
-            YamlIdEncoding::Hex => IdEncoding::Hex,
-        };
-        let field_names: Vec<&str> = decode.fields.iter().map(|f| f.as_str()).collect();
-        if let Ok(decoded) = kani_shared::encoding::decode_composite(
-            &raw_id,
-            &decode.delimiter,
-            &encoding,
-            &field_names,
-        ) {
-            for (field, value) in decoded {
-                args.insert(format!("{}_{}", decode.role, field), value);
-            }
+    let Some(raw_id) = args.get(arg_name).cloned() else {
+        return;
+    };
+    let encoding = match entry.encoding {
+        YamlIdEncoding::Base64Url => IdEncoding::Base64Url,
+        YamlIdEncoding::Base64 => IdEncoding::Base64,
+        YamlIdEncoding::Passthrough => IdEncoding::Passthrough,
+        YamlIdEncoding::Hex => IdEncoding::Hex,
+    };
+    let field_names: Vec<&str> = entry.fields.iter().map(|f| f.as_str()).collect();
+    if let Ok(decoded) =
+        kani_shared::encoding::decode_composite(&raw_id, &entry.delimiter, &encoding, &field_names)
+    {
+        for (field, value) in decoded {
+            args.insert(format!("{role}_{field}"), value);
         }
+    }
+}
+
+/// Decode composite IDs referenced by `ep` and add the decoded sub-fields to `args`.
+pub fn resolve_composite_ids(
+    ep: &yaml::model::ValidatedEndpoint,
+    args: &mut std::collections::HashMap<String, String>,
+) {
+    for decode in &ep.composite_id_decodes {
+        let entry = yaml::schema::IdEncodingEntry {
+            fields: decode.fields.clone(),
+            delimiter: decode.delimiter.clone(),
+            encoding: decode.encoding,
+        };
+        decode_composite_arg(&entry, &decode.role, &decode.fn_arg, args);
+    }
+}
+
+/// Decode the `manga_id` arg against the extension's top-level `id_encoding.manga`
+/// block and add the decoded sub-fields (`manga_<field>`) to `args`.
+///
+/// `get_url` is not an endpoint, so it carries no `composite_id_decodes` of its own
+/// (those are only collected per-endpoint from a route/page_url — see
+/// `collect_composite_id_decodes`); this is the equivalent for the one template that
+/// lives outside the endpoints map. A no-op when the extension declares no
+/// `id_encoding.manga`, or when `manga_id` isn't present in `args`.
+pub fn resolve_get_url_manga_id(
+    ext: &yaml::model::ValidatedExtension,
+    args: &mut std::collections::HashMap<String, String>,
+) {
+    if let Some(entry) = ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref()) {
+        decode_composite_arg(entry, "manga", "manga_id", args);
     }
 }
 
@@ -373,5 +404,36 @@ mod url_tests {
     fn a_lone_dollar_is_kept_literally() {
         let url = build_url_with_args("https://src.example", "/price/$5", &args(&[])).unwrap();
         assert_eq!(url, "https://src.example/price/$5");
+    }
+
+    #[test]
+    fn get_url_resolves_a_dotted_composite_id() {
+        // `resolve_get_url_manga_id` is a thin `id_encoding.manga` lookup around this
+        // same decode step, exercised directly here to avoid hand-building the ~25-field
+        // `ValidatedExtension` just to reach it.
+        use super::decode_composite_arg;
+        use super::yaml::schema::{IdEncodingEntry, YamlIdEncoding};
+
+        let entry = IdEncodingEntry {
+            fields: vec!["hid".to_string(), "slug".to_string()],
+            delimiter: "|".to_string(),
+            encoding: YamlIdEncoding::Base64Url,
+        };
+        let encoded = kani_shared::encoding::encode_composite(
+            &["h1", "some-title-slug"],
+            "|",
+            &kani_shared::ast::IdEncoding::Base64Url,
+        );
+
+        let mut resolved = args(&[("manga_id", &encoded)]);
+        decode_composite_arg(&entry, "manga", "manga_id", &mut resolved);
+        assert_eq!(
+            resolved.get("manga_slug").map(String::as_str),
+            Some("some-title-slug")
+        );
+
+        let url =
+            build_url_with_args("https://src.example", "/title/$manga.slug$", &resolved).unwrap();
+        assert_eq!(url, "https://src.example/title/some-title-slug");
     }
 }

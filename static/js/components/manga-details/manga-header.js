@@ -112,9 +112,9 @@ function _showExternalLinkDialog(url) {
 export function mountMangaHeader(leftCol, info, source, ctx) {
   const { isLocal, dbId, sid, mangaId } = ctx;
 
-  const coverUrl = isLocal
-    ? api.getMangaCoverUrl(dbId, 'lg') + '&v=' + Date.now()
-    : (info?.cover_url ?? info?.cover_image_url ?? null);
+  const coverUrl = info?.cover_url
+    ?? info?.cover_image_url
+    ?? (isLocal ? api.getMangaCoverUrl(dbId, 'lg') : null);
 
   // The rail activates only when both it and the chapter column retain usable width.
   const isDesktop = () => window.innerWidth >= 1024;

@@ -40,12 +40,10 @@ impl AppService {
         let mut tx = self.db.begin().await?;
         let status: i64 = manga.status.into();
 
-        let decoded_manga_id = decode_manga_id(&manga.id);
-
         let insert_result = sqlx::query!(
             "INSERT OR IGNORE INTO manga (source_manga_id, source_id, name, cover_url, description, status) \
              VALUES (?, ?, ?, ?, ?, ?)",
-            decoded_manga_id,
+            manga.id,
             source_id,
             manga.title,
             manga.cover_url,
@@ -60,7 +58,7 @@ impl AppService {
         let manga_row_id = MangaId(
             sqlx::query_scalar!(
                 "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
-                decoded_manga_id,
+                manga.id,
                 source_id
             )
             .fetch_one(&mut *tx)
@@ -74,71 +72,102 @@ impl AppService {
         tx.commit().await?;
 
         if we_inserted {
-            self.update_manga_fts(manga_row_id)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!("FTS update failed for manga {manga_row_id}: {e}");
-                });
-            self.cache.invalidate_library();
-        }
-
-        if we_inserted {
-            if let Some(ref url) = manga.cover_url {
-                let base_url =
-                    sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
-                        .fetch_optional(&self.db_read)
-                        .await?
-                        .unwrap_or_default();
-
-                if let Err(e) = self
-                    .download_and_store_cover(manga_row_id, url, &base_url)
-                    .await
-                {
-                    tracing::warn!(
-                        "Failed to download cover for manga {}: {} — library entry still saved, scheduling retry",
-                        manga_row_id,
-                        e
-                    );
-                    self.schedule_cover_retry(manga_row_id).await;
-                }
-            }
-
-            let has_next_page = self
-                .fetch_and_store_chapter_page(source_id, manga_id, manga_row_id, 1)
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::error!("Failed to fetch initial chapters: {}", e);
-                    false
-                });
-
-            if has_next_page {
-                let bg_self = self.clone();
-                let bg_manga_id = manga_id.to_string();
-                tokio::spawn(async move {
-                    bg_self
-                        .fetch_and_store_remaining_chapters(source_id, bg_manga_id, manga_row_id, 2)
-                        .await;
-                });
-            }
-
-            let pool = self.db.clone();
-            tokio::spawn(async move {
-                if let Err(e) =
-                    crate::service::dedup::record_duplicates_for_manga(&pool, manga_row_id).await
-                {
-                    tracing::warn!("Duplicate recording failed for manga {manga_row_id}: {e}");
-                }
-            });
-
-            self.fire_webhooks(crate::service::webhooks::WebhookPayload::MangaAdded {
-                manga_id: manga_row_id,
-                manga_name: manga.title.clone(),
+            self.after_manga_added(
+                manga_row_id,
                 source_id,
-            })
+                manga_id,
+                &manga.title,
+                manga.cover_url.as_deref(),
+                true,
+            )
             .await;
         }
 
         Ok(manga_row_id)
+    }
+
+    /// Everything a newly created manga row needs beyond the row itself:
+    /// search indexing, a local cover, its chapter list, duplicate detection
+    /// and the webhook.
+    ///
+    /// Shared with the importers so a manga that arrives from a backup is not
+    /// half-added — unsearchable, coverless, and with no chapters to read.
+    /// A failed chapter fetch is logged, not surfaced: the manga is still
+    /// added and the next scan fills it in.
+    pub(crate) async fn after_manga_added(
+        &self,
+        manga_row_id: MangaId,
+        source_id: i64,
+        source_manga_id: &str,
+        title: &str,
+        cover_url: Option<&str>,
+        fetch_chapters: bool,
+    ) {
+        self.update_manga_fts(manga_row_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("FTS update failed for manga {manga_row_id}: {e}");
+            });
+        self.cache.invalidate_library();
+
+        if let Some(url) = cover_url {
+            let base_url =
+                sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
+                    .fetch_optional(&self.db_read)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+
+            if let Err(e) = self
+                .download_and_store_cover(manga_row_id, url, &base_url)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to download cover for manga {}: {} — library entry still saved, scheduling retry",
+                    manga_row_id,
+                    e
+                );
+                self.schedule_cover_retry(manga_row_id).await;
+            }
+        }
+
+        let has_next_page = if fetch_chapters {
+            self.fetch_and_store_chapter_page(source_id, source_manga_id, manga_row_id, 1)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!("Failed to fetch initial chapters: {}", e);
+                    false
+                })
+        } else {
+            false
+        };
+
+        if has_next_page {
+            let bg_self = self.clone();
+            let bg_manga_id = source_manga_id.to_string();
+            tokio::spawn(async move {
+                bg_self
+                    .fetch_and_store_remaining_chapters(source_id, bg_manga_id, manga_row_id, 2)
+                    .await;
+            });
+        }
+
+        let pool = self.db.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::service::dedup::record_duplicates_for_manga(&pool, manga_row_id).await
+            {
+                tracing::warn!("Duplicate recording failed for manga {manga_row_id}: {e}");
+            }
+        });
+
+        self.fire_webhooks(crate::service::webhooks::WebhookPayload::MangaAdded {
+            manga_id: manga_row_id,
+            manga_name: title.to_string(),
+            source_id,
+        })
+        .await;
     }
 
     pub(super) async fn sync_manga_people(
@@ -436,7 +465,7 @@ impl AppService {
             );
             qb.push_values(chunk, |mut b, ch| {
                 b.push_bind(manga_row_id)
-                    .push_bind(decode_manga_id(&ch.id))
+                    .push_bind(ch.id.clone())
                     .push_bind(ch.title.clone())
                     .push_bind(ch.number)
                     .push_bind(ch.language.clone())
@@ -463,7 +492,7 @@ impl AppService {
             let Some(count) = ch.page_count.map(i64::from) else {
                 continue;
             };
-            let source_chapter_id = decode_manga_id(&ch.id);
+            let source_chapter_id = &ch.id;
             sqlx::query!(
                 "UPDATE chapters SET source_page_count = ? \
                  WHERE manga_id = ? AND source_chapter_id = ? \
@@ -529,10 +558,13 @@ impl AppService {
                 .max(1);
 
         loop {
-            let res = match backend
+            let started = std::time::Instant::now();
+            let attempt = backend
                 .get_chapter_list(&ids.source_manga_id, page, None, None)
-                .await
-            {
+                .await;
+            self.record_source_call(ids.source_id, started, &attempt)
+                .await;
+            let res = match attempt {
                 Ok(res) => res,
                 Err(e) => {
                     if emit_progress {
@@ -558,7 +590,7 @@ impl AppService {
             let new_on_page = chapter_list
                 .chapters
                 .iter()
-                .filter(|ch| known_ids.insert(decode_manga_id(&ch.id)))
+                .filter(|ch| known_ids.insert(ch.id.clone()))
                 .count();
 
             total_received += chapter_list.chapters.len();
@@ -762,7 +794,10 @@ impl AppService {
             .sources
             .get_backend(source_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", source_id)))?;
-        let res = backend.get_chapter_list(manga_id, page, None, None).await?;
+        let started = std::time::Instant::now();
+        let attempt = backend.get_chapter_list(manga_id, page, None, None).await;
+        self.record_source_call(source_id, started, &attempt).await;
+        let res = attempt?;
         let json = serde_json::to_string(&res)
             .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))?;
         let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)
@@ -779,7 +814,7 @@ impl AppService {
 
             query_builder.push_values(chunk, |mut b, chapter| {
                 b.push_bind(manga_row_id)
-                    .push_bind(decode_manga_id(&chapter.id))
+                    .push_bind(chapter.id.clone())
                     .push_bind(chapter.title.clone())
                     .push_bind(chapter.number)
                     .push_bind(chapter.language.clone())

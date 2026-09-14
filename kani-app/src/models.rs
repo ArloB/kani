@@ -192,6 +192,7 @@ pub struct LibraryManga {
     pub name: String,
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
+    pub cover_hash: Option<String>,
     pub base_url: String,
     /// Total matching rows (populated by COUNT(*) OVER() in get_library_filtered).
     #[sqlx(default)]
@@ -201,6 +202,9 @@ pub struct LibraryManga {
     pub new_chapter_count: i64,
     #[sqlx(default)]
     pub is_orphaned: bool,
+    /// `pending` or `unlinked` while an imported id has no proven replacement.
+    #[sqlx(default)]
+    pub import_link_status: Option<String>,
     /// In-progress chapter (partially read) to power a hover "resume" affordance
     /// on the library grid card. `None` when the user has no in-progress chapter
     /// for this manga.
@@ -212,6 +216,10 @@ pub struct LibraryManga {
     pub resume_last_page: Option<i64>,
     #[sqlx(default)]
     pub resume_page_count: Option<i64>,
+    #[sqlx(default)]
+    pub match_field: Option<String>,
+    #[sqlx(default)]
+    pub match_text: Option<String>,
 }
 
 /// One item in the "continue reading" shelf.
@@ -221,6 +229,7 @@ pub struct ContinueReadingItem {
     pub manga_name: String,
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
+    pub cover_hash: Option<String>,
     pub base_url: String,
     pub chapter_id: ChapterId,
     pub chapter_number: f64,
@@ -300,6 +309,8 @@ pub struct LocalMangaDetails {
     pub local_artists: Vec<String>,
     pub local_tags: Vec<String>,
     pub has_local_people: bool,
+    /// 'pending' or 'unlinked' while an imported id has not been proved.
+    pub import_link_status: Option<String>,
     pub has_local_tags: bool,
     /// Chapters currently held for this series, excluding ones a migration
     /// orphaned. The rail states it; the chapter list's own count is filtered.

@@ -1,14 +1,8 @@
 services:
   kani:
-    # Pulls the signed, multi-arch release image. To build from source instead
-    # (e.g. an unreleased change, or before v1.0.0 exists and this tag
-    # resolves), replace the line above with:
-    #   build:
-    #     context: .
-    #     args:
-    #       GIT_SHA: "${GIT_SHA:-}"
-    #       #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
-    #       # INSTALL_KCC: "true"
+    # Signed multi-arch release image. To build from source, swap this for a
+    # `build:` block with context "." and args GIT_SHA, plus INSTALL_KCC: "true"
+    # for Kindle Comic Converter (MOBI/AZW3 export).
     image: ghcr.io/arlob/kani:latest
     ports:
       - "8242:8242"
@@ -65,22 +59,18 @@ services:
       # Set to "false" to prevent self-registration after initial administrator setup.
       # KANI_ALLOW_REGISTRATION: "true"
 
-      # Marks the deployment as internet-facing so the UI can surface hardened-setup guidance.
-      # Security settings still require explicit configuration. 
+      # Marks the deployment internet-facing so the UI can surface hardened-setup
+      # guidance. Security settings still need configuring explicitly.
       # KANI_PUBLIC_INSTANCE: "false"
 
-      # Where kani stores its database and auto-provisioned key files. Defaults to the process
-      # working directory (/data inside Docker). Only needed for non-Docker deployments where the
-      # working directory differs. 
+      # Where kani stores its database and auto-provisioned key files. Defaults to
+      # the working directory (/data in Docker); set it only when that differs.
       # KANI_DATA_DIR: "/data"
     restart: unless-stopped
 
   # Runs capture scripts for browser sources. /v1 executes caller-supplied
-  # JavaScript against named browser profiles, so it isn't published to the
-  # host at all -- only the kani container can reach it, via the compose
-  # network's service DNS (http://solver:8191). Uncomment the ports: block
-  # below only to debug it directly from the host, and revert it after; set
-  # API_KEY plus the matching KANI_SOLVER_SECRET if anything else needs in.
+  # JavaScript, so it is unpublished: only kani reaches it, at
+  # http://solver:8191. API_KEY plus KANI_SOLVER_SECRET admits anything else.
   solver:
     image: ghcr.io/kani-app/flaresolverr:latest
     # ports:

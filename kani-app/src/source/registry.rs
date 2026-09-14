@@ -19,6 +19,14 @@ impl SourceRegistry {
         self.slots.get(&id).map(|r| r.value().load_full())
     }
 
+    /// Every registered source, for passes that must visit all of them.
+    pub(crate) fn entries(&self) -> Vec<(i64, Arc<SourceBackend>)> {
+        self.slots
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().load_full()))
+            .collect()
+    }
+
     pub fn insert(&self, id: i64, backend: SourceBackend) {
         match self.slots.get(&id) {
             Some(slot) => slot.store(Arc::new(backend)),

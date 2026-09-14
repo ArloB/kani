@@ -13,9 +13,13 @@ import { mountIntoModalRoot } from '../components/modal.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { mountRepoManager } from '../components/repo-manager.js';
+import { createSourcesHeaderActions } from '../components/sources-header.js';
 import { t } from '../i18n.js';
+import { subscribe as subscribeCache } from '../cache.js';
 const html = htm.bind(h);
 
+/** @type {(() => void) | null} */
+let _unsubSourcesInvalidation = null;
 /** @type {HTMLElement | null} */
 let _asideEl = null;
 /** @type {HTMLElement | null} */
@@ -36,35 +40,8 @@ export async function init(container) {
 
   const canInstall = hasPermission('source:install');
 
-  const _tabsEl = document.createElement('div');
-  _tabsEl.className = 'flex gap-1';
-
-  const _sourcesTabBtn = document.createElement('button');
-  _sourcesTabBtn.type = 'button';
-  _sourcesTabBtn.className = 'btn-ghost btn-sm';
-  _sourcesTabBtn.textContent = t('sources.tab.extensions');
-
-  const _reposTabBtn = document.createElement('button');
-  _reposTabBtn.type = 'button';
-  _reposTabBtn.className = 'btn-ghost btn-sm';
-  _reposTabBtn.textContent = t('repo.tab');
-
-  _tabsEl.appendChild(_sourcesTabBtn);
-  _tabsEl.appendChild(_reposTabBtn);
-
-  const _addSourceBtn = (() => {
-    if (!canInstall) return undefined;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn-primary btn-sm';
-    btn.textContent = t('source.add.title');
-    return btn;
-  })();
-
-  // Passed as separate actions (not one wrapper) so the header can collapse the
-  // tab switcher into its kebab on narrow screens and keep "Add source" visible.
-  const _actions = /** @type {HTMLElement[]} */ ([_tabsEl]);
-  if (_addSourceBtn) _actions.push(_addSourceBtn);
+  const { actions: _actions, addSourceBtn: _addSourceBtn, setActive: _setActiveTab } =
+    createSourcesHeaderActions({ canInstall, onTab: (tab) => _switchTab(tab) });
 
   setPageHeader({ crumbs: [{ label: t('sources.crumb') }], actions: _actions });
 
@@ -102,27 +79,27 @@ export async function init(container) {
   const sourcesView = /** @type {HTMLElement} */ (container.querySelector('.js-sources-view'));
   const reposView = /** @type {HTMLElement} */ (container.querySelector('.js-repos-view'));
 
+  /** @param {'extensions' | 'repos'} tab */
   function _switchTab(tab) {
-    _sourcesTabBtn.classList.toggle('bg-surface-2', tab === 'extensions');
-    _reposTabBtn.classList.toggle('bg-surface-2', tab === 'repos');
+    _setActiveTab(tab);
 
     if (tab === 'repos') {
-      _addSourceBtn?.classList.add('hidden');
       sourcesView.classList.add('hidden');
       reposView.classList.remove('hidden');
       if (!_repoManager) {
         _repoManager = mountRepoManager(reposView);
       }
     } else {
-      _addSourceBtn?.classList.remove('hidden');
       reposView.classList.add('hidden');
       sourcesView.classList.remove('hidden');
     }
+    const url = new URL(location.href);
+    if (tab === 'repos') url.searchParams.set('tab', 'repos');
+    else url.searchParams.delete('tab');
+    history.replaceState(history.state, '', url.pathname + url.search);
   }
 
-  _sourcesTabBtn.addEventListener('click', () => _switchTab('extensions'));
-  _reposTabBtn.addEventListener('click', () => _switchTab('repos'));
-  _switchTab('extensions');
+  _switchTab(new URLSearchParams(location.search).get('tab') === 'repos' ? 'repos' : 'extensions');
 
   _asideEl = /** @type {HTMLElement} */ (container.querySelector('aside'));
   _mobileEl = /** @type {HTMLElement} */ (container.querySelector('.js-mobile-sources'));
@@ -168,9 +145,14 @@ export async function init(container) {
   _mountSourceList();
 
 
+  // The Repos tab installs through its own component and bumps
+  // `sourcesInvalidation`; this is the other half of that handshake.
+  _unsubSourcesInvalidation = subscribeCache('sourcesInvalidation', () => { _refresh(); });
+
   // Mount once per click and close via the returned cleanup — mountIntoModalRoot
   // gives each call its own container, so re-mounting with open=false would stack
   // an empty modal instead of closing the open one.
+
   if (canInstall && _addSourceBtn) {
     _addSourceBtn.addEventListener('click', () => {
       let cleanup = () => {};
@@ -188,6 +170,8 @@ export async function init(container) {
 /** @param {HTMLElement} container */
 export function destroy(container) {
   clearPageHeader();
+  _unsubSourcesInvalidation?.();
+  _unsubSourcesInvalidation = null;
   const pendingId = consumePendingSourceId();
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});
   if (_asideEl)  render(null, _asideEl);

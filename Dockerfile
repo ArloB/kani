@@ -75,12 +75,9 @@ COPY --from=builder --chown=kani:kani /build/target/release/kani-web ./kani-web
 COPY --chown=kani:kani entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-# /data holds the database and WASM extensions.
-# /library is a separate mount point for the manga image library — it can be
-# a bind-mounted path on a different drive/filesystem on the host. Chowned
-# here so a fresh named volume (which Docker seeds from the image at this
-# path) starts out already correct; a bind mount is host-owned regardless,
-# which is what entrypoint.sh's runtime chown handles.
+# /data holds the database and WASM extensions; /library is a separate mount
+# for the image library, possibly a bind mount on another filesystem. Chowned
+# here for fresh named volumes; entrypoint.sh handles host-owned bind mounts.
 RUN mkdir -p /data /library && chown kani:kani /data /library
 
 # No USER here: the container starts as root so entrypoint.sh can chown a

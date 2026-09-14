@@ -12,6 +12,7 @@ import * as api from '../api.js';
 import { hasPermission } from '../session.js';
 import { iconCube } from '../icons.js';
 import { t } from '../i18n.js';
+import { updateState as updateCacheState } from '../cache.js';
 const html = htm.bind(h);
 
 /**
@@ -252,6 +253,9 @@ export function mountRepoManager(container) {
     if (d.type === 'repo_refreshed' || d.type === 'update_available' || d.type === 'source_installed') {
       _loadRepos();
       if (_selectedRepoId !== null) _selectRepo(_selectedRepoId);
+      // Covers an install performed elsewhere (another tab, or the server
+      // installing on its own behalf), which never runs handleAction here.
+      if (d.type === 'source_installed') updateCacheState('sourcesInvalidation', n => n + 1);
     }
   }
   window.addEventListener('kani:sse', _onSse);
@@ -398,6 +402,10 @@ function ExtensionRow({ ext, repoId, sources, onInstalled }) {
       }
       showToast(successMsg, { type: 'success' });
       onInstalled();
+      // The repo browser refreshes its own "Installed" badges, but the sources
+      // list is a separate page component with no other way to learn about
+      // this. Bump the counter it subscribes to rather than reaching across.
+      updateCacheState('sourcesInvalidation', n => n + 1);
     } catch (err) {
       showApiError(err);
       btn.disabled = false;

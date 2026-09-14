@@ -111,13 +111,20 @@ pub(crate) async fn run_chapter_download(
         .await
         .map_err(|e| JobError::Internal(e.to_string()))?;
 
+    let completed = (
+        task.chapter_id,
+        task.name.clone(),
+        task.manga_id,
+        task.manga_title.clone(),
+    );
+
     let result = svc
         .downloader
         .download_chapter_direct(task, cancel, job_id, on_page)
         .await;
 
     match result {
-        Ok(_) => {
+        Ok(outcome) => {
             let now = time::OffsetDateTime::now_utc();
             sqlx::query!(
                 "UPDATE chapters SET download_status = ?, resume_offset = 0, download_error = NULL, downloaded_at = ? WHERE id = ?",
@@ -127,6 +134,15 @@ pub(crate) async fn run_chapter_download(
             )
             .execute(&svc.db)
             .await?;
+
+            let (id, name, manga_id, manga_title) = completed;
+            svc.downloader.emit_chapter_completed(
+                id,
+                name,
+                manga_id,
+                manga_title,
+                outcome.successful_pages,
+            );
 
             // Clear a renamed chapter's stored path before resolving the downloader's derived path.
             let _ = svc.clear_chapter_manifest(chapter_id).await;

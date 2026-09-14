@@ -541,6 +541,18 @@ pub struct MangaListItem {
     pub new_chapter_count: i64,
     #[serde(default)]
     pub resume: Option<ContinueReadingChapter>,
+    /// Which indexed field matched a library search, when it was not the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_field: Option<String>,
+    /// The matching fragment of that field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_text: Option<String>,
+    /// `pending` or `unlinked` while an imported id has no proven replacement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_link_status: Option<String>,
+    /// The source no longer lists this manga.
+    #[serde(default)]
+    pub is_orphaned: bool,
 }
 
 #[cfg(feature = "host")]
@@ -907,6 +919,11 @@ pub struct GlobalSearchResult {
     pub source_name: String,
     pub has_next_page: bool,
     pub manga: Vec<MangaListItem>,
+    /// Why this source contributed nothing, when it failed rather than matched
+    /// nothing. Without it the two are the same empty list, and a source that
+    /// never answered is reported as one that found no matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(feature = "host")]
@@ -1144,6 +1161,8 @@ pub struct RecentUpdateItem {
     pub cover_url: Option<String>,
     #[serde(skip)]
     pub local_cover_path: Option<String>,
+    #[serde(skip)]
+    pub cover_hash: Option<String>,
     pub base_url: String,
     pub chapter_id: i64,
     pub chapter_number: f64,
@@ -1516,6 +1535,10 @@ mod tests {
             cover_url: Some("https://example.com/cover.jpg".into()),
             new_chapter_count: 5,
             resume: None,
+            match_field: Some("author".into()),
+            match_text: Some("Oda".into()),
+            import_link_status: Some("pending".into()),
+            is_orphaned: true,
         });
     }
 
@@ -1535,6 +1558,10 @@ mod tests {
                 cover_url: None,
                 new_chapter_count: 0,
                 resume: None,
+                match_field: None,
+                match_text: None,
+                import_link_status: None,
+                is_orphaned: false,
             }],
             has_next_page: true,
             total_pages: Some(5),

@@ -24,6 +24,10 @@ pub type Result<T, E = AppError> = std::result::Result<T, E>;
 /// HTTP-specific extras — proxy cryptography, per-host rate-limit semaphores,
 /// a boot-time identifier used by the SSE reconnect protocol, and the
 /// in-memory log ring buffer handle.
+/// How long a written `user_sessions.last_seen_at` suppresses the next write.
+/// Bounds session-list staleness; below it, requests skip the writer pool.
+pub const SESSION_TOUCH_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Clone)]
 pub struct AppState {
     pub service: Arc<AppService>,
@@ -47,6 +51,8 @@ pub struct AppState {
     /// Records responses to writes carrying an `Idempotency-Key`, so a client's
     /// retry replays the original result instead of repeating the write.
     pub idempotency: crate::idempotency::IdempotencyStore,
+    /// Sessions whose sidecar row was written within [`SESSION_TOUCH_WINDOW`].
+    pub session_touch_seen: moka::future::Cache<String, ()>,
     /// Networks whose `X-Forwarded-For` is believed. Empty unless `KANI_TRUSTED_PROXIES` is set,
     /// so a direct deployment cannot have its client address forged.
     pub trusted_proxies: Arc<crate::client_ip::TrustedProxies>,
@@ -100,6 +106,9 @@ impl AppState {
             csrf_secret: Arc::new(random_secret()),
             public_instance,
             idempotency: crate::idempotency::IdempotencyStore::new(),
+            session_touch_seen: moka::future::Cache::builder()
+                .time_to_live(SESSION_TOUCH_WINDOW)
+                .build(),
             trusted_proxies: Arc::new(trusted_proxies),
             service,
         })
@@ -212,6 +221,9 @@ impl AppState {
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
             idempotency: crate::idempotency::IdempotencyStore::new(),
+            session_touch_seen: moka::future::Cache::builder()
+                .time_to_live(SESSION_TOUCH_WINDOW)
+                .build(),
             trusted_proxies: Arc::new(crate::client_ip::TrustedProxies::default()),
         }
     }

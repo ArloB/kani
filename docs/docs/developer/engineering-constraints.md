@@ -65,12 +65,12 @@ cannot provide, or the image base changes.
 **Constraint.** The challenge solve, host-page token generation, extension script, and payload
 capture must run in one solver browser session. Clearance is never carried to a second browser.
 
-**Evidence.** Cloudflare documents clearance as bound to the visitor and device. Against live
-Comix on 2026-08-12, across 20 captures per cell: a fresh solver took 12.57 s at p50, and a cleared
-session 2.07 s, with no correctness failures in 80 captures and no re-challenge in 40. The solve is
-almost all of the cold cost — 10.4 s of it — while the capture itself runs about 300 ms either way.
-On an identical local fixture the solver beat local Puppeteer at every percentile, 246 ms against
-370 ms at p50, so removing the local browser cost no latency.
+**Evidence.** Cloudflare documents clearance as bound to the visitor and device. Against a live
+browser-gated source on 2026-08-12, across 20 captures per cell: a fresh solver took 12.57 s at
+p50, and a cleared session 2.07 s, with no correctness failures in 80 captures and no re-challenge
+in 40. The solve is almost all of the cold cost — 10.4 s of it — while the capture itself runs
+about 300 ms either way. On an identical local fixture the solver beat local Puppeteer at every
+percentile, 246 ms against 370 ms at p50, so removing the local browser cost no latency.
 
 **Consequence.** Cookie fidelity cannot make cross-browser replay reliable. A solver without
 scripted capture can still solve ordinary HTTP requests, but protected browser sources may fail.

@@ -290,6 +290,9 @@ function RestoreModal({ file, preview, passphrase = '', onClose }) {
     try {
       const r = await api.restoreBackupEncrypted(file, opts, passphrase);
       showToast(t('library.restore.success', { count: r.imported_manga }), { type: 'success' });
+      if (r.trashed_manga > 0) {
+        showToast(t('library.import.trashed', { count: r.trashed_manga }), { type: 'warn' });
+      }
       onClose();
     } catch (e) {
       showApiError(e);
@@ -366,6 +369,12 @@ function TachiyomiImportModal({ file, preview, onClose }) {
     try {
       const r = await api.importTachiyomiBackup(file, opts);
       showToast(t('library.tachiyomi.success', { count: r.imported_manga }), { type: 'success' });
+      if (r.unmatched_progress > 0) {
+        showToast(t('library.restore.unmatched_progress', { count: r.unmatched_progress }), { type: 'warn' });
+      }
+      if (r.trashed_manga > 0) {
+        showToast(t('library.import.trashed', { count: r.trashed_manga }), { type: 'warn' });
+      }
       onClose();
     } catch (e) {
       showApiError(e);

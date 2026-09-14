@@ -1,9 +1,8 @@
 #!/bin/sh
 
-# Started as root so a freshly host-created bind mount can be chowned; a
-# non-recursive chown so a restart with a large existing /library stays fast.
-# Not root when an operator has already pinned a non-root user (e.g. a
-# Kubernetes runAsNonRoot policy) -- nothing to fix in that case.
+# Started as root so a freshly host-created bind mount can be chowned, and
+# non-recursively so a restart with a large /library stays fast. An
+# operator-pinned non-root user (e.g. runAsNonRoot) has nothing to fix.
 if [ "$(id -u)" = "0" ]; then
     chown kani:kani /data /library
     # No --reset-env: that would wipe KANI_* / RUST_LOG and everything else

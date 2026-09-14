@@ -41,24 +41,28 @@ pub async fn session_touch_middleware(
                     .into_response();
             }
 
-            let ua = request
-                .headers()
-                .get("user-agent")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_owned());
-            let peer = request
-                .extensions()
-                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-                .map(|info| info.0.ip());
-            let ip = crate::client_ip::client_ip(request.headers(), peer, &state.trusted_proxies)
-                .map(|a| a.to_string());
+            if state.session_touch_seen.get(&sid).await.is_none() {
+                let ua = request
+                    .headers()
+                    .get("user-agent")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_owned());
+                let peer = request
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                    .map(|info| info.0.ip());
+                let ip =
+                    crate::client_ip::client_ip(request.headers(), peer, &state.trusted_proxies)
+                        .map(|a| a.to_string());
 
-            if let Err(e) = state
-                .service
-                .touch_session(&sid, user_id, ua.as_deref(), ip.as_deref())
-                .await
-            {
-                tracing::debug!("session touch failed: {e}");
+                if let Err(e) = state
+                    .service
+                    .touch_session(&sid, user_id, ua.as_deref(), ip.as_deref())
+                    .await
+                {
+                    tracing::debug!("session touch failed: {e}");
+                }
+                state.session_touch_seen.insert(sid, ()).await;
             }
         }
     }

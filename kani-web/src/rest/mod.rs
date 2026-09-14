@@ -6,10 +6,11 @@ use crate::{
     models::{
         AddDownloadRuleRequest, AddRepoRequest, AdminCreateRoleRequest, AdminCreateUserRequest,
         AdminGrantRoleRequest, AdminUpdateRoleRequest, AdminUpdateUserRequest, BlockRepoRequest,
-        ChangePasswordRequest, ContinueReadingShelfQuery, CreateCategoryRequest, CreateSource,
-        FetchWasmRequest, FetchYamlRequest, GlobalSearchQuery, InstallFromRepoRequest,
-        InstallYamlRequest, LibraryQuery, ListItemRequest, LocalChaptersQuery, LoginRequest,
-        MarkUpToRequest, MigrateMangaRequest, PageQuery, PasswordResetConfirmBody,
+        BulkMigrationRequest, ChangePasswordRequest, ContinueReadingShelfQuery,
+        CreateCategoryRequest, CreateSource, FetchWasmRequest, FetchYamlRequest, GlobalSearchQuery,
+        InstallFromRepoRequest, InstallYamlRequest, LibraryQuery, ListItemRequest,
+        LocalChaptersQuery, LoginRequest, MarkUpToRequest, MatchMigrationTargetsRequest,
+        MigrateMangaRequest, MigrationStatusRequest, PageQuery, PasswordResetConfirmBody,
         PasswordResetRequestBody, PreviewDownloadRulesRequest, PreviewMigrationRequest, ProxyQuery,
         RenameCategoryRequest, ReorderCategoriesRequest, ReorderDownloadRulesRequest,
         ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterNoteRequest,
@@ -74,6 +75,17 @@ pub(crate) mod webhooks;
 
 fn sign_image_url(url: &str, referer: &str, state: &AppState, transform: Option<&str>) -> String {
     crate::proxy::make_proxy_url(url, referer, &state.proxy_secret, transform)
+}
+
+/// Without `h`, [`serve_manga_cover`] can only answer `max-age=3600`; a matching
+/// prefix is what lets it mark the thumbnail immutable.
+fn local_cover_url(id: impl std::fmt::Display, size: &str, cover_hash: Option<&str>) -> String {
+    let mut url = format!("/rest/manga/{id}/cover?size={size}");
+    if let Some(hash) = cover_hash.filter(|h| !h.is_empty()) {
+        url.push_str("&h=");
+        url.push_str(&hash[..hash.len().min(16)]);
+    }
+    url
 }
 
 pub(crate) struct ValidatedJson<T>(T);
@@ -383,6 +395,29 @@ async fn host_semaphore(
         .await
 }
 
+/// Only correct on a path that reaches the network: a cache hit sends nothing
+/// upstream and owes the host no delay. Serialises callers for `host` while waiting.
+async fn throttle_host(state: &AppState, host: &str) {
+    let min_host_interval = state.proxy_config.min_host_interval;
+    let throttle_mutex = state
+        .proxy_throttle
+        .get_with(host.to_string(), async {
+            Arc::new(tokio::sync::Mutex::new(
+                std::time::Instant::now()
+                    .checked_sub(min_host_interval)
+                    .unwrap_or_else(std::time::Instant::now),
+            ))
+        })
+        .await;
+
+    let mut last = throttle_mutex.lock().await;
+    let elapsed = last.elapsed();
+    if elapsed < min_host_interval {
+        tokio::time::sleep(min_host_interval - elapsed).await;
+    }
+    *last = std::time::Instant::now();
+}
+
 fn proxy_max_mem_bytes() -> usize {
     std::env::var("KANI_IMAGE_PROXY_MAX_MEMORY_MB")
         .ok()
@@ -523,26 +558,6 @@ pub(crate) async fn image_proxy(
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| url.clone());
 
-    let min_host_interval = state.proxy_config.min_host_interval;
-    let throttle_mutex = state
-        .proxy_throttle
-        .get_with(host.clone(), async {
-            Arc::new(tokio::sync::Mutex::new(
-                std::time::Instant::now()
-                    .checked_sub(min_host_interval)
-                    .unwrap_or_else(std::time::Instant::now),
-            ))
-        })
-        .await;
-    {
-        let mut last = throttle_mutex.lock().await;
-        let elapsed = last.elapsed();
-        if elapsed < min_host_interval {
-            tokio::time::sleep(min_host_interval - elapsed).await;
-        }
-        *last = std::time::Instant::now();
-    }
-
     if let Some(range) = headers.get(header::RANGE) {
         return proxy_range_request(&state, &url, &referer, &host, &etag, range).await;
     }
@@ -575,6 +590,7 @@ pub(crate) async fn image_proxy(
             let transform_hint = transform_hint.map(str::to_string);
             async move {
                 let cfg = state.proxy_config;
+                throttle_host(&state, &host).await;
                 let semaphore =
                     host_semaphore(&state.proxy_semaphores, &host, cfg.per_host_concurrency).await;
                 let mut attempt = 0u32;
@@ -799,6 +815,8 @@ async fn proxy_range_request(
     etag: &str,
     range: &header::HeaderValue,
 ) -> Result<axum::response::Response, AppError> {
+    throttle_host(state, host).await;
+
     let semaphore = host_semaphore(
         &state.proxy_semaphores,
         host,

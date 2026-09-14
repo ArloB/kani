@@ -4,6 +4,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { getLocal, setLocal, resetAllConfirmDialogs } from '../../utils.js';
+import { getCoverQuality, setCoverQuality } from '../../cover-quality.js';
 import { SettingsGroup, SettingsRow, ToggleRow, SelectRow } from './_shared.js';
 import {
   ACCENT_SWATCHES,
@@ -19,6 +20,7 @@ import { t } from '../../i18n.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { ThemeEditor, ThemePreviewSwatch } from '../../components/theme-editor.js';
 import { showCheatsheet } from '../../shortcuts.js';
+import { isPhoneLayout, PHONE_LAYOUT_QUERY } from '../../pagination-mode.js';
 
 const html = htm.bind(h);
 
@@ -77,6 +79,15 @@ export function GeneralSection() {
     syncServerThemes().then(refresh).catch(() => { });
   }, []);
 
+  const [phoneLayout, setPhoneLayout] = useState(isPhoneLayout());
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const query = matchMedia(PHONE_LAYOUT_QUERY);
+    const onChange = () => setPhoneLayout(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
   const applyTheme = (/** @type {string} */ th, /** @type {string} */ dn, /** @type {string} */ ac) => {
     saveAndApplyTheme(th, dn, ac);
     refresh();
@@ -115,6 +126,10 @@ export function GeneralSection() {
   const canPublish = hasPermission('theme:publish');
   const activeTheme = theme.theme;
   const hasNotification = typeof window !== 'undefined' && 'Notification' in window;
+  // Browsers expose the API over plain HTTP but refuse the permission, reporting
+  // it as denied. Told apart so the row does not blame the browser's settings
+  // for something only a secure origin can change.
+  const notificationsInsecure = hasNotification && !window.isSecureContext;
 
   return html`
     <${SettingsGroup} label=${t('settings.display.group')}>
@@ -138,6 +153,20 @@ export function GeneralSection() {
         options=${[
           { value: 'comfortable', label: t('settings.display.density.comfortable') },
           { value: 'compact', label: t('settings.display.density.compact') },
+        ]}
+      />
+      <${SelectRow}
+        label=${t('settings.display.cover_quality')}
+        description=${t('settings.display.cover_quality.desc')}
+        value=${getCoverQuality()}
+        onChange=${(v) => {
+          setCoverQuality(v);
+          setTick((n) => n + 1);
+        }}
+        options=${[
+          { value: 'sm', label: t('settings.display.cover_quality.sm') },
+          { value: 'md', label: t('settings.display.cover_quality.md') },
+          { value: 'lg', label: t('settings.display.cover_quality.lg') },
         ]}
       />
       <${SettingsRow} label=${t('settings.display.accent')} description=${t('settings.display.accent.desc')}>
@@ -168,7 +197,7 @@ export function GeneralSection() {
       <//>
     <//>
 
-    <${SettingsGroup} label=${t('settings.general.pagination.group')}>
+    ${!phoneLayout && html`<${SettingsGroup} label=${t('settings.general.pagination.group')}>
       ${PAGINATION_PREFS.map(
         (p) => html`<${SelectRow}
           key=${p.key}
@@ -185,7 +214,7 @@ export function GeneralSection() {
           ]}
         />`,
       )}
-    <//>
+    <//>`}
 
     <${SettingsGroup} label=${t('settings.general.reading.group')}>
       <${ToggleRow}
@@ -212,16 +241,18 @@ export function GeneralSection() {
       ${hasNotification &&
       html`<${SettingsRow}
         label=${t('settings.general.notifications.browser')}
-        description=${Notification.permission === 'denied'
-          ? t('settings.general.notifications.browser.blocked')
-          : t('settings.general.notifications.browser.desc')}
+        description=${notificationsInsecure
+          ? t('settings.general.notifications.browser.insecure')
+          : Notification.permission === 'denied'
+            ? t('settings.general.notifications.browser.blocked')
+            : t('settings.general.notifications.browser.desc')}
       >
         <label class="kani-toggle">
           <input
             type="checkbox"
             class="kani-toggle__input"
             checked=${getLocal('kani_browser_notifications') === 'true' && Notification.permission === 'granted'}
-            disabled=${Notification.permission === 'denied'}
+            disabled=${notificationsInsecure || Notification.permission === 'denied'}
             onChange=${async (/** @type {any} */ e) => {
               const on = e.target.checked;
               if (on) {

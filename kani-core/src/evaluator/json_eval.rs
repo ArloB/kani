@@ -627,6 +627,7 @@ pub async fn extract_json_paginated(
     let has_next_page;
 
     let mut cursor: Option<String> = None;
+    let mut last_scalars = serde_json::Map::new();
 
     loop {
         let mut chunk_bp = blueprint.clone();
@@ -656,6 +657,9 @@ pub async fn extract_json_paginated(
         }
 
         let chunk_result = extract_json(state, None, &chunk_bp).await?;
+        if let Some(map) = chunk_result["scalars"].as_object() {
+            last_scalars = map.clone();
+        }
 
         let empty = vec![];
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
@@ -706,10 +710,54 @@ pub async fn extract_json_paginated(
         current_chunk_offset += native_size;
     }
 
-    Ok(serde_json::json!({
-        "rows": all_rows,
-        "scalars": { "has_next_page": has_next_page }
-    }))
+    let mut scalars = last_scalars;
+    scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
+    rescale_total_pages(&mut scalars, native_size, page_size as usize);
+
+    Ok(serde_json::json!({ "rows": all_rows, "scalars": scalars }))
+}
+
+/// A source counts pages at its own chunk size; the client asked for pages of
+/// `page_size`. Without this the strip shows the source's page count, which is
+/// wrong by the ratio between the two. A `total_items` scalar gives the exact
+/// answer; the page-count fallback overestimates by up to one native chunk.
+/// Test seam for the page-count rescale, which is otherwise reachable only
+/// through a live paginated fetch.
+pub fn rescale_total_pages_for_test(
+    scalars: &mut serde_json::Map<String, serde_json::Value>,
+    native_size: usize,
+    page_size: usize,
+) {
+    rescale_total_pages(scalars, native_size, page_size)
+}
+
+pub(crate) fn rescale_total_pages(
+    scalars: &mut serde_json::Map<String, serde_json::Value>,
+    native_size: usize,
+    page_size: usize,
+) {
+    if page_size == 0 {
+        return;
+    }
+    let scalar = |name: &str| scalars.get(name).and_then(serde_json::Value::as_i64);
+
+    let items = match scalar("total_items") {
+        Some(total) => total.max(0) as usize,
+        None => {
+            if native_size == page_size {
+                return;
+            }
+            let Some(native_pages) = scalar("total_pages") else {
+                return;
+            };
+            (native_pages.max(0) as usize).saturating_mul(native_size)
+        }
+    };
+
+    scalars.insert(
+        "total_pages".into(),
+        serde_json::json!(items.div_ceil(page_size)),
+    );
 }
 
 async fn fetch_and_parse_json(

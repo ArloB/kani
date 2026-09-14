@@ -91,3 +91,45 @@ fn replay_matches_expected() {
     )
     .unwrap();
 }
+
+/// The request a source would send is the thing a fixture cannot check, so it
+/// gets asserted directly: declared queries, filter defaults, the multiselect
+/// shape, and the pagination offset all have to appear.
+#[test]
+fn resolve_builds_the_request_the_host_would_send() {
+    let (ext, ep) = test_cmd::load_endpoint(&fixture("resolve-request.yaml"), "popular").unwrap();
+    let resolved = kani_cli::repl::resolve::resolve(
+        &ext,
+        &ep,
+        "popular",
+        &["page=3".to_string()],
+        &["tags=action,drama".to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        resolved.url(),
+        "https://api.example.com/items?order=score&rating=safe&tags[]=action&tags[]=drama&page=3"
+    );
+}
+
+#[test]
+fn resolve_applies_declared_filter_defaults_without_overrides() {
+    let (ext, ep) = test_cmd::load_endpoint(&fixture("resolve-request.yaml"), "popular").unwrap();
+    let resolved =
+        kani_cli::repl::resolve::resolve(&ext, &ep, "popular", &["page=1".to_string()], &[])
+            .unwrap();
+
+    let rating: Vec<_> = resolved
+        .request
+        .queries
+        .iter()
+        .filter(|(k, _)| k == "rating")
+        .collect();
+    assert_eq!(
+        rating,
+        vec![&("rating".to_string(), "safe".to_string())],
+        "the declared default was not applied: {:?}",
+        resolved.request.queries
+    );
+}

@@ -10,6 +10,8 @@ pub(crate) struct MigrationJob {
     pub target_source_id: i64,
     pub target_source_manga_id: String,
     pub keep_orphaned_downloads: bool,
+    #[serde(default)]
+    pub bulk: bool,
 }
 
 impl MigrationJob {
@@ -25,7 +27,13 @@ impl MigrationJob {
             target_source_id,
             target_source_manga_id,
             keep_orphaned_downloads,
+            bulk: false,
         }
+    }
+
+    pub fn bulk(mut self) -> Self {
+        self.bulk = true;
+        self
     }
 }
 
@@ -48,7 +56,11 @@ impl BackgroundJob for MigrationJob {
     // A migration is a user-initiated action they are waiting on, and it holds
     // the series in a half-moved state until it finishes.
     fn priority(&self) -> JobPriority {
-        JobPriority::High
+        if self.bulk {
+            JobPriority::Normal
+        } else {
+            JobPriority::High
+        }
     }
 
     fn source_id(&self) -> Option<i64> {
@@ -57,13 +69,17 @@ impl BackgroundJob for MigrationJob {
 
     async fn run(self: Box<Self>, ctx: JobContext) -> Result<MigrationResult, JobError> {
         let svc = ctx.service();
-        svc.migrate_manga(
-            MangaId(self.manga_id),
-            self.target_source_id,
-            self.target_source_manga_id,
-            self.keep_orphaned_downloads,
-        )
-        .await
-        .map_err(|e| JobError::Internal(e.to_string()))
+        ctx.progress.report(0, 1, "Migrating").await;
+        let result = svc
+            .migrate_manga(
+                MangaId(self.manga_id),
+                self.target_source_id,
+                self.target_source_manga_id,
+                self.keep_orphaned_downloads,
+            )
+            .await
+            .map_err(|e| JobError::Internal(e.to_string()))?;
+        ctx.progress.report(1, 1, "Migrated").await;
+        Ok(result)
     }
 }

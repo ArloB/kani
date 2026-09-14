@@ -310,7 +310,71 @@ async fn read_progress_and_chapter_state_survive() {
 }
 
 #[tokio::test]
-async fn progress_that_cannot_be_applied_yet_is_reported() {
+async fn progress_against_a_differently_shaped_chapter_id_is_counted() {
+    // The sibling test above seeds its chapter rows with the backup's own ids,
+    // so a match is true by construction. A row from a real scan carries the
+    // id that source's extension produced, which need not be the backup's.
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    let series = backup
+        .backup_manga
+        .iter()
+        .find(|m| m.chapters.iter().any(|c| c.read || c.last_page_read > 0))
+        .expect("the fixture must carry read state");
+    let with_progress = series
+        .chapters
+        .iter()
+        .filter(|c| c.read || c.last_page_read > 0)
+        .count();
+
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE mihon_source_id = ?")
+        .bind(series.source)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let manga_id = common::insert_manga(&svc.db, source_id, &series.url, &series.title).await;
+    for (idx, ch) in series.chapters.iter().enumerate() {
+        let scanned_id = format!("kani::{}", ch.url);
+        assert_ne!(scanned_id, ch.url);
+        common::insert_chapter(&svc.db, manga_id, &scanned_id, idx as f64 + 1.0).await;
+    }
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(true))
+        .await
+        .unwrap();
+
+    let progress_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_chapter_tracking uct \
+         JOIN chapters c ON c.id = uct.chapter_id WHERE c.manga_id = ?",
+    )
+    .bind(manga_id)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(progress_rows, 0, "ids differ, so nothing should match");
+
+    assert!(
+        result.unmatched_progress as usize >= with_progress,
+        "unmatched progress went uncounted: {}",
+        result.unmatched_progress
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.contains(&series.title) && w.contains("chapters")),
+        "the drop was silent: {:?}",
+        result.warnings
+    );
+}
+
+#[tokio::test]
+async fn progress_waits_for_the_chapter_list_rather_than_being_dropped() {
     let data = fixture("suwayomi-anonymised.tachibk");
     let backup = decode(&data);
     let svc = common::test_service().await;
@@ -332,23 +396,30 @@ async fn progress_that_cannot_be_applied_yet_is_reported() {
         "there are no chapter rows to attach progress to yet"
     );
 
-    let with_progress: Vec<&String> = backup
+    let expected: i64 = backup
         .backup_manga
         .iter()
-        .filter(|m| m.chapters.iter().any(|c| c.read || c.last_page_read > 0))
-        .map(|m| &m.title)
-        .collect();
-    assert!(!with_progress.is_empty());
-    for title in with_progress {
-        assert!(
-            result
-                .warnings
+        .map(|m| {
+            m.chapters
                 .iter()
-                .any(|w| w.contains(title) && w.contains("chapters")),
-            "progress for '{title}' was dropped without a warning: {:?}",
-            result.warnings
-        );
-    }
+                .filter(|c| c.read || c.last_page_read > 0)
+                .count() as i64
+        })
+        .sum();
+    assert!(expected > 0);
+
+    let parked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga_import_progress")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        parked, expected,
+        "progress must wait for the chapter list, not be dropped for arriving first"
+    );
+    assert_eq!(
+        result.unmatched_progress, 0,
+        "nothing was lost, so nothing should be reported lost"
+    );
 }
 
 #[tokio::test]
@@ -395,6 +466,155 @@ async fn a_series_resembling_one_already_in_the_library_is_parked_for_review() {
         .await
         .unwrap();
     assert_eq!(stored, 0, "a parked series must not also be imported");
+}
+
+#[tokio::test]
+async fn an_import_queues_linking_instead_of_fetching_with_the_backups_ids() {
+    // A backup identifies manga by Mihon's own URL, which addresses nothing on
+    // the Kani source, so the chapter fetch has to wait for the resolve job.
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+    assert_eq!(result.imported_manga as usize, backup.backup_manga.len());
+
+    let queued: Vec<(String, String)> =
+        sqlx::query_as("SELECT job_type, description FROM jobs WHERE job_type = 'import_resolve'")
+            .fetch_all(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        !queued.is_empty(),
+        "an import must queue linking work for its manga"
+    );
+    assert!(
+        queued.iter().all(|(_, d)| d.contains("Link")),
+        "the queued job should say what it is doing: {queued:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_import_marks_its_manga_as_awaiting_linking() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    svc.import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+
+    // The resolve job runs concurrently and moves rows on from 'pending', so the
+    // durable invariant is that no imported id is left marked as trusted.
+    let untrusted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga_import_links")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        untrusted as usize,
+        backup.backup_manga.len(),
+        "an imported id must never be treated as one the source accepts"
+    );
+}
+
+#[tokio::test]
+async fn a_manga_whose_source_is_not_installed_stays_queued() {
+    let svc = common::test_service().await;
+    let src = common::insert_source(&svc.db, "src").await;
+    let manga_id =
+        common::insert_manga(&svc.db, src, "/manga/mihon-shaped-id", "Paper Cranes").await;
+    sqlx::query("INSERT INTO manga_import_links (manga_id, status) VALUES (?, 'pending')")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.resolve_imported_manga(src, manga_id, "/manga/mihon-shaped-id", "Paper Cranes")
+        .await
+        .unwrap();
+
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM manga_import_links WHERE manga_id = ?")
+            .bind(manga_id.0)
+            .fetch_optional(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        status.as_deref(),
+        Some("pending"),
+        "a source that never answered proves nothing about the id"
+    );
+}
+
+#[tokio::test]
+async fn linking_reports_why_it_could_not_resolve_a_manga() {
+    use kani_app::service::import::resolve::Resolution;
+
+    let svc = common::test_service().await;
+    let src = common::insert_source(&svc.db, "src").await;
+    let manga_id =
+        common::insert_manga(&svc.db, src, "/manga/mihon-shaped-id", "Paper Cranes").await;
+
+    // No backend is registered, so nothing can be proved against the source.
+    let outcome = svc
+        .resolve_imported_manga(src, manga_id, "/manga/mihon-shaped-id", "Paper Cranes")
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, Resolution::Deferred(_)),
+        "an unreachable source must not invent an id: {outcome:?}"
+    );
+
+    let stored: String = sqlx::query_scalar("SELECT source_manga_id FROM manga WHERE id = ?")
+        .bind(manga_id.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored, "/manga/mihon-shaped-id",
+        "an unresolved manga keeps the id it came in with"
+    );
+}
+
+#[tokio::test]
+async fn a_source_is_matched_by_the_name_the_backup_carries() {
+    // Mihon backups name every source they reference. An extension Kani knows
+    // under that name is the same source, so a new extension does not need an
+    // entry in the hardcoded id table before its backups can be imported.
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+
+    // Installed under the backup's own name, with an id that matches nothing.
+    let source_id = common::insert_source(&svc.db, "Third Source").await;
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.imported_manga as usize,
+        backup.backup_manga.len(),
+        "every series should resolve by name: {:?}",
+        result.warnings
+    );
+    assert_eq!(result.pending_imports_added, 0);
+
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga WHERE source_id = ?")
+        .bind(source_id)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(stored as usize, backup.backup_manga.len());
 }
 
 #[tokio::test]
@@ -610,4 +830,448 @@ async fn importing_twice_is_idempotent() {
         };
         assert_eq!(count, expected, "{table} grew on the second import");
     }
+}
+
+#[tokio::test]
+async fn parked_progress_is_applied_once_the_chapters_arrive() {
+    use kani_app::service::import::progress::ImportedProgress;
+
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    let src = common::insert_source(&svc.db, "src").await;
+    let manga_id = common::insert_manga(&svc.db, src, "/manga/mihon-shaped-id", "Tidewalker").await;
+
+    // Mihon stores the chapter number as a 32-bit float, so 1.1 reaches us as
+    // 1.100000023841858 and never equals the 1.1 a source parsed.
+    let entries = vec![
+        ImportedProgress {
+            source_chapter_id: "/chapter/mihon-1".to_string(),
+            chapter_number: f64::from(1.0f32),
+            is_read: true,
+            last_page_read: 0,
+        },
+        ImportedProgress {
+            source_chapter_id: "/chapter/mihon-1-1".to_string(),
+            chapter_number: f64::from(1.1f32),
+            is_read: false,
+            last_page_read: 7,
+        },
+    ];
+    svc.store_import_progress(manga_id, uid, &entries)
+        .await
+        .unwrap();
+
+    let applied_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_chapter_tracking")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(applied_before, 0, "there is nothing to attach progress to");
+
+    // The chapter list arrives with the source's own ids, which share nothing
+    // with the backup's.
+    let ch1 = common::insert_chapter(&svc.db, manga_id, "kani::abc", 1.0).await;
+    let ch11 = common::insert_chapter(&svc.db, manga_id, "kani::def", 1.1).await;
+
+    let unmatched = svc.apply_stored_import_progress(manga_id).await.unwrap();
+    assert_eq!(unmatched, 0, "both entries name a chapter that now exists");
+
+    let read: Vec<(i64, bool, i64)> = sqlx::query_as(
+        "SELECT chapter_id, is_read, last_page_read FROM user_chapter_tracking \
+         WHERE user_id = ? ORDER BY chapter_id",
+    )
+    .bind(uid)
+    .fetch_all(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(read, vec![(ch1.0, true, 0), (ch11.0, false, 7)]);
+
+    let parked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga_import_progress")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(parked, 0, "applied progress is consumed");
+}
+
+#[tokio::test]
+async fn the_preview_counts_what_it_found_so_an_empty_one_is_distinguishable() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+
+    let preview = svc.preview_tachiyomi_backup(&data).await.unwrap();
+
+    let chapters: usize = backup.backup_manga.iter().map(|m| m.chapters.len()).sum();
+    let with_progress: usize = backup
+        .backup_manga
+        .iter()
+        .map(|m| {
+            m.chapters
+                .iter()
+                .filter(|c| c.read || c.last_page_read > 0)
+                .count()
+        })
+        .sum();
+    assert!(
+        chapters > 0 && with_progress > 0,
+        "fixture carries no progress"
+    );
+
+    let tracking: usize = backup.backup_manga.iter().map(|m| m.tracking.len()).sum();
+    assert!(tracking > 0, "fixture carries no tracker links");
+
+    assert_eq!(preview.chapter_count as usize, chapters);
+    assert_eq!(preview.progress_entry_count as usize, with_progress);
+    assert_eq!(preview.tracking_entry_count as usize, tracking);
+    assert!(
+        preview.has_tracking,
+        "reading status comes from tracker links, so it must be offered when there are some"
+    );
+    assert!(
+        preview.has_chapter_progress,
+        "the option must be offered when the file has progress to import"
+    );
+}
+
+#[tokio::test]
+async fn re_importing_requeues_a_manga_that_gave_up_and_keeps_its_progress() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    // The state a user is left in after a first import whose linking failed:
+    // in the library, no chapters, and marked as given up on.
+    let series = backup
+        .backup_manga
+        .iter()
+        .find(|m| m.chapters.iter().any(|c| c.read || c.last_page_read > 0))
+        .expect("fixture has a series with progress");
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE mihon_source_id = ?")
+        .bind(series.source)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let manga_id = common::insert_manga(&svc.db, source_id, &series.url, &series.title).await;
+    sqlx::query("INSERT INTO manga_import_links (manga_id, status) VALUES (?, 'unlinked')")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(true))
+        .await
+        .unwrap();
+
+    let expected = series
+        .chapters
+        .iter()
+        .filter(|c| c.read || c.last_page_read > 0)
+        .count() as i64;
+    let parked: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM manga_import_progress WHERE manga_id = ?")
+            .bind(manga_id.0)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        parked, expected,
+        "progress for a manga with no chapters must wait, not be dropped"
+    );
+
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM manga_import_links WHERE manga_id = ?")
+            .bind(manga_id.0)
+            .fetch_optional(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        status.as_deref(),
+        Some("pending"),
+        "re-importing must put a given-up manga back in the queue that drains it"
+    );
+    assert_eq!(
+        result.unmatched_progress, 0,
+        "nothing was lost, so nothing should be reported lost"
+    );
+}
+
+#[tokio::test]
+async fn overwriting_progress_keeps_the_timestamp_the_shelf_orders_by() {
+    use kani_app::service::import::progress::ImportedProgress;
+
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    let src = common::insert_source(&svc.db, "src").await;
+    let manga_id = common::insert_manga(&svc.db, src, "/manga/mihon-shaped-id", "Tidewalker").await;
+    let ch = common::insert_chapter(&svc.db, manga_id, "kani::abc", 1.0).await;
+
+    sqlx::query(
+        "INSERT INTO user_chapter_tracking (user_id, chapter_id, is_read, last_page_read, last_read_at) \
+         VALUES (?, ?, 0, 3, '2026-01-02 03:04:05')",
+    )
+    .bind(uid)
+    .bind(ch.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.store_import_progress(
+        manga_id,
+        uid,
+        &[ImportedProgress {
+            source_chapter_id: "kani::abc".to_string(),
+            chapter_number: 1.0,
+            is_read: true,
+            last_page_read: 12,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(svc.apply_stored_import_progress(manga_id).await.unwrap(), 0);
+
+    let (is_read, last_page_read, last_read_at): (bool, i64, Option<String>) = sqlx::query_as(
+        "SELECT is_read, last_page_read, last_read_at FROM user_chapter_tracking \
+         WHERE user_id = ? AND chapter_id = ?",
+    )
+    .bind(uid)
+    .bind(ch.0)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert!(is_read, "the import's read flag must win");
+    assert_eq!(last_page_read, 12, "the import's page position must win");
+    assert_eq!(
+        last_read_at.as_deref(),
+        Some("2026-01-02 03:04:05"),
+        "continue-reading orders by this, so an import must not erase it"
+    );
+}
+
+#[tokio::test]
+async fn a_relinked_manga_is_recognised_rather_than_imported_again() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    // The state the resolve job leaves a manga in: the same series, on the same
+    // source, under the id the source actually accepts rather than the backup's.
+    let series = backup
+        .backup_manga
+        .iter()
+        .find(|m| m.chapters.iter().any(|c| c.read || c.last_page_read != 0))
+        .expect("fixture has a series with progress");
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE mihon_source_id = ?")
+        .bind(series.source)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let manga_id = common::insert_manga(&svc.db, source_id, "kani::linked-id", &series.title).await;
+    for ch in &series.chapters {
+        common::insert_chapter(&svc.db, manga_id, &ch.url, f64::from(ch.chapter_number)).await;
+    }
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(true))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.possible_duplicates, 0,
+        "a manga already in the library is not a duplicate of itself"
+    );
+
+    let expected = series
+        .chapters
+        .iter()
+        .filter(|c| c.read || c.last_page_read != 0)
+        .count() as i64;
+    let applied: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_chapter_tracking uct \
+         JOIN chapters c ON c.id = uct.chapter_id WHERE c.manga_id = ?",
+    )
+    .bind(manga_id.0)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        applied, expected,
+        "progress must land on the manga already in the library"
+    );
+    assert_eq!(result.unmatched_progress, 0);
+}
+
+#[tokio::test]
+async fn re_importing_over_a_manga_keeps_that_users_reader_settings() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    let series = backup
+        .backup_manga
+        .iter()
+        .find(|m| !m.tracking.is_empty())
+        .expect("fixture has a series with a tracker link");
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE mihon_source_id = ?")
+        .bind(series.source)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let manga_id = common::insert_manga(&svc.db, source_id, &series.url, &series.title).await;
+    sqlx::query(
+        "INSERT INTO user_manga_tracking (user_id, manga_id, status, notify_new_chapters, reader_prefs) \
+         VALUES (?, ?, 0, 0, '{\"zoom\":\"fit-width\"}')",
+    )
+    .bind(uid)
+    .bind(manga_id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+
+    let (notify, prefs): (bool, Option<String>) = sqlx::query_as(
+        "SELECT notify_new_chapters, reader_prefs FROM user_manga_tracking \
+         WHERE user_id = ? AND manga_id = ?",
+    )
+    .bind(uid)
+    .bind(manga_id.0)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert!(
+        !notify,
+        "an import must not re-enable notifications this user turned off"
+    );
+    assert_eq!(
+        prefs.as_deref(),
+        Some("{\"zoom\":\"fit-width\"}"),
+        "an import carries no reader preferences, so it must not clear them"
+    );
+}
+
+#[tokio::test]
+async fn progress_only_import_applies_to_the_library_that_is_already_there() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    let series = backup
+        .backup_manga
+        .iter()
+        .find(|m| m.chapters.iter().any(|c| c.read || c.last_page_read != 0))
+        .expect("fixture has a series with progress");
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE mihon_source_id = ?")
+        .bind(series.source)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let manga_id = common::insert_manga(&svc.db, source_id, &series.url, &series.title).await;
+    for ch in &series.chapters {
+        common::insert_chapter(&svc.db, manga_id, &ch.url, f64::from(ch.chapter_number)).await;
+    }
+
+    let result = svc
+        .import_tachiyomi_backup(
+            uid,
+            &data,
+            TachiyomiImportOptions {
+                import_manga: false,
+                import_categories: false,
+                import_tracking: false,
+                import_chapter_progress: true,
+            },
+        )
+        .await
+        .unwrap();
+
+    let expected = series
+        .chapters
+        .iter()
+        .filter(|c| c.read || c.last_page_read != 0)
+        .count() as i64;
+    let applied: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_chapter_tracking uct \
+         JOIN chapters c ON c.id = uct.chapter_id WHERE c.manga_id = ?",
+    )
+    .bind(manga_id.0)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        applied, expected,
+        "progress-only must reach the manga already in the library"
+    );
+    assert_eq!(
+        result.pending_imports_added, 0,
+        "a progress-only run must not add manga by another name"
+    );
+    let manga_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(manga_count, 1, "a progress-only run must not add manga");
+}
+
+/// A trashed series is not restored by an import, so counting it as imported
+/// tells the user something landed in a library that still hides it.
+#[tokio::test]
+async fn a_trashed_series_is_reported_rather_than_counted_as_imported() {
+    let data = fixture("suwayomi-anonymised.tachibk");
+    let backup = decode(&data);
+
+    let svc = common::test_service().await;
+    let uid = user(&svc).await;
+    register_every_source(&svc.db, &backup).await;
+
+    svc.import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+
+    let trashed_url = &backup.backup_manga[0].url;
+    let trashed_id: i64 = sqlx::query_scalar("SELECT id FROM manga WHERE source_manga_id = ?")
+        .bind(trashed_url)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE manga SET deleted_at = unixepoch() WHERE id = ?")
+        .bind(trashed_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let result = svc
+        .import_tachiyomi_backup(uid, &data, options(false))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.imported_manga as usize,
+        backup.backup_manga.len() - 1,
+        "the trashed series was counted as imported"
+    );
+    assert_eq!(
+        result.trashed_manga, 1,
+        "the trashed series was not reported"
+    );
+
+    let still_trashed: Option<i64> =
+        sqlx::query_scalar("SELECT deleted_at FROM manga WHERE id = ?")
+            .bind(trashed_id)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        still_trashed.is_some(),
+        "the import silently resurrected a trashed series"
+    );
 }

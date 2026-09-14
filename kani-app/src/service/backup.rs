@@ -186,6 +186,7 @@ impl Default for RestoreOptions {
 pub struct RestoreResult {
     pub imported_manga: u32,
     pub skipped_manga: u32,
+    pub trashed_manga: u32,
     pub possible_duplicates: u32,
     pub imported_categories: u32,
     pub imported_repos: u32,
@@ -618,6 +619,7 @@ impl AppService {
         let mut result = RestoreResult {
             imported_manga: 0,
             skipped_manga: 0,
+            trashed_manga: 0,
             possible_duplicates: 0,
             imported_categories: 0,
             imported_repos: 0,
@@ -688,11 +690,12 @@ impl AppService {
                 total: total_manga,
             });
         }
-        for (processed, m) in (1_u32..).zip(backup.manga.iter()) {
-            if !opts.import_manga {
-                break;
-            }
+        let mut title_index: std::collections::HashMap<
+            i64,
+            std::collections::HashMap<String, Vec<i64>>,
+        > = Default::default();
 
+        for (processed, m) in (1_u32..).zip(backup.manga.iter()) {
             let source_id: Option<i64> = sqlx::query_scalar!(
                 "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
                 m.source_name
@@ -703,6 +706,10 @@ impl AppService {
             let source_id = match source_id {
                 Some(id) => id,
                 None => {
+                    if !opts.import_manga {
+                        result.skipped_manga += 1;
+                        continue;
+                    }
                     result.warnings.push(format!(
                         "Source '{}' not installed — '{}' saved to pending imports",
                         m.source_name, m.name
@@ -721,7 +728,7 @@ impl AppService {
                 }
             };
 
-            let existing_id: Option<i64> = sqlx::query_scalar!(
+            let mut existing_id: Option<i64> = sqlx::query_scalar!(
                 "SELECT id FROM manga WHERE source_id = ? AND source_manga_id = ?",
                 source_id,
                 m.source_manga_id
@@ -729,8 +736,57 @@ impl AppService {
             .fetch_optional(&self.db_read)
             .await?;
 
-            let manga_id = if let Some(id) = existing_id {
-                id
+            if existing_id.is_none() {
+                use std::collections::hash_map::Entry;
+                let index = match title_index.entry(source_id) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => e.insert(
+                        crate::service::dedup::source_title_index(&self.db_read, source_id).await?,
+                    ),
+                };
+                // An ambiguous title matches nothing: attaching a backup's
+                // progress to the wrong series is worse than a duplicate.
+                existing_id = index
+                    .get(&crate::service::dedup::normalise_title(&m.name))
+                    .filter(|ids| ids.len() == 1)
+                    .map(|ids| ids[0]);
+            }
+
+            if let Some(id) = existing_id {
+                let trashed: Option<i64> = sqlx::query_scalar!(
+                    "SELECT id FROM manga WHERE id = ? AND deleted_at IS NOT NULL",
+                    id
+                )
+                .fetch_optional(&self.db_read)
+                .await?;
+                if trashed.is_some() {
+                    result.trashed_manga += 1;
+                    let _ = self.refresh_tx.send(AppEvent::ImportProgress {
+                        origin: "kani_backup".into(),
+                        completed: processed,
+                        total: total_manga,
+                        title: m.name.clone(),
+                    });
+                    continue;
+                }
+            }
+
+            // Without `import_manga` the run may only touch what is already in
+            // the library, so an entry with nothing to attach to is skipped
+            // rather than added under another option's name.
+            if existing_id.is_none() && !opts.import_manga {
+                result.skipped_manga += 1;
+                let _ = self.refresh_tx.send(AppEvent::ImportProgress {
+                    origin: "kani_backup".into(),
+                    completed: processed,
+                    total: total_manga,
+                    title: m.name.clone(),
+                });
+                continue;
+            }
+
+            let (manga_id, is_new) = if let Some(id) = existing_id {
+                (id, false)
             } else {
                 let authors: Vec<String> = vec![];
                 let hits =
@@ -798,15 +854,34 @@ impl AppService {
                 }
 
                 tx.commit().await?;
-                id
+                (id, true)
             };
+
+            // Restored manga need the same follow-up as ones added from a
+            // source, chapters above all: without them there is nothing to
+            // read, and nothing for chapter progress below to attach to.
+            if is_new {
+                self.after_manga_added(
+                    MangaId(manga_id),
+                    source_id,
+                    &m.source_manga_id,
+                    &m.name,
+                    None,
+                    true,
+                )
+                .await;
+            }
 
             if opts.import_tracking
                 && let Some(ref tr) = m.tracking
             {
+                // Updated rather than replaced: REPLACE would reset every column the
+                // backup does not carry, including this user's reader settings.
                 sqlx::query!(
-                    "INSERT OR REPLACE INTO user_manga_tracking (user_id, manga_id, status, score) \
-                         VALUES (?, ?, ?, ?)",
+                    "INSERT INTO user_manga_tracking (user_id, manga_id, status, score) \
+                         VALUES (?, ?, ?, ?) \
+                         ON CONFLICT(user_id, manga_id) DO UPDATE SET \
+                         status = excluded.status, score = excluded.score",
                     user_id,
                     manga_id,
                     tr.status,
@@ -817,28 +892,29 @@ impl AppService {
             }
 
             if opts.import_chapter_progress && !m.chapter_progress.is_empty() {
+                let mut unmatched = 0u32;
                 for cp in &m.chapter_progress {
-                    let chapter_id: Option<i64> = sqlx::query_scalar!(
-                        "SELECT id FROM chapters WHERE manga_id = ? AND source_chapter_id = ?",
-                        manga_id,
-                        cp.source_chapter_id
-                    )
-                    .fetch_optional(&self.db_read)
-                    .await?;
-
-                    if let Some(ch_id) = chapter_id {
-                        sqlx::query!(
-                            "INSERT OR REPLACE INTO user_chapter_tracking \
-                             (user_id, chapter_id, is_read, last_page_read) \
-                             VALUES (?, ?, ?, ?)",
+                    // A Kani backup carries no chapter number, so zero here
+                    // leaves the id the only thing this can match on.
+                    let applied = self
+                        .apply_one_progress(
+                            MangaId(manga_id),
                             user_id,
-                            ch_id,
+                            &cp.source_chapter_id,
+                            0.0,
                             cp.is_read,
-                            cp.last_page_read
+                            cp.last_page_read,
                         )
-                        .execute(&self.db)
                         .await?;
+                    if !applied {
+                        unmatched += 1;
                     }
+                }
+                if unmatched > 0 {
+                    result.warnings.push(format!(
+                        "Read progress for '{}': {unmatched} entries matched none of its chapters in the library.",
+                        m.name
+                    ));
                 }
             }
 

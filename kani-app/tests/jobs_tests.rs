@@ -498,3 +498,50 @@ async fn webhook_delivery_job_completes_on_2xx() {
         .unwrap();
     assert_eq!(await_terminal(&svc, job_id).await, "completed");
 }
+
+/// The reader re-fetches pages the moment it sees `ChapterCompleted`, and that
+/// fetch 404s while `download_status` is still Pending. The event must therefore
+/// not become observable until the row has been committed.
+#[tokio::test]
+async fn chapter_completed_is_not_broadcast_before_the_row_is_marked_downloaded() {
+    use kani_shared::DownloadProgressEvent;
+
+    let svc = test_service().await;
+    let port = start_mock_page_server().await;
+
+    let source_id = insert_source(&svc.db, "src").await;
+    let manga_id = insert_manga(&svc.db, source_id, "manga-001", "TestManga").await;
+    let chapter_id = insert_chapter(&svc.db, manga_id, "ch-001", 1.0).await;
+    svc.register_mock_source(source_id, MockPageListFetcher::succeeding(3, port));
+
+    let mut events = svc.downloader.subscribe();
+    svc.download_chapter(chapter_id).await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let remaining = deadline - tokio::time::Instant::now();
+        let event = tokio::time::timeout(remaining, events.recv())
+            .await
+            .expect("timed out waiting for ChapterCompleted")
+            .expect("event channel closed");
+        if let DownloadProgressEvent::ChapterCompleted { chapter_id: id, .. } = event
+            && id == i64::from(chapter_id)
+        {
+            break;
+        }
+    }
+
+    let dl_status: i64 = sqlx::query_scalar!(
+        "SELECT download_status FROM chapters WHERE id = ?",
+        chapter_id
+    )
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        dl_status, 2,
+        "ChapterCompleted was observable while download_status was still {dl_status}; \
+         a reader re-fetching on this event gets a 404"
+    );
+}

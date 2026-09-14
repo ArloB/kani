@@ -730,6 +730,11 @@ export async function refreshManga(id, opts) {
 }
 
 /** @param {number} id @returns {Promise<{ job_id: string }>} */
+export async function relinkManga(id) {
+  return _req('POST', `/manga/${id}/relink`);
+}
+
+/** @param {number} id @returns {Promise<{ job_id: string }>} */
 export async function scanManga(id) {
   return _req('POST', `/manga/${id}/scan`);
 }
@@ -837,6 +842,31 @@ export async function migrateManga(id, targetSourceId, targetMangaId, keepOrphan
   });
 }
 
+
+/**
+ * @param {number} targetSourceId
+ * @param {{ manga_id: number, query?: string }[]} items
+ * @param {AbortSignal} [signal]
+ */
+export async function matchMigrationTargets(targetSourceId, items, signal) {
+  return _req('POST', '/migrations/match', { body: { target_source_id: targetSourceId, items }, signal });
+}
+
+/**
+ * @param {number} targetSourceId
+ * @param {{ manga_id: number, target_source_manga_id: string }[]} items
+ * @param {boolean} keepOrphaned
+ */
+export async function submitBulkMigration(targetSourceId, items, keepOrphaned) {
+  return _req('POST', '/migrations/bulk', {
+    body: { target_source_id: targetSourceId, items, keep_orphaned_downloads: keepOrphaned },
+  });
+}
+
+/** @param {string[]} jobIds */
+export async function getMigrationStatuses(jobIds) {
+  return _req('POST', '/migrations/status', { body: { job_ids: jobIds } });
+}
 
 /** @param {number} mangaId */
 export async function getDownloadRules(mangaId) {

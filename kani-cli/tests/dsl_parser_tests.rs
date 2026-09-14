@@ -902,7 +902,7 @@ fn parse_string_keeps_regex_escapes_intact() {
 }
 
 #[test]
-fn parse_full_comix_description_expression() {
+fn parse_a_multi_binding_description_expression() {
     let expression = r#"let $synopsis = self.ptr("/synopsis").str().fallback("");
 let $alts = if pref("alt_titles_in_description") == "true"
   then self.ptr("/altTitles").map($item.str()).join("\n").fallback("")
@@ -924,9 +924,9 @@ merge([
 
     let parsed = parse_ok(expression);
     let Expr::Arena { arena, root } = &parsed else {
-        panic!("the complex Comix expression must use arena storage");
+        panic!("a multi-binding expression must use arena storage");
     };
-    arena.validate(*root).expect("valid Comix arena");
+    arena.validate(*root).expect("valid arena");
     assert!(arena.nodes.len() > 32);
     assert!(kani_cli::codegen::expr::emit_expr(&parsed).starts_with("Expr::arena_from_bytes"));
 }

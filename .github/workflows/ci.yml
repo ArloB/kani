@@ -272,6 +272,12 @@ jobs:
       - name: Dead module and export check
         run: node scripts/check-dead-js.mjs
 
+      - name: Frontend shell parity
+        run: node scripts/check-shell-parity.mjs
+
+      - name: Test the shell parity scanner itself
+        run: node --test scripts/check-shell-parity.test.mjs
+
       - name: Showcase manifest is current
         run: node scripts/generate-showcase-manifest.mjs --check
 

@@ -59,6 +59,8 @@ pub fn make_pure_sandbox() -> Engine {
     engine.set_max_string_size(limits.max_string);
     engine.set_max_array_size(limits.max_array);
     engine.set_max_map_size(1_000);
+    crate::scripting::bytes::register_byte_bindings(&mut engine);
+
     engine.disable_symbol("eval");
     engine.disable_symbol("import");
     engine.disable_symbol("export");

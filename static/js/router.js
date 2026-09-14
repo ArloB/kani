@@ -53,6 +53,13 @@ let _currentParams = {};
 let _beforeNavigate = null;
 let _isInitialRoute = true;
 /**
+ * How long a page gets to finish loading before the router shows its skeleton.
+ * Matches `deferredSkeleton`'s default so a cached page never flashes one.
+ */
+const SKELETON_GRACE_MS = 150;
+/** @param {number} ms */
+const _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
  * Bumped by every navigation. A route that started earlier compares its own
  * value after each await and bails if a newer navigation has superseded it —
  * otherwise a slow page's `await import()` resolves *after* a redirect and
@@ -190,12 +197,21 @@ async function _route(path, fromPopstate = false) {
     try {
       const mod = await matched.load();
       if (generation !== _navGeneration) return;
+
+      // A view transition suppresses painting until its callback settles, so
+      // awaiting all of `init()` holds the old page on screen for the whole
+      // fetch. Start it, wait a grace period, then let the skeleton show.
+      /** @type {Promise<void> | null} */
+      let pending = null;
       const swap = async () => {
         if (generation !== _navGeneration) return;
-        // Clear old content only once the new module is ready to render
+        // Pages paint their own skeleton synchronously before their first
+        // await, so clearing here is enough — the skeleton is in the DOM by the
+        // time the grace period is up.
         /** @type {HTMLElement} */ (_container).innerHTML = '';
         _activePage = mod;
-        await mod.init(_container, params);
+        pending = Promise.resolve(mod.init(_container, params));
+        await Promise.race([pending, _sleep(SKELETON_GRACE_MS)]);
       };
       const vt = /** @type {any} */ (document).startViewTransition;
       if (typeof vt === 'function'
@@ -205,6 +221,9 @@ async function _route(path, fromPopstate = false) {
       } else {
         await swap();
       }
+      // Scroll restoration below needs real content, not the skeleton, so the
+      // navigation still resolves only once the page has loaded.
+      if (pending) await pending;
     } catch (e) {
       console.error('Page init error:', e);
       _container.innerHTML = `<div style="padding:2rem;color:var(--color-danger)">${t('router.load_failed')}</div>`;

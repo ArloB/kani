@@ -2,7 +2,10 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_post, body_json};
+use common::{
+    authed_get, authed_post, body_json, build_test_app, create_admin, insert_manga, insert_source,
+    login, test_state,
+};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -107,5 +110,61 @@ async fn scan_manga_invalid_body_returns_422() {
         res.status().is_client_error(),
         "expected 4xx, got {}",
         res.status(),
+    );
+}
+
+#[tokio::test]
+async fn a_library_item_links_its_thumbnail_not_the_full_cover() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    let source_id = insert_source(&state.db, "src-cover").await;
+    let manga_id = insert_manga(&state.db, source_id, "ext-cover", "Covered").await;
+
+    let library_path = state.service.settings.read().await.library_path.clone();
+    let covers_dir = library_path.join("covers");
+    tokio::fs::create_dir_all(&covers_dir).await.unwrap();
+    let jpeg = kani_shared_test::origin::jpeg_page(400, 600, false, 80);
+    tokio::fs::write(covers_dir.join(format!("{manga_id}.jpg")), &jpeg)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE manga SET local_cover_path = ? WHERE id = ?")
+        .bind(format!("covers/{manga_id}.jpg"))
+        .bind(manga_id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    state
+        .service
+        .generate_and_store_thumbnails(manga_id)
+        .await
+        .unwrap();
+
+    let cover_hash: String = sqlx::query_scalar("SELECT cover_hash FROM manga WHERE id = ?")
+        .bind(manga_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+
+    let res = app
+        .oneshot(authed_get("/rest/library?page=1&page_size=20", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_json(res).await;
+    let cover_url = body["items"][0]["cover_url"]
+        .as_str()
+        .expect("a manga with a local cover must expose a cover_url");
+
+    assert!(
+        cover_url.contains("size=sm"),
+        "the grid asked for the full-size original: {cover_url}"
+    );
+    assert!(
+        cover_url.contains(&format!("h={}", &cover_hash[..16])),
+        "cover_url carries no matching hash, so the response cannot be marked immutable: {cover_url}"
     );
 }

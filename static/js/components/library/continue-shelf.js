@@ -6,6 +6,7 @@
 import { navigate } from '../../router.js';
 import { formatChapterTitle } from '../../utils.js';
 import { t } from '../../i18n.js';
+import { applyCoverQuality } from '../../cover-quality.js';
 
 /**
  * @typedef {{
@@ -81,9 +82,9 @@ function _mkShelfCard(item) {
 
   const cover = document.createElement('div');
   cover.className = 'relative w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden';
-  const coverSrc = item.local_cover_path
+  const coverSrc = applyCoverQuality(item.local_cover_path
     ? `/rest/manga/${item.manga_id}/cover?size=sm`
-    : item.cover_url ?? null;
+    : item.cover_url ?? null);
   if (coverSrc) {
     const img = document.createElement('img');
     img.src = coverSrc;
