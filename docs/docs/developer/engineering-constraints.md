@@ -353,7 +353,9 @@ dependencies once and ship the feature set that the default-members build in CI 
 **Evidence.** Without it, 62 of 407 shared packages resolved different features, including
 `rustls` with only `aws-lc-rs` in kani-cli and only `ring` in kani-web, while tests ran with both.
 The kani-web build recompiled 482 units after kani-cli. On four cores a clean `dist` build of both
-fell from 10m 46s to 9m 06s, and CPU time from 45.3 to 32.7 minutes.
+fell from 10m 46s to 9m 06s, and CPU time from 45.3 to 32.7 minutes. In the release workflow, the
+crates dist compiled for kani-web fell from 392-400 to 43-53. Its Intel macOS kani-web build went
+from 36m 51s to 18m 07s, and the Docker image's `-p kani-cli` step from 168 crates to 5.
 
 **Consequence.** The Dockerfile builds per package after `cargo chef cook` resolves the whole
 workspace, so it has the same exposure. A dependency change that alters features fails CI until
