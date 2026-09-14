@@ -40,6 +40,12 @@ export const COMPONENTS = [
     ]
   },
   {
+    "module": "components/bulk-migration-dialogue.js",
+    "exports": [
+      "openBulkMigrationDialogue"
+    ]
+  },
+  {
     "module": "components/chip-group.js",
     "exports": [
       "renderChipGroup"
@@ -475,6 +481,12 @@ export const COMPONENTS = [
     "module": "components/sortable-list.js",
     "exports": [
       "mountSortableList"
+    ]
+  },
+  {
+    "module": "components/sources-header.js",
+    "exports": [
+      "createSourcesHeaderActions"
     ]
   },
   {

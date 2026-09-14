@@ -55,6 +55,9 @@ Kani uses [Semantic Versioning](https://semver.org/).
 - Duplicate warnings no longer flag a numbered sequel as a duplicate of the original series.
 - The bundled solver's port is no longer published to the host in `docker-compose.yml`; only the
   Kani container can reach it.
+- Dependencies are updated to their latest patch releases, including wasmtime 46.0.3, axum 0.8.9,
+  reqwest 0.13.4 and serde 1.0.229, alongside arc-swap 1.9.2, bytes 1.12.1, regex 1.13.1 and insta
+  1.48.0.
 
 ### Fixed
 
