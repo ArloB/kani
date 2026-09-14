@@ -6,6 +6,11 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- Intel macOS (`x86_64-apple-darwin`) release archives. On an Intel Mac, run the `linux/amd64`
+  Docker image or build from source. Apple Silicon, Linux and Windows archives are unchanged.
+
 ## [1.0.0-rc.3] - 2026-09-14
 
 ### Added
