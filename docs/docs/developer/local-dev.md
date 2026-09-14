@@ -71,6 +71,20 @@ cargo sqlx prepare --workspace -- --all-targets
 
 Commit `.sqlx` changes. Build without a live database with `SQLX_OFFLINE=true`.
 
+## Dependency changes
+
+After adding, removing, or changing the features of a dependency, or adding a native workspace
+crate:
+
+```bash
+cargo install cargo-hakari --locked
+cargo hakari generate
+cargo hakari manage-deps
+```
+
+Commit the `workspace-hack` changes. The crate pins one feature set for every native crate, so the
+release builds each package with the dependencies CI tests; CI fails when it is stale.
+
 ## Frontend checks
 
 ```bash
