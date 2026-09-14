@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788772552613,
+  "lastUpdate": 1789379307885,
   "repoUrl": "https://github.com/ArloB/kani",
   "entries": {
     "Benchmark": [
@@ -169,6 +169,40 @@ window.BENCHMARK_DATA = {
             "name": "blueprint_eval/json_200_rows",
             "value": 1190816,
             "range": "± 83642",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Arlo Burke",
+            "username": "ArloB",
+            "email": "arlo.burke2@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2b3372ca5a99e84be15d70e854bca9b58c5e43da",
+          "message": "Merge pull request #21 from ArloB/release/1.0.0-rc.3\n\nRelease/1.0.0 rc.3",
+          "timestamp": "2026-09-14T07:11:30Z",
+          "url": "https://github.com/ArloB/kani/commit/2b3372ca5a99e84be15d70e854bca9b58c5e43da"
+        },
+        "date": 1789379306811,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "blueprint_eval/html_200_rows",
+            "value": 2847538,
+            "range": "± 6448",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "blueprint_eval/json_200_rows",
+            "value": 914295,
+            "range": "± 2222",
             "unit": "ns/iter"
           }
         ]
