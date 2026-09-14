@@ -3159,7 +3159,7 @@ dependencies = [
 
 [[package]]
 name = "kani-app"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3224,7 +3224,7 @@ dependencies = [
 
 [[package]]
 name = "kani-cli"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "ariadne",
  "base64",
@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "kani-core"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3327,14 +3327,14 @@ dependencies = [
 
 [[package]]
 name = "kani-lease"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "loom",
 ]
 
 [[package]]
 name = "kani-shared"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "base64",
  "hex",
@@ -3350,7 +3350,7 @@ dependencies = [
 
 [[package]]
 name = "kani-shared-test"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "image",
  "kani-app",
@@ -3367,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "kani-web"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "ammonia",
  "argon2",
@@ -3426,7 +3426,7 @@ dependencies = [
 
 [[package]]
 name = "kani-yaml"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "base64",
  "chumsky",
