@@ -647,6 +647,11 @@ fn validate_id_encoding(block: &IdEncodingBlock) -> Vec<YamlError> {
                 errors.push(YamlError::Validation(format!(
                     "id_encoding.{role}: field names must not be empty"
                 )));
+            } else if !f.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                errors.push(YamlError::Validation(format!(
+                    "id_encoding.{role}: field name {f:?} may use only letters, digits and '_', \
+                     since it is referenced as ${role}.{f}$"
+                )));
             } else if !seen.insert(f.as_str()) {
                 errors.push(YamlError::Validation(format!(
                     "id_encoding.{role}: duplicate field name '{f}'"

@@ -293,7 +293,7 @@ impl YamlSource {
         filters: &[kani_shared::types::ActiveFilter],
     ) -> std::result::Result<kani_shared::ast::RequestDef, String> {
         let mut resolved = args.clone();
-        kani_yaml::resolve_composite_ids(ep, &mut resolved);
+        kani_yaml::resolve_composite_ids(ep, &mut resolved)?;
         let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved)?;
         let mut queries = kani_yaml::build_queries(&ep.queries, &resolved);
         queries.extend(kani_yaml::apply_filters(
@@ -382,7 +382,7 @@ impl YamlSource {
             .ok_or_else(|| invalid(format!("browser script '{script_name}' not declared")))?;
 
         let mut resolved = args.clone();
-        kani_yaml::resolve_composite_ids(ep, &mut resolved);
+        kani_yaml::resolve_composite_ids(ep, &mut resolved).map_err(invalid)?;
         let page_url =
             kani_yaml::build_url_with_args("", page_url_template, &resolved).map_err(invalid)?;
 
@@ -732,7 +732,8 @@ impl YamlSource {
             ))
         })?;
         let mut args = Self::build_args(&[("manga_id", manga_id)]);
-        kani_yaml::resolve_get_url_manga_id(&self.config, &mut args);
+        kani_yaml::resolve_get_url_manga_id(&self.config, &mut args)
+            .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
         kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
             .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }

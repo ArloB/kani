@@ -214,12 +214,12 @@ fn decode_composite_arg(
     role: &str,
     arg_name: &str,
     args: &mut std::collections::HashMap<String, String>,
-) {
+) -> Result<(), String> {
     use kani_shared::ast::IdEncoding;
     use yaml::schema::YamlIdEncoding;
 
     let Some(raw_id) = args.get(arg_name).cloned() else {
-        return;
+        return Ok(());
     };
     let encoding = match entry.encoding {
         YamlIdEncoding::Base64Url => IdEncoding::Base64Url,
@@ -228,28 +228,31 @@ fn decode_composite_arg(
         YamlIdEncoding::Hex => IdEncoding::Hex,
     };
     let field_names: Vec<&str> = entry.fields.iter().map(|f| f.as_str()).collect();
-    if let Ok(decoded) =
+    let decoded =
         kani_shared::encoding::decode_composite(&raw_id, &entry.delimiter, &encoding, &field_names)
-    {
-        for (field, value) in decoded {
-            args.insert(format!("{role}_{field}"), value);
-        }
+            .map_err(|e| {
+                format!("{arg_name} {raw_id:?} is not a valid {role} id for this source: {e}")
+            })?;
+    for (field, value) in decoded {
+        args.insert(format!("{role}_{field}"), value);
     }
+    Ok(())
 }
 
 /// Decode composite IDs referenced by `ep` and add the decoded sub-fields to `args`.
 pub fn resolve_composite_ids(
     ep: &yaml::model::ValidatedEndpoint,
     args: &mut std::collections::HashMap<String, String>,
-) {
+) -> Result<(), String> {
     for decode in &ep.composite_id_decodes {
         let entry = yaml::schema::IdEncodingEntry {
             fields: decode.fields.clone(),
             delimiter: decode.delimiter.clone(),
             encoding: decode.encoding,
         };
-        decode_composite_arg(&entry, &decode.role, &decode.fn_arg, args);
+        decode_composite_arg(&entry, &decode.role, &decode.fn_arg, args)?;
     }
+    Ok(())
 }
 
 /// Decode the `manga_id` arg against the extension's top-level `id_encoding.manga`
@@ -263,9 +266,10 @@ pub fn resolve_composite_ids(
 pub fn resolve_get_url_manga_id(
     ext: &yaml::model::ValidatedExtension,
     args: &mut std::collections::HashMap<String, String>,
-) {
-    if let Some(entry) = ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref()) {
-        decode_composite_arg(entry, "manga", "manga_id", args);
+) -> Result<(), String> {
+    match ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref()) {
+        Some(entry) => decode_composite_arg(entry, "manga", "manga_id", args),
+        None => Ok(()),
     }
 }
 
@@ -427,7 +431,7 @@ mod url_tests {
         .expect("no delimiter in a non-final part");
 
         let mut resolved = args(&[("manga_id", &encoded)]);
-        decode_composite_arg(&entry, "manga", "manga_id", &mut resolved);
+        decode_composite_arg(&entry, "manga", "manga_id", &mut resolved).unwrap();
         assert_eq!(
             resolved.get("manga_slug").map(String::as_str),
             Some("some-title-slug")
@@ -436,5 +440,25 @@ mod url_tests {
         let url =
             build_url_with_args("https://src.example", "/title/$manga.slug$", &resolved).unwrap();
         assert_eq!(url, "https://src.example/title/some-title-slug");
+    }
+
+    #[test]
+    fn a_malformed_composite_id_is_a_decode_error_not_an_unresolved_placeholder() {
+        use super::decode_composite_arg;
+        use super::yaml::schema::{IdEncodingEntry, YamlIdEncoding};
+
+        let entry = IdEncodingEntry {
+            fields: vec!["hid".to_string(), "slug".to_string()],
+            delimiter: "|".to_string(),
+            encoding: YamlIdEncoding::Base64Url,
+        };
+        for malformed in ["!!!not-base64!!!", "aGlk"] {
+            let mut resolved = args(&[("manga_id", malformed)]);
+            let err = decode_composite_arg(&entry, "manga", "manga_id", &mut resolved).unwrap_err();
+            assert!(
+                err.contains("is not a valid manga id") && err.contains(malformed),
+                "{err}"
+            );
+        }
     }
 }

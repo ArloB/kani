@@ -33,8 +33,9 @@ fn emit_composite_id_decode_prologue(ep: &ValidatedEndpoint) -> String {
             .join(", ");
         let local = format!("__{}_decoded", decode.role);
         out.push_str(&format!(
-            "let {local} = kani_shared::encoding::decode_composite({arg}, \"{delim}\", &{encoding_str}, &[{field_names}]).map_err(kani_shared::ExtensionError::parse)?;\n",
+            "let {local} = kani_shared::encoding::decode_composite({arg}, {delim:?}, &{encoding_str}, &[{field_names}]).map_err(|e| kani_shared::ExtensionError::parse(format!(\"{arg} {{:?}} is not a valid {role} id for this source: {{e}}\", {arg})))?;\n",
             arg = decode.fn_arg,
+            role = decode.role,
             delim = decode.delimiter,
         ));
         for (idx, field) in decode.fields.iter().enumerate() {

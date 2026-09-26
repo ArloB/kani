@@ -2003,3 +2003,46 @@ async fn reloading_yaml_whose_hooks_no_longer_compile_is_refused() {
         "refused for the hooks, got: {err}"
     );
 }
+
+#[tokio::test]
+async fn a_malformed_stored_composite_id_reports_the_decode_error() {
+    let yaml = r#"id: composite-errors
+name: composite-errors
+version: "1.0.0"
+base_url: "https://example.com"
+get_url: "/title/$manga.slug$"
+id_encoding:
+  manga:
+    fields: [hid, slug]
+    delimiter: "|"
+    encoding: base64_url
+endpoints:
+  manga_details:
+    route: /title/$manga.slug$
+    container: ":root"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.first(".title").text()'
+      status: '"unknown"'
+"#;
+    let svc = test_service().await;
+    let source_id = svc.install_yaml_source(yaml.as_bytes()).await.unwrap();
+
+    let details = svc
+        .get_manga_details(source_id, "not*base64")
+        .await
+        .unwrap_err()
+        .to_string();
+    let url = svc
+        .get_source_url(source_id, "not*base64")
+        .await
+        .unwrap_err()
+        .to_string();
+
+    for err in [details, url] {
+        assert!(
+            err.contains("is not a valid manga id") && !err.contains("unresolved"),
+            "the decode failure must be reported, got: {err}"
+        );
+    }
+}

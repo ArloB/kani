@@ -1673,3 +1673,29 @@ fn a_filter_mapping_key_must_name_a_filter_group() {
     assert_valid(&yaml("genre"));
     assert_invalid_containing(&yaml("genres"), "no filter has id 'genres'");
 }
+
+#[test]
+fn id_encoding_definitions_that_cannot_round_trip_are_refused() {
+    let yaml = |block: &str| format!("{METADATA_BASE}id_encoding:\n  manga:\n{block}");
+    assert_invalid_containing(
+        &yaml("    fields: []\n    delimiter: \"|\"\n"),
+        "'fields' must not be empty",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, hid]\n    delimiter: \"|\"\n"),
+        "duplicate",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, slug]\n    delimiter: \"\"\n"),
+        "'delimiter' must not be empty",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, \"the-slug\"]\n    delimiter: \"|\"\n"),
+        "may use only letters, digits and '_'",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, \"a.b\"]\n    delimiter: \"|\"\n"),
+        "may use only letters, digits and '_'",
+    );
+    assert_valid(&yaml("    fields: [hid, slug_2]\n    delimiter: \"|\"\n"));
+}

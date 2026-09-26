@@ -1195,6 +1195,11 @@ chapter_list:
 
 Codegen decodes the incoming `manga_id`/`chapter_id` function argument once at the top of the method and binds one local per referenced subfield (sanitized to `<role>_<field>`, since `.` is not a valid Rust identifier character). Only roles actually referenced by an endpoint's `route`/`queries` incur a decode call.
 
+An incoming id that does not decode (bad encoding, or fewer delimiter-separated parts than declared
+fields) fails the request with an extension parse error naming the argument, the id and the role.
+Both the interpreted and the generated extension report it this way; neither sends a request with
+the placeholder left unresolved.
+
 #### Cache Namespaces
 
 The top-level `cache` block declares the namespaces an extension's hook scripts may store values
@@ -2015,6 +2020,9 @@ The `kani-cli validate` command checks:
     A name becomes a file under the generated crate's `src/scripts/` and a Rust identifier, so a
     separator could write outside that directory and `a-b`/`a_b` would collide. Code generation
     refuses such a name even if validation is bypassed.
+21. **`id_encoding`:** each declared role must list at least one field; field names must be
+    non-empty, unique within the role, and use only letters, digits and `_`; a role with more than
+    one field must have a non-empty `delimiter`.
 
 ### 3.10 Scripting Hooks
 
