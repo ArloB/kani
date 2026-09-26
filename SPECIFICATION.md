@@ -1998,7 +1998,7 @@ The `kani-cli validate` command checks:
 11. **`filter_format`:** `array_separator` must not be empty.
 12. **`options_ref`:** every filter or preference `options_ref` must resolve to a declared `option_sets` entry.
 13. **Range filters:** `int_range`/`date_range` filters must declare both `min` and `max`.
-14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days.
+14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days. Each fetched set's effective cache key (`cache.key`, or the set's name when it has no `cache` block) must be unique among the source's fetched sets, since they share the `fetched_opts:{source_id}` namespace.
 15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and match a recognized PNG/WebP/SVG signature.
 16. **`metadata.rate_limit.rps`:** must be greater than 0.
 17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.

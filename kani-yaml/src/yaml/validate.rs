@@ -337,6 +337,22 @@ fn validate_filters_and_option_sets(
         }
     }
 
+    let mut cache_keys: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (name, def) in option_sets {
+        if let OptionSetDef::Fetched { options_fetched_by } = def {
+            let key = options_fetched_by
+                .cache
+                .as_ref()
+                .map_or(name.as_str(), |c| c.key.as_str());
+            if let Some(other) = cache_keys.insert(key, name) {
+                errors.push(YamlError::Validation(format!(
+                    "option_sets.{name}: cache key '{key}' is also used by option_sets.{other}; \
+                     fetched option sets share one cache namespace, so each needs its own key"
+                )));
+            }
+        }
+    }
+
     for (name, def) in option_sets {
         if name.is_empty() {
             errors.push(YamlError::Validation(

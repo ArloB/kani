@@ -1623,3 +1623,38 @@ fn script_names_that_could_escape_or_collide_are_refused() {
         "{METADATA_BASE}browser_scripts:\n  harvest_cipher_2: \"passPayload('{{}}')\"\n"
     ));
 }
+
+fn fetched_set(name: &str, cache_key: Option<&str>) -> String {
+    let cache = cache_key
+        .map(|k| format!("      cache:\n        ttl: 600\n        key: {k}\n"))
+        .unwrap_or_default();
+    format!(
+        "  {name}:\n    options_fetched_by:\n      route: \"https://example.com/api/{name}\"\n      \
+         type: json\n      container: /items\n      fields:\n        name: /label\n        \
+         value: /slug\n{cache}"
+    )
+}
+
+#[test]
+fn fetched_option_sets_cannot_share_a_cache_key() {
+    let yaml = |a: String, b: String| format!("{METADATA_BASE}option_sets:\n{a}{b}");
+
+    assert_invalid_containing(
+        &yaml(
+            fetched_set("genres", Some("v1")),
+            fetched_set("tags", Some("v1")),
+        ),
+        "cache key 'v1' is also used by",
+    );
+    assert_invalid_containing(
+        &yaml(
+            fetched_set("genres", Some("tags")),
+            fetched_set("tags", None),
+        ),
+        "cache key 'tags' is also used by",
+    );
+    assert_valid(&yaml(
+        fetched_set("genres", Some("genres-v1")),
+        fetched_set("tags", None),
+    ));
+}
