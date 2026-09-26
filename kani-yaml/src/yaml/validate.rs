@@ -1065,6 +1065,10 @@ fn validate_endpoint(
             errors.push(YamlError::Validation(format!(
                 "endpoints.{name}: required field '{req}' is missing"
             )));
+        } else if body.fields.get(*req).is_some_and(|def| def.optional()) {
+            errors.push(YamlError::Validation(format!(
+                "endpoints.{name}.fields.{req}: a required field cannot be optional"
+            )));
         }
     }
 

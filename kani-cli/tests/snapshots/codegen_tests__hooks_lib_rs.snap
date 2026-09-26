@@ -130,7 +130,8 @@ impl MangaExtension for HooksTest {
             kani_shared::unpack::HasNextPage::FromScalar,
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("popular"))
     }
 
     fn search_manga(

@@ -84,7 +84,8 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::Static(false),
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("popular"))
     }
 
     fn search_manga(
@@ -122,7 +123,8 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::FromScalar,
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("search"))
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
@@ -162,7 +164,8 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::Static(false),
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("chapter_list"))
     }
 
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {

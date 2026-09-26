@@ -2002,7 +2002,20 @@ The `kani-cli validate` command checks:
 3. **Version format:** Must be valid semver.
 4. **Base URL format:** Must be a valid URL with scheme.
 5. **DSL syntax:** All DSL strings must parse without errors.
-6. **Field completeness:** For `manga_details`, the required fields are `id`, `title`, `status`. For `chapter_list`, the required fields are `id`, `number`, `language`. For `pages`, the required fields are `index`, `url`, and `transform` is optional.
+6. **Field completeness:** every endpoint must declare its required row fields, and none of them
+   may be marked `optional: true`:
+
+   | Endpoint | Required fields |
+   |---|---|
+   | `popular`, `search` | `id`, `title` |
+   | `manga_details` | `id`, `title`, `status` |
+   | `chapter_list` | `id` (`number` defaults to `0`, `language` to `"en"`) |
+   | `pages` | `url`, `index` (`transform` is optional) |
+
+   A required field that evaluates to null fails the whole page. In `popular`, `search` and
+   `chapter_list`, a row whose required field evaluates to something other than a string or an
+   integer is skipped, and each page that skipped rows logs a warning with the count. The
+   interpreted and generated backends behave the same way.
 7. **Variable references:** All `$variable$` references in routes and queries must correspond to available function arguments or preference keys.
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
 9. **Filter mapping:** every `filter_mapping` key must be a filter id, or the group part (before `:`) of a grouped checkbox id such as `genre:Action`. An unmatched key is an error rather than silently sending nothing.

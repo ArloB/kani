@@ -1699,3 +1699,30 @@ fn id_encoding_definitions_that_cannot_round_trip_are_refused() {
     );
     assert_valid(&yaml("    fields: [hid, slug_2]\n    delimiter: \"|\"\n"));
 }
+
+#[test]
+fn a_required_row_field_cannot_be_optional() {
+    let yaml = |endpoint: &str, field: &str| {
+        let plain: String = ["id", "title", "status"]
+            .iter()
+            .filter(|f| **f != field)
+            .map(|f| format!("      {f}: 'dom(\".{f}\").text()'\n"))
+            .collect();
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/x\"\n    fields:\n{plain}      \
+             {field}:\n        expr: 'dom(\".{field}\").text()'\n        optional: true\n"
+        )
+    };
+    for (endpoint, field) in [
+        ("popular", "id"),
+        ("search", "title"),
+        ("manga_details", "status"),
+        ("chapter_list", "id"),
+    ] {
+        assert_invalid_containing(
+            &yaml(endpoint, field),
+            &format!("endpoints.{endpoint}.fields.{field}: a required field cannot be optional"),
+        );
+    }
+    assert_valid(&yaml("search", "cover_url"));
+}

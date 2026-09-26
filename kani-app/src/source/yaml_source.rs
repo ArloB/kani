@@ -607,7 +607,7 @@ impl YamlSource {
                     ("page_size", &page_size.to_string()),
                 ]);
                 let result = self.eval_endpoint(ep, "popular", &args, filters).await?;
-                Ok(unpack_manga_list(&result, ep))
+                Ok(unpack_manga_list(&result, ep, "popular"))
             }
             None => Err(Error::Extension(
                 kani_shared::extension::ExtensionError::parse(
@@ -637,7 +637,7 @@ impl YamlSource {
             ("page_size", &page_size_str),
         ]);
         let result = self.eval_endpoint(ep, "search", &args, filters).await?;
-        Ok(unpack_manga_list(&result, ep))
+        Ok(unpack_manga_list(&result, ep, "search"))
     }
 
     pub async fn search_manga(
@@ -690,7 +690,7 @@ impl YamlSource {
             ("sort", sort_str),
         ]);
         let result = self.eval_endpoint(ep, "chapter_list", &args, &[]).await?;
-        Ok(unpack_chapter_list(&result, ep))
+        Ok(unpack_chapter_list(&result, ep, "chapter_list"))
     }
 
     pub async fn get_pages(&self, manga_id: &str, chapter_id: &str) -> Result<Chapter> {
@@ -941,8 +941,24 @@ async fn deduplicate_for_each_rows(
     Ok(())
 }
 
-fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
-    kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
+fn unpack_manga_list(
+    result: &serde_json::Value,
+    ep: &kani_yaml::ValidatedEndpoint,
+    endpoint: &str,
+) -> MangaList {
+    let unpacked =
+        kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep), &[]);
+    warn_skipped_rows(endpoint, unpacked.skipped);
+    unpacked.value.into()
+}
+
+fn warn_skipped_rows(endpoint: &str, skipped: usize) {
+    if skipped > 0 {
+        tracing::warn!(
+            "{}",
+            kani_shared::unpack::skipped_rows_message(endpoint, skipped)
+        );
+    }
 }
 
 /// Graft function-argument fields (`id: "$manga_id$"`) onto each extracted row.
@@ -1014,8 +1030,12 @@ fn unpack_manga_info(result: &serde_json::Value) -> Result<MangaInfo> {
 fn unpack_chapter_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
+    endpoint: &str,
 ) -> ChapterList {
-    kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
+    let unpacked =
+        kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep), &[]);
+    warn_skipped_rows(endpoint, unpacked.skipped);
+    unpacked.value.into()
 }
 
 fn unpack_chapter(result: &serde_json::Value) -> Chapter {

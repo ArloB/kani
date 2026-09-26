@@ -157,7 +157,8 @@ impl MangaExtension for TestIdEncoding {
             kani_shared::unpack::HasNextPage::Static(false),
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("chapter_list"))
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {
