@@ -121,7 +121,7 @@ pub struct ChapterSortOptionYaml {
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 fn default_schema_version() -> u32 {
-    CURRENT_SCHEMA_VERSION
+    1
 }
 
 #[derive(Debug, Deserialize, Default)]

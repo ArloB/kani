@@ -1726,3 +1726,25 @@ fn a_required_row_field_cannot_be_optional() {
     }
     assert_valid(&yaml("search", "cover_url"));
 }
+
+#[test]
+fn a_file_without_schema_version_is_version_one() {
+    let validated = validate_str(METADATA_BASE).unwrap();
+    assert_eq!(validated.schema_version, 1);
+}
+
+#[test]
+fn a_scaffolded_extension_states_its_schema_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_kani-cli"))
+        .args(["new", "pinned-source"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let yaml = std::fs::read_to_string(dir.path().join("pinned-source.yaml")).unwrap();
+    assert!(
+        yaml.lines().any(|l| l == "schema_version: 1"),
+        "scaffold must pin schema_version: {yaml}"
+    );
+}

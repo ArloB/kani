@@ -1062,7 +1062,7 @@ nsfw: bool              # Whether the source contains NSFW content (default: fal
 unrestricted_http: bool # Whether the extension needs to contact external hosts (default: false)
 
 # === Schema/compatibility versioning ===
-schema_version: integer            # YAML schema version this file targets (default: current; error if newer than this kani-cli supports)
+schema_version: integer            # YAML schema version this file targets (default: 1, always; error if newer than this kani-cli supports)
 min_kani_version: string           # Optional semver floor on the host version required to install this extension
 requires_capabilities: [string]    # Optional list of host capability flags this extension requires
 
@@ -1233,7 +1233,7 @@ accounts are a possible future feature, not a cache setting.
 The top-level `metadata` block carries the parts of an extension's identity that aren't required to construct a request or run extraction — icon, rate limiting, supported languages, a description, and reserved `sections` labels — plus the top-level `schema_version`/`min_kani_version`/`requires_capabilities` fields that gate installation:
 
 ```yaml
-schema_version: 1                  # Default: current schema version kani-cli supports
+schema_version: 1                  # Default: 1 — an unversioned file is always version 1
 min_kani_version: "0.5.0"          # Optional semver floor; install is rejected on older hosts
 requires_capabilities:
   - "unrestricted_http"            # Optional; install is rejected if the host lacks a listed capability
@@ -1719,7 +1719,7 @@ base_url: string                # Required. Base URL.
 language: string                # Optional. Default: "en".
 nsfw: bool                      # Optional. Default: false.
 unrestricted_http: bool         # Optional. Default: false.
-schema_version: integer         # Optional. Default: current schema version.
+schema_version: integer         # Optional. Default: 1, whatever version kani-cli supports.
 min_kani_version: string        # Optional. Semver floor on the host version.
 requires_capabilities: [string] # Optional. Host capability flags required to install.
 
@@ -2027,7 +2027,8 @@ The `kani-cli validate` command checks:
 15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and match a recognized PNG/WebP/SVG signature.
 16. **`metadata.rate_limit.rps`:** must be greater than 0.
 17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.
-18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports.
+18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports. When omitted
+    it is 1, so a later schema version never reinterprets a file written without one.
 19. **`min_kani_version`:** when present, must be a valid semver version string.
 20. **Script names:** every `browser_scripts` and `scripts.pure` key must match `[a-z][a-z0-9_]*`.
     A name becomes a file under the generated crate's `src/scripts/` and a Rust identifier, so a
