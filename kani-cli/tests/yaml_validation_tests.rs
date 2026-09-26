@@ -1658,3 +1658,18 @@ fn fetched_option_sets_cannot_share_a_cache_key() {
         fetched_set("tags", None),
     ));
 }
+
+#[test]
+fn a_filter_mapping_key_must_name_a_filter_group() {
+    let yaml = |mapping_key: &str| {
+        format!(
+            "{METADATA_BASE}filters:\n  - id: \"genre:Action\"\n    name: Action\n    type: checkbox\n  \
+             - id: \"genre:Adventure\"\n    name: Adventure\n    type: checkbox\n\
+             endpoints:\n  search:\n    route: \"/s\"\n    filter_mapping:\n      \
+             {mapping_key}: genre\n    fields:\n      id: 'dom(\".id\").text()'\n      \
+             title: 'dom(\".t\").text()'\n"
+        )
+    };
+    assert_valid(&yaml("genre"));
+    assert_invalid_containing(&yaml("genres"), "no filter has id 'genres'");
+}

@@ -201,7 +201,7 @@ pub fn apply_filters(
                     };
                     out.push((param.clone(), v));
                 }
-                FilterState::Checkbox(false) if !omit_empty => {
+                FilterState::Checkbox(false) if !omit_empty && action.is_empty() => {
                     out.push((param.clone(), bool_literal(bool_fmt, false).to_string()));
                 }
                 FilterState::Multiselect(values) => match array_fmt {
@@ -280,6 +280,31 @@ mod tests {
     fn build_url_errors_on_unresolved_placeholder() {
         let err = build_url("https://s.example", "/list/$page$", &args(&[])).unwrap_err();
         assert!(err.contains("page"));
+    }
+
+    #[test]
+    fn checked_grouped_checkboxes_each_send_their_value_and_unchecked_send_nothing() {
+        let mapping = vec![("genre".to_string(), FilterMapping::Simple("genre".into()))];
+        let format = FilterFormat {
+            omit_empty: false,
+            ..FilterFormat::default()
+        };
+        let boxes = [("Action", true), ("Adventure", true), ("Comedy", false)];
+        let filters: Vec<ActiveFilter> = boxes
+            .iter()
+            .map(|(value, on)| ActiveFilter {
+                filter_name: format!("genre:{value}"),
+                state: FilterState::Checkbox(*on),
+            })
+            .collect();
+
+        assert_eq!(
+            apply_filters(&mapping, Some(&format), &filters),
+            vec![
+                ("genre".to_string(), "Action".to_string()),
+                ("genre".to_string(), "Adventure".to_string()),
+            ]
+        );
     }
 
     #[test]

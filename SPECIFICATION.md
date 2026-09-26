@@ -1638,6 +1638,13 @@ search:
   fields: { ... }
 ```
 
+**Grouped checkboxes.** A checkbox id of the form `group:value` belongs to filter group `group`.
+Each checked box in a group sends one `param=value` pair, in the order the filters are listed, and
+an unchecked grouped box sends nothing, whatever `omit_empty` says. With the mapping `genre: genre`
+and both `genre:Action` and `genre:Adventure` checked, the request carries
+`genre=Action&genre=Adventure`. A plain checkbox id (no `:`) sends its `bool_format` literal
+instead.
+
 **`filter_format` (optional, per-endpoint):** controls how filter values are serialized into query parameters when the default encoding doesn't match the source's API:
 
 ```yaml
@@ -1647,7 +1654,7 @@ search:
     genres: genre
   filter_format:
     multiselect: bracket        # "default" (repeated param) | "bracket" (param[]) | "comma_separated" | "repeated"
-    omit_empty: false            # Default: true. When false, emits an explicit query for an unchecked checkbox.
+    omit_empty: false            # Default: true. When false, an unchecked plain checkbox sends its "false" literal (grouped boxes never send anything when unchecked).
     bool_format: one_zero        # "true_false" (default) | "one_zero" | "yes_no"
     array_separator: "|"         # Separator used by "comma_separated". Default: ",". Must not be empty.
   container: "..."
@@ -1993,7 +2000,7 @@ The `kani-cli validate` command checks:
 6. **Field completeness:** For `manga_details`, the required fields are `id`, `title`, `status`. For `chapter_list`, the required fields are `id`, `number`, `language`. For `pages`, the required fields are `index`, `url`, and `transform` is optional.
 7. **Variable references:** All `$variable$` references in routes and queries must correspond to available function arguments or preference keys.
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
-9. **Filter mapping:** All filter mapping keys must correspond to declared filter group IDs.
+9. **Filter mapping:** every `filter_mapping` key must be a filter id, or the group part (before `:`) of a grouped checkbox id such as `genre:Action`. An unmatched key is an error rather than silently sending nothing.
 10. **No unused bindings:** Warn if a top-level binding is declared but never referenced.
 11. **`filter_format`:** `array_separator` must not be empty.
 12. **`options_ref`:** every filter or preference `options_ref` must resolve to a declared `option_sets` entry.

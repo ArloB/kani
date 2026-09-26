@@ -145,6 +145,7 @@ pub fn validate(
     errors.append(&mut validate_browser_scripts(&ext.browser_scripts));
     errors.append(&mut validate_pure_scripts(&ext.scripts.pure));
     errors.append(&mut validate_hook_scripts(ext));
+    errors.append(&mut validate_filter_mapping_groups(ext));
 
     // Validate filter IDs: non-empty, no whitespace, no leading/trailing ':', at most one ':'.
     for filter in &ext.filters {
@@ -1499,6 +1500,34 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<YamlError> {
         }
     }
     errors
+}
+
+/// Every `filter_mapping` key must name a filter group: a filter id, or the part before `:` in a
+/// grouped checkbox id such as `genre:Action`. An unmatched key would be skipped silently.
+fn validate_filter_mapping_groups(ext: &super::schema::YamlExtension) -> Vec<YamlError> {
+    let groups: std::collections::BTreeSet<&str> = ext
+        .filters
+        .iter()
+        .map(|f| {
+            f.id.split_once(':')
+                .map_or(f.id.as_str(), |(group, _)| group)
+        })
+        .collect();
+    endpoint_iter(ext)
+        .into_iter()
+        .flat_map(|(name, ep)| {
+            ep.filter_mapping
+                .keys()
+                .filter(|key| !groups.contains(key.as_str()))
+                .map(move |key| {
+                    YamlError::Validation(format!(
+                        "endpoints.{name}.filter_mapping.{key}: no filter has id '{key}' or an id \
+                         of the form '{key}:<value>'"
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn endpoint_iter(ext: &super::schema::YamlExtension) -> Vec<(&str, &super::schema::EndpointBody)> {
