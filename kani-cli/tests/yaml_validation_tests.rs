@@ -1791,3 +1791,30 @@ fn paging_keys_are_refused_on_endpoints_that_return_one_result() {
     let list = "      id: 'dom(\".id\").text()'\n      title: 'dom(\".t\").text()'\n";
     assert_valid(&yaml("search", list, "total_pages: 3"));
 }
+
+#[test]
+fn arithmetic_in_a_request_template_is_refused_but_text_templates_are_not() {
+    let yaml = |route: &str, key: &str, value: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"{route}\"\n    {key}:\n      \
+             v: \"{value}\"\n    fields:\n      id: 'dom(\".id\").text()'\n      \
+             title: 'dom(\".t\").text()'\n"
+        )
+    };
+    for value in ["$page_size$ * ($page$ - 1)", "$page$+1", "($page$)"] {
+        for key in ["queries", "headers"] {
+            assert_invalid_containing(
+                &yaml("/s", key, value),
+                &format!("{key}.v: {value:?} is arithmetic"),
+            );
+        }
+    }
+    assert_invalid_containing(
+        &yaml("$page$*2", "queries", "x"),
+        "route: \"$page$*2\" is arithmetic",
+    );
+    for value in ["id-$query$", "$query$ extra", "$query$-$page$", "$query$"] {
+        assert_valid(&yaml("/s/$query$/2", "queries", value));
+    }
+    assert_valid(&yaml("/$query$", "headers", "Bearer $query$"));
+}

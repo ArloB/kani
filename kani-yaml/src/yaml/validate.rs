@@ -716,10 +716,7 @@ fn collect_composite_id_decodes(
 
     let mut vars = extract_dollar_vars(route);
     for v in queries.values() {
-        let trimmed = v.trim();
-        if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2 {
-            vars.push(trimmed[1..trimmed.len() - 1].to_string());
-        }
+        vars.extend(extract_dollar_vars(v));
     }
 
     let mut by_role: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
@@ -912,6 +909,7 @@ fn validate_endpoint(
             Some(r) => {
                 let mut route_errs = validate_route_vars(r, name, fn_args, id_encoding);
                 errors.append(&mut route_errs);
+                errors.extend(arithmetic_template_error(r, name, "route", "+-*"));
                 r.clone()
             }
             None => {
@@ -933,6 +931,14 @@ fn validate_endpoint(
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    for (key, value) in &headers {
+        errors.extend(arithmetic_template_error(
+            value,
+            name,
+            &format!("headers.{key}"),
+            "+-*/",
+        ));
+    }
 
     let queries = match build_query_entries(&body.queries, name, fn_args, id_encoding) {
         Ok(q) => q,
@@ -1325,6 +1331,31 @@ fn validate_route_vars(
         .collect()
 }
 
+fn arithmetic_template_error(
+    value: &str,
+    endpoint: &str,
+    location: &str,
+    operators: &str,
+) -> Option<YamlError> {
+    let (texts, vars) = kani_shared::request::template_parts(value);
+    let rest: String = texts.concat();
+    let only_arithmetic = rest.chars().all(|c| {
+        c.is_ascii_digit() || c.is_whitespace() || "()".contains(c) || operators.contains(c)
+    });
+    let has_operator = rest
+        .chars()
+        .any(|c| "()".contains(c) || operators.contains(c));
+    let reads_as_arithmetic = rest
+        .chars()
+        .any(|c| c.is_ascii_digit() || "()*".contains(c));
+    (!vars.is_empty() && only_arithmetic && has_operator && reads_as_arithmetic).then(|| {
+        YamlError::Validation(format!(
+            "endpoints.{endpoint}.{location}: {value:?} is arithmetic, which request templates \
+             do not evaluate; use `pagination` for offsets"
+        ))
+    })
+}
+
 fn build_query_entries(
     queries: &BTreeMap<String, String>,
     endpoint: &str,
@@ -1335,18 +1366,24 @@ fn build_query_entries(
     let mut errors = Vec::new();
 
     for (key, value) in queries {
-        let trimmed = value.trim();
-        let query_value = if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2
-        {
-            let var = &trimmed[1..trimmed.len() - 1];
-            let location = format!("queries.{key}");
-            if let Some(err) = validate_dollar_var(var, endpoint, &location, fn_args, id_encoding) {
-                errors.push(err);
-                continue;
-            }
-            QueryValue::Arg(var.to_string())
-        } else {
-            QueryValue::Static(value.clone())
+        let location = format!("queries.{key}");
+        if let Some(err) = arithmetic_template_error(value, endpoint, &location, "+-*/") {
+            errors.push(err);
+            continue;
+        }
+        let (texts, vars) = kani_shared::request::template_parts(value.trim());
+        let var_errors: Vec<YamlError> = vars
+            .iter()
+            .filter_map(|var| validate_dollar_var(var, endpoint, &location, fn_args, id_encoding))
+            .collect();
+        if !var_errors.is_empty() {
+            errors.extend(var_errors);
+            continue;
+        }
+        let query_value = match vars.as_slice() {
+            [] => QueryValue::Static(value.clone()),
+            [var] if texts.iter().all(String::is_empty) => QueryValue::Arg(var.clone()),
+            _ => QueryValue::Template(value.clone()),
         };
         entries.push(QueryEntry {
             key: key.clone(),

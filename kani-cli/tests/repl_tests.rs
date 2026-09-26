@@ -109,7 +109,7 @@ fn resolve_builds_the_request_the_host_would_send() {
 
     assert_eq!(
         resolved.url(),
-        "https://api.example.com/items?order=score&rating=safe&tags[]=action&tags[]=drama&page=3"
+        "https://api.example.com/items?from=page-3&order=score&rating=safe&tags[]=action&tags[]=drama&page=3"
     );
 }
 

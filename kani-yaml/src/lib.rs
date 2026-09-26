@@ -191,6 +191,7 @@ impl From<&yaml::model::QueryEntry> for kani_shared::request::QuerySpec {
             value: match &e.value {
                 Y::Static(s) => kani_shared::request::QueryValue::Static(s.clone()),
                 Y::Arg(a) => kani_shared::request::QueryValue::Arg(a.clone()),
+                Y::Template(t) => kani_shared::request::QueryValue::Template(t.clone()),
             },
         }
     }

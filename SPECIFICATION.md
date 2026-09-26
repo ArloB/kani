@@ -1112,7 +1112,7 @@ Each endpoint corresponds to a method in the `manga-provider` WIT interface. The
 ```yaml
 endpoint_name:
   # --- Request construction ---
-  route: string           # URL path appended to base_url. Supports {variable} templates.
+  route: string           # URL path appended to base_url. Supports $variable$ placeholders.
   method: string          # HTTP method (default: "GET")
   headers:                # Additional headers (optional)
     Header-Name: value
@@ -1139,7 +1139,13 @@ endpoint_name:
 
 #### Variable Interpolation
 
-Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function arguments:
+Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function
+arguments. Replacement is textual: `id-$manga_id$` sends `id-abc`, and text around a placeholder is
+kept as written. Nothing is evaluated, so a value built only from placeholders, numbers, operators and
+parentheses, such as `$page$+1` or `$page_size$ * ($page$ - 1)`, is refused at validation rather than
+sent as `2+1`. Compute offsets with `pagination` (§3.3) instead. A join such as `$hid$-$slug$`, with no
+number, parenthesis or `*`, is an ordinary template. In a route, `/` is a path separator, not an
+operator.
 
 | Variable | Available In | Description |
 |----------|-------------|-------------|
@@ -1375,9 +1381,12 @@ Otherwise define it as a full endpoint. JSON API example:
 ```yaml
 popular:
   route: "/manga"
+  pagination:
+    native_page_size: 32
+    offset_param: offset
+    offset_type: item
   queries:
-    limit: $page_size$
-    offset: "$page_size$ * ($page$ - 1)"
+    limit: "32"
     includes[]: cover_art
     order[followedCount]: desc
   type: json
@@ -2042,6 +2051,9 @@ The `kani-cli validate` command checks:
 22. **Paging keys:** `pagination`, `has_next_page` and `total_pages` are accepted only on `popular`,
     `search` and `chapter_list`. `manga_details` and `pages` return one result, so these keys are
     refused there rather than ignored.
+23. **Arithmetic templates:** a `route`, query or header value made only of placeholders, number
+    literals, operators and parentheses, containing a number, a parenthesis or `*`, is refused. See
+    [Variable Interpolation](#variable-interpolation).
 
 ### 3.10 Scripting Hooks
 

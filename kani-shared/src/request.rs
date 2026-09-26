@@ -18,6 +18,54 @@ pub enum QueryValue {
     Static(String),
     /// A `$var$` placeholder resolved from the runtime args (by the dot-replaced key).
     Arg(String),
+    /// Text with `$var$` placeholders, each replaced by its argument's value.
+    Template(String),
+}
+
+/// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
+/// names, starting and ending with text. A `$` that opens no placeholder stays literal.
+pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {
+    let mut texts = vec![String::new()];
+    let mut vars = Vec::new();
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'.')
+            {
+                end += 1;
+            }
+            if end < bytes.len() && bytes[end] == b'$' && end > start {
+                vars.push(template[start..end].to_string());
+                texts.push(String::new());
+                i = end + 1;
+                continue;
+            }
+        }
+        let ch = template[i..].chars().next().unwrap_or_default();
+        if let Some(last) = texts.last_mut() {
+            last.push(ch);
+        }
+        i += ch.len_utf8();
+    }
+    (texts, vars)
+}
+
+/// Replaces each `$var$` in `template` with its argument (looked up by the dot-replaced key),
+/// as plain text. `None` when an argument is missing, so a placeholder never reaches the wire.
+pub fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String> {
+    let (texts, vars) = template_parts(template);
+    let mut out = String::with_capacity(template.len());
+    for (i, text) in texts.iter().enumerate() {
+        out.push_str(text);
+        if let Some(var) = vars.get(i) {
+            out.push_str(args.get(&var.replace('.', "_"))?);
+        }
+    }
+    Some(out)
 }
 
 /// One declared query parameter.
@@ -157,6 +205,7 @@ pub fn build_queries(
             let val = match &e.value {
                 QueryValue::Static(s) => s.clone(),
                 QueryValue::Arg(name) => args.get(name.as_str())?.clone(),
+                QueryValue::Template(template) => interpolate(template, args)?,
             };
             Some((e.key.clone(), val))
         })
