@@ -1608,3 +1608,18 @@ fn an_id_outside_the_documented_form_is_rejected() {
         );
     }
 }
+
+#[test]
+fn script_names_that_could_escape_or_collide_are_refused() {
+    for bad in ["../x", "a-b", "a\"b", "Upper", "1st", ""] {
+        let quoted = serde_json::to_string(bad).unwrap();
+        let browser =
+            format!("{METADATA_BASE}browser_scripts:\n  {quoted}: \"passPayload('{{}}')\"\n");
+        assert_invalid_containing(&browser, "must match [a-z][a-z0-9_]*");
+        let pure = format!("{METADATA_BASE}scripts:\n  pure:\n    {quoted}: \"fn f(x) {{ x }}\"\n");
+        assert_invalid_containing(&pure, "must match [a-z][a-z0-9_]*");
+    }
+    assert_valid(&format!(
+        "{METADATA_BASE}browser_scripts:\n  harvest_cipher_2: \"passPayload('{{}}')\"\n"
+    ));
+}

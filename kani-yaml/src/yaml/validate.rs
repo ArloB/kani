@@ -1356,16 +1356,29 @@ fn build_query_entries(
     }
 }
 
+/// Script names become file names and Rust identifiers in generated crates, so they are held to
+/// one grammar, `[a-z][a-z0-9_]*`, under which distinct names can never collide.
+pub fn is_script_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+fn script_name_error(block: &str, name: &str) -> Option<YamlError> {
+    (!is_script_name(name)).then(|| {
+        YamlError::Validation(format!(
+            "{block}: script name {name:?} must match [a-z][a-z0-9_]* (it becomes a file name \
+             and a Rust identifier)"
+        ))
+    })
+}
+
 fn validate_browser_scripts(
     scripts: &std::collections::BTreeMap<String, String>,
 ) -> Vec<YamlError> {
     let mut errors = Vec::new();
     for (name, src) in scripts {
-        if name.is_empty() {
-            errors.push(YamlError::Validation(
-                "browser_scripts: script name must not be empty".to_string(),
-            ));
-        }
+        errors.extend(script_name_error("browser_scripts", name));
         if src.is_empty() {
             errors.push(YamlError::Validation(format!(
                 "browser_scripts.{name}: script source must not be empty"
@@ -1383,6 +1396,7 @@ fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -
     let mut errors = Vec::new();
     let engine = make_validation_sandbox();
     for (name, src) in scripts {
+        errors.extend(script_name_error("scripts.pure", name));
         if name.is_empty() {
             errors.push(YamlError::Validation(
                 "scripts.pure: function name must not be empty".to_string(),

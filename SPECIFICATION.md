@@ -1975,7 +1975,7 @@ endpoints:
 **Validation rules for `via: browser_payload`:**
 - `page_url` must be present and non-empty.
 - `script` must be present, non-empty, and declared in `browser_scripts`.
-- `browser_scripts` entries must have non-empty names and non-empty source.
+- `browser_scripts` entries must have non-empty source, and names matching `[a-z][a-z0-9_]*` (rule 20).
 - Scripts that do not call `passPayload` produce a warning (not an error).
 
 ### 3.9 YAML Validation Rules
@@ -2004,6 +2004,10 @@ The `kani-cli validate` command checks:
 17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.
 18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports.
 19. **`min_kani_version`:** when present, must be a valid semver version string.
+20. **Script names:** every `browser_scripts` and `scripts.pure` key must match `[a-z][a-z0-9_]*`.
+    A name becomes a file under the generated crate's `src/scripts/` and a Rust identifier, so a
+    separator could write outside that directory and `a-b`/`a_b` would collide. Code generation
+    refuses such a name even if validation is bypassed.
 
 ### 3.10 Scripting Hooks
 
