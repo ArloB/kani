@@ -1762,3 +1762,32 @@ fn an_svg_or_html_icon_is_refused() {
     let webp = base64::engine::general_purpose::STANDARD.encode(b"RIFF\x10\0\0\0WEBPVP8 ");
     assert_valid(&format!("{METADATA_BASE}metadata:\n  icon: \"{webp}\"\n"));
 }
+
+#[test]
+fn paging_keys_are_refused_on_endpoints_that_return_one_result() {
+    let yaml = |endpoint: &str, fields: &str, key: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/x\"\n    {key}\n    fields:\n{fields}"
+        )
+    };
+    let details = "      id: 'dom(\".id\").text()'\n      title: 'dom(\".t\").text()'\n      \
+                   status: 'dom(\".s\").text()'\n";
+    let pages = "      url: 'self.attr(\"src\")'\n      index: 'self.index()'\n";
+    for (endpoint, fields) in [("manga_details", details), ("pages", pages)] {
+        for (key, name) in [
+            ("has_next_page: true", "has_next_page"),
+            ("total_pages: 3", "total_pages"),
+            (
+                "pagination:\n      offset_type: page\n      offset_param: p\n      native_page_size: 20",
+                "pagination",
+            ),
+        ] {
+            assert_invalid_containing(
+                &yaml(endpoint, fields, key),
+                &format!("endpoints.{endpoint}.{name}: only popular, search and chapter_list page"),
+            );
+        }
+    }
+    let list = "      id: 'dom(\".id\").text()'\n      title: 'dom(\".t\").text()'\n";
+    assert_valid(&yaml("search", list, "total_pages: 3"));
+}

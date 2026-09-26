@@ -1061,6 +1061,21 @@ fn validate_endpoint(
         });
     }
 
+    if !matches!(name, "popular" | "search" | "chapter_list") {
+        for (key, set) in [
+            ("has_next_page", body.has_next_page.is_some()),
+            ("total_pages", body.total_pages.is_some()),
+            ("pagination", body.pagination.is_some()),
+        ] {
+            if set {
+                errors.push(YamlError::Validation(format!(
+                    "endpoints.{name}.{key}: only popular, search and chapter_list page, \
+                     so {name} cannot declare it"
+                )));
+            }
+        }
+    }
+
     let has_next_page = match &body.has_next_page {
         None => ValidatedHnp::Default,
         Some(HasNextPage::Static(b)) => ValidatedHnp::Static(*b),

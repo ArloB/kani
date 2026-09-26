@@ -2039,6 +2039,9 @@ The `kani-cli validate` command checks:
 21. **`id_encoding`:** each declared role must list at least one field; field names must be
     non-empty, unique within the role, and use only letters, digits and `_`; a role with more than
     one field must have a non-empty `delimiter`.
+22. **Paging keys:** `pagination`, `has_next_page` and `total_pages` are accepted only on `popular`,
+    `search` and `chapter_list`. `manga_details` and `pages` return one result, so these keys are
+    refused there rather than ignored.
 
 ### 3.10 Scripting Hooks
 
