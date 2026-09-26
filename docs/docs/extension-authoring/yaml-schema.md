@@ -89,7 +89,8 @@ Validate examples rather than treating this page as a substitute for the parser.
 
 ## Metadata and rate limits
 
-`metadata.icon` accepts a base64 PNG, WebP, or SVG up to the validator's 64 KiB decoded limit.
+`metadata.icon` accepts a base64 PNG or WebP image up to 64 KiB decoded; SVG and other markup
+are refused.
 `metadata.languages` can advertise more than the primary language. Sections describe named source
 views.
 

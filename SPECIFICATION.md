@@ -1239,7 +1239,7 @@ requires_capabilities:
   - "unrestricted_http"            # Optional; install is rejected if the host lacks a listed capability
 
 metadata:
-  icon: "<base64-encoded PNG/WebP/SVG, ≤ 64KB decoded>"
+  icon: "<base64-encoded PNG or WebP, ≤ 64KB decoded>"
   rate_limit:
     rps: 2.0                       # Requests per second. Default: 2.0
     burst: 8                       # Default: 8
@@ -1725,7 +1725,7 @@ requires_capabilities: [string] # Optional. Host capability flags required to in
 
 # Extension metadata (optional)
 metadata:
-  icon: string                  # Optional. Base64-encoded PNG/WebP/SVG, ≤ 64KB decoded.
+  icon: string                  # Optional. Base64-encoded PNG or WebP, ≤ 64KB decoded.
   rate_limit:
     rps: number                 # Optional. Default: 2.0. Must be > 0.
     burst: integer              # Optional. Default: 8.
@@ -2024,7 +2024,9 @@ The `kani-cli validate` command checks:
 12. **`options_ref`:** every filter or preference `options_ref` must resolve to a declared `option_sets` entry.
 13. **Range filters:** `int_range`/`date_range` filters must declare both `min` and `max`.
 14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days. Each fetched set's effective cache key (`cache.key`, or the set's name when it has no `cache` block) must be unique among the source's fetched sets, since they share the `fetched_opts:{source_id}` namespace.
-15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and match a recognized PNG/WebP/SVG signature.
+15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and start with a PNG or WebP
+    signature. The same check applies to a WASM extension's metadata icon at install. Markup such as
+    SVG is refused, since clients render the icon from a `data:` URL typed by those bytes.
 16. **`metadata.rate_limit.rps`:** must be greater than 0.
 17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.
 18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports. When omitted

@@ -14,6 +14,7 @@ import { navigate } from '../router.js';
 import { t } from '../i18n.js';
 import { StatusDot } from './status-dot.js';
 import { Tabs } from './tabs.js';
+import { sourceIconSrc } from '../source-icon.js';
 const html = htm.bind(h);
 
 /** True if a filename / URL path points at an interpreted-YAML extension. */
@@ -260,8 +261,8 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                 }}
               >
                 <div class="flex items-center gap-3 border-b border-border-subtle last:border-0 w-full">
-                    ${src.icon
-                      ? html`<img src=${`data:image/png;base64,${src.icon}`} alt="" class="avatar shrink-0 object-contain" style="background:var(--color-surface-3)" />`
+                    ${sourceIconSrc(src.icon)
+                      ? html`<img src=${sourceIconSrc(src.icon)} alt="" class="avatar shrink-0 object-contain" style="background:var(--color-surface-3)" />`
                       : html`<span
                           class="avatar shrink-0"
                           style="background:var(--color-surface-3);color:var(--color-text-muted)"

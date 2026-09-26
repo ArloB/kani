@@ -1179,7 +1179,7 @@ metadata:
             METADATA_BASE,
             base64_text("just some bytes that aren't an image"),
         ),
-        "do not match a supported",
+        "must be a PNG or WebP image",
     );
 }
 
@@ -1194,7 +1194,7 @@ metadata:
 "#,
             METADATA_BASE, huge
         ),
-        "exceeding the",
+        "over the 64 KiB limit",
     );
 }
 
@@ -1747,4 +1747,18 @@ fn a_scaffolded_extension_states_its_schema_version() {
         yaml.lines().any(|l| l == "schema_version: 1"),
         "scaffold must pin schema_version: {yaml}"
     );
+}
+
+#[test]
+fn an_svg_or_html_icon_is_refused() {
+    use base64::Engine;
+    for markup in ["<svg xmlns='http://www.w3.org/2000/svg'/>", "<html></html>"] {
+        let icon = base64::engine::general_purpose::STANDARD.encode(markup);
+        assert_invalid_containing(
+            &format!("{METADATA_BASE}metadata:\n  icon: \"{icon}\"\n"),
+            "PNG or WebP",
+        );
+    }
+    let webp = base64::engine::general_purpose::STANDARD.encode(b"RIFF\x10\0\0\0WEBPVP8 ");
+    assert_valid(&format!("{METADATA_BASE}metadata:\n  icon: \"{webp}\"\n"));
 }

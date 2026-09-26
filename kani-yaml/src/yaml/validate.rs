@@ -456,40 +456,21 @@ fn validate_cache(
 }
 
 /// Validates the optional `metadata` block: icon must be valid base64 decoding
-/// to a PNG/WebP/SVG payload no larger than 64KB; rate_limit.rps must be
+/// to a PNG/WebP payload no larger than 64KB; rate_limit.rps must be
 /// positive; section ids must be non-empty.
 fn validate_metadata(
     metadata: Option<&MetadataBlock>,
 ) -> Result<ValidatedMetadata, Vec<YamlError>> {
-    const MAX_ICON_BYTES: usize = 64 * 1024;
     let mut errors = Vec::new();
 
     let Some(metadata) = metadata else {
         return Ok(ValidatedMetadata::default());
     };
 
-    if let Some(icon) = &metadata.icon {
-        use base64::Engine;
-        match base64::engine::general_purpose::STANDARD.decode(icon) {
-            Ok(bytes) => {
-                if bytes.len() > MAX_ICON_BYTES {
-                    errors.push(YamlError::Validation(format!(
-                        "metadata.icon: decoded icon is {} bytes, exceeding the {MAX_ICON_BYTES}-byte limit",
-                        bytes.len()
-                    )));
-                }
-                if !is_known_image_format(&bytes) {
-                    errors.push(YamlError::Validation(
-                        "metadata.icon: decoded bytes do not match a supported PNG/WebP/SVG signature".to_string(),
-                    ));
-                }
-            }
-            Err(e) => {
-                errors.push(YamlError::Validation(format!(
-                    "metadata.icon: not valid base64: {e}"
-                )));
-            }
-        }
+    if let Some(icon) = &metadata.icon
+        && let Err(e) = kani_shared::types::source_icon_mime(icon)
+    {
+        errors.push(YamlError::Validation(format!("metadata.icon: {e}")));
     }
 
     let rate_limit = metadata.rate_limit.as_ref().map(|cfg| {
@@ -536,23 +517,6 @@ fn validate_metadata(
     } else {
         Err(errors)
     }
-}
-
-/// Recognizes the magic bytes of the icon formats we support: PNG, WebP
-/// (RIFF....WEBP), and SVG (sniffed as UTF-8 text starting with `<`, ignoring
-/// leading whitespace/BOM).
-fn is_known_image_format(bytes: &[u8]) -> bool {
-    const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-    if bytes.starts_with(PNG_MAGIC) {
-        return true;
-    }
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return true;
-    }
-    let text = String::from_utf8_lossy(bytes);
-    text.trim_start_matches('\u{feff}')
-        .trim_start()
-        .starts_with('<')
 }
 
 /// Validates the `chapter_sort` block: `options` must be non-empty, each

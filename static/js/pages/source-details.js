@@ -24,6 +24,7 @@ import { PreferenceRow, PreferenceDetailView } from '../components/preference-ro
 import { TileSizeSelect } from '../components/tile-size-select.js';
 import { FALLBACK_PAGE_SIZE, MAX_PAGE_SIZE, gridCapacity, gridFitEnabled, observeCapacity } from '../grid-columns.js';
 import { Icon } from '../components/icon.js';
+import { sourceIconSrc } from '../source-icon.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { createSourcesHeaderActions } from '../components/sources-header.js';
 import { createErrorState } from '../components/error-state.js';
@@ -398,8 +399,8 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       <!-- 0. About -->
       <div class="flex flex-col gap-3">
         <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-4 flex items-start gap-4">
-          ${source.icon
-            ? html`<img src=${`data:image/png;base64,${source.icon}`} alt="" class="w-12 h-12 rounded-lg shrink-0 object-contain bg-surface-2" />`
+          ${sourceIconSrc(source.icon)
+            ? html`<img src=${sourceIconSrc(source.icon)} alt="" class="w-12 h-12 rounded-lg shrink-0 object-contain bg-surface-2" />`
             : html`<span class="w-12 h-12 rounded-lg shrink-0 flex items-center justify-center text-lg font-medium" style="background:var(--color-surface-3);color:var(--color-text-muted)">${(source.name ?? '?')[0]?.toUpperCase()}</span>`
           }
           <div class="flex flex-col gap-1.5 min-w-0">
