@@ -537,13 +537,6 @@ fn eval_json_expr<'a>(
                     .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null))
             }
 
-            Expr::ArrayLen { target } => {
-                eval_json_expr(target, doc, current, env, registry, budget)
-                    .await
-                    .and_then(|v| v.into_json("array_len"))
-                    .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0)))
-            }
-
             Expr::JsonKeys { target } => {
                 eval_json_expr(target, doc, current, env, registry, budget)
                     .await
@@ -610,41 +603,6 @@ fn eval_json_expr<'a>(
                     })
                     .map(|v| Value::Json(v.clone()))
                     .unwrap_or(Value::Null))
-            }
-
-            Expr::JsonArray(items) => {
-                let mut arr = Vec::with_capacity(items.len());
-                for item in items {
-                    let v = eval_json_expr(
-                        item,
-                        doc,
-                        current,
-                        env.clone(),
-                        registry,
-                        Arc::clone(&budget),
-                    )
-                    .await?;
-                    arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
-                }
-                Ok(Value::Json(serde_json::Value::Array(arr)))
-            }
-
-            Expr::JsonFold { target } => {
-                let items = eval_json_expr(target, doc, current, env, registry, budget)
-                    .await
-                    .and_then(|v| v.into_list("json_fold"))?;
-                let mut merged: Option<serde_json::Value> = None;
-                for item in items {
-                    let v = item.into_json("json_fold")?;
-                    if v.is_null() {
-                        continue;
-                    }
-                    merged = Some(match merged {
-                        None => v,
-                        Some(acc) => json_merge_two(acc, v)?,
-                    });
-                }
-                Ok(merged.map(Value::Json).unwrap_or(Value::Null))
             }
 
             _ => Err(format!(
@@ -815,36 +773,4 @@ async fn fetch_and_parse_json(
 ) -> Result<serde_json::Value, String> {
     let body = fetch_body(state, req).await?;
     serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))
-}
-
-fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_json::Value, String> {
-    use serde_json::Value as J;
-    match (a, b) {
-        (J::Object(mut ma), J::Object(mb)) => {
-            for (k, v) in mb {
-                ma.insert(k, v);
-            }
-            Ok(J::Object(ma))
-        }
-        (J::Array(mut va), J::Array(vb)) => {
-            va.extend(vb);
-            Ok(J::Array(va))
-        }
-        (a, b) => Err(format!(
-            "json_merge: cannot merge {} with {}",
-            type_str(&a),
-            type_str(&b)
-        )),
-    }
-}
-
-fn type_str(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "bool",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
 }

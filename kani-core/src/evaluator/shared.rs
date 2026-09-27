@@ -280,9 +280,13 @@ impl Value {
     pub(crate) fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
         match self {
             Value::List(v) => Ok(v),
-            Value::Json(serde_json::Value::Array(arr)) => {
-                Ok(arr.into_iter().map(Value::Json).collect())
-            }
+            Value::Json(serde_json::Value::Array(arr)) => Ok(arr
+                .into_iter()
+                .map(|v| match v {
+                    serde_json::Value::Null => Value::Null,
+                    v => Value::Json(v),
+                })
+                .collect()),
             _ => Err(format!("{}: expected a List", op)),
         }
     }
@@ -700,11 +704,51 @@ where
             .await,
         ),
 
+        Expr::ArrayLen { target } => Some(
+            recurse(target, env)
+                .await
+                .and_then(|v| v.into_json("array_len"))
+                .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
+        ),
+
+        Expr::JsonArray(items) => Some(
+            (async {
+                let mut arr = Vec::with_capacity(items.len());
+                for item in items {
+                    let v = recurse(item, env.clone()).await?;
+                    arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
+                }
+                Ok(Value::Json(serde_json::Value::Array(arr)))
+            })
+            .await,
+        ),
+
+        Expr::JsonFold { target } => Some(
+            (async {
+                let items = recurse(target, env)
+                    .await
+                    .and_then(|v| v.into_list("json_fold"))?;
+                let mut merged: Option<serde_json::Value> = None;
+                for item in items {
+                    let v = item.into_json("json_fold")?;
+                    if v.is_null() {
+                        continue;
+                    }
+                    merged = Some(match merged {
+                        None => v,
+                        Some(acc) => json_merge_two(acc, v)?,
+                    });
+                }
+                Ok(merged.map(Value::Json).unwrap_or(Value::Null))
+            })
+            .await,
+        ),
+
         Expr::Filter { target, filter } => Some(
             (async {
-                let items = recurse(target, env.clone())
-                    .await
-                    .and_then(|v| v.into_list("filter"))?;
+                let receiver = recurse(target, env.clone()).await?;
+                let json_array = matches!(receiver, Value::Json(serde_json::Value::Array(_)));
+                let items = receiver.into_list("filter")?;
                 if items.len() > limits.max_list_size {
                     return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
@@ -718,6 +762,14 @@ where
                         Value::Bool(false) | Value::Null => {}
                         _ => return Err("filter: predicate must return Bool".into()),
                     }
+                }
+                if json_array {
+                    return Ok(Value::Json(serde_json::Value::Array(
+                        results
+                            .into_iter()
+                            .map(|v| v.to_json().unwrap_or(serde_json::Value::Null))
+                            .collect(),
+                    )));
                 }
                 Ok(Value::List(results))
             })
@@ -1524,6 +1576,38 @@ pub(super) fn header_pair(key: Value, value: Value) -> Result<(String, String), 
     match (key, value) {
         (Value::Str(k), Value::Str(v)) => Ok((k, v)),
         _ => Err("Fetch: header keys and values must be strings".into()),
+    }
+}
+
+fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_json::Value, String> {
+    use serde_json::Value as J;
+    match (a, b) {
+        (J::Object(mut ma), J::Object(mb)) => {
+            for (k, v) in mb {
+                ma.insert(k, v);
+            }
+            Ok(J::Object(ma))
+        }
+        (J::Array(mut va), J::Array(vb)) => {
+            va.extend(vb);
+            Ok(J::Array(va))
+        }
+        (a, b) => Err(format!(
+            "json_merge: cannot merge {} with {}",
+            type_str(&a),
+            type_str(&b)
+        )),
+    }
+}
+
+fn type_str(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
     }
 }
 

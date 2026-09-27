@@ -176,7 +176,7 @@ These are the starting points for extraction chains:
 | `.map(body)` | List | List | Iterate over the list. For each element, evaluate `body` with `$item` bound to the current element and `$index` bound to its 0-based position. `Null` results are dropped. Returns a new `List`. |
 | `.flat_map(body)` | List | List | Like `.map(body)`, but each `body` evaluation must return a `List`; all result lists are concatenated into a single flat `List`. Useful when each element expands into multiple values. |
 | `.fold(base, body)` | List | Any | Left fold over the list. Evaluates `base` as the initial accumulator, then for each element evaluates `body` with `$acc` bound to the running accumulator, `$item` to the current element, and `$index` to its 0-based position. The result of each `body` evaluation becomes the new `$acc`. Returns the final accumulator value. |
-| `.filter(predicate)` | List | List | Keep only elements for which `predicate` evaluates to `true`. `predicate` is evaluated with `$item` and `$index` in scope. Elements where the predicate returns `false` or `Null` are dropped. Produces a `List` of the same element type. |
+| `.filter(predicate)` | List or Json array | same as input | Keep only elements for which `predicate` evaluates to `true`. `predicate` is evaluated with `$item` and `$index` in scope; a JSON `null` element is `$item == null`. Elements where the predicate returns `false` or `Null` are dropped. A `List` stays a `List`; a `Json` array stays a `Json` array, so `.json_fold()` and `.array_len()` still apply. |
 | `if cond then a else b` | — | Any | If `cond` is `true`, evaluates and returns `a`; if `false` or `Null`, evaluates and returns `b`. Short-circuits: only the selected branch is evaluated. `cond` must be `Bool` (or `Null`, which is treated as `false`). |
 | `.not()` | Bool/Null | Bool | Boolean negation. `Null` is treated as `false`, so `.not()` on `Null` returns `true`. |
 
@@ -765,7 +765,7 @@ Returns the keys of a JSON object as a `List<String>`. Returns an empty `List` i
 { "op": "json_array", "items": [{ ... }, { ... }] }
 ```
 
-Constructs a `Json` array from N evaluated expressions. Unlike `{ "op": "list" }` (which produces a `List` value), `json_array` produces a `Json` value that supports `.json_fold()`, `.filter()`, and other JSON-native operations. **Rust builder only** — not directly parseable from the text DSL.
+Constructs a `Json` array from N evaluated expressions. Unlike `{ "op": "list" }` (which produces a `List` value), `json_array` produces a `Json` value that supports `.json_fold()`, `.filter()` (which keeps it a `Json` array), `.array_len()`, and other JSON-native operations, in both HTML and JSON endpoints. **Rust builder only** — not directly parseable from the text DSL.
 
 #### Boolean Operations
 
