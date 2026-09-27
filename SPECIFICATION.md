@@ -1335,7 +1335,8 @@ the first.
 **`deduplicate_by`** is a DSL expression evaluated against each *main-result* row once
 its sub-fetch has merged in; the row is a JSON object, so `self` and `json()` both address
 it. Rows repeating an earlier row's key are dropped, the first
-occurrence is kept, and the original order is preserved. Use it where a source lists the
+occurrence is kept, and the original order is preserved. A row whose key is null has no
+identity to repeat, so it is always kept. Use it where a source lists the
 same entry under several categories on one page and only the sub-fetch reveals they are
 the same.
 

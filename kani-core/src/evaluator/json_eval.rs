@@ -430,7 +430,7 @@ pub async fn deduplicate_rows(result: &mut serde_json::Value, key: &Expr) -> Res
             Arc::clone(&budget),
         )
         .await?;
-        keep.push(seen.insert(key_of(&value)));
+        keep.push(matches!(value, Value::Null) || seen.insert(key_of(&value)));
     }
 
     let mut iter = keep.into_iter();

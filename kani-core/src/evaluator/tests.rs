@@ -3269,3 +3269,27 @@ mod dsl_v2_tests {
         assert_eq!(rows[1]["total"], 42);
     }
 }
+
+#[tokio::test]
+async fn rows_whose_dedup_key_is_null_are_all_kept() {
+    let mut result = serde_json::json!({"rows": [
+        {"id": "a", "title": "one"},
+        {"title": "no id"},
+        {"id": "a", "title": "dup"},
+        {"title": "another without id"},
+    ]});
+    let key = kani_shared::ast::Expr::JsonPtr {
+        target: Box::new(kani_shared::ast::Expr::SelfRef),
+        pointer: "/id".into(),
+    };
+    crate::evaluator::json_eval::deduplicate_rows(&mut result, &key)
+        .await
+        .unwrap();
+    let titles: Vec<&str> = result["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["one", "no id", "another without id"]);
+}
