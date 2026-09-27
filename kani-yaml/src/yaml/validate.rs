@@ -1288,6 +1288,11 @@ fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<YamlError>> {
             errors,
         }]
     })?;
+    crate::dsl::check_receivers(&parse_ast.to_arena()?).map_err(|e| {
+        vec![YamlError::Validation(format!(
+            "{field_path}: {e} in {dsl:?}"
+        ))]
+    })?;
     parse_ast.try_into()
 }
 /// Detects `"$varname$"` — a DSL string literal wrapping a dollar-fenced identifier.

@@ -1,6 +1,7 @@
 //! Tokenized Pratt parser for the declarative extraction expression language.
 
 mod parseexpr;
+mod receivers;
 
 use chumsky::prelude::SimpleSpan;
 use kani_shared::ast::Op;
@@ -8,6 +9,7 @@ use std::ops::Range;
 
 use self::parseexpr::ParseExpr;
 pub use self::parseexpr::SpannedParseExpr;
+pub use self::receivers::check_receivers;
 
 pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_TOKENS: usize = 16_384;

@@ -19,8 +19,8 @@ endpoints:
     container: ":root"
     fields:
       id:
-        expr: "json(\"/id\").text()"
+        expr: "json(\"/id\").str()"
       title:
-        expr: "json(\"/title\").text()"
+        expr: "json(\"/title\").str()"
       status:
-        expr: "json(\"/status\").text()"
+        expr: "json(\"/status\").str()"

@@ -2098,7 +2098,7 @@ endpoints:
     container: ":root"
     fields:
       id: '"$manga_id$"'
-      title: 'self.ptr("/t").text()'
+      title: 'self.ptr("/t").str()'
       status: '"unknown"'
 "#;
     let svc = test_service().await;

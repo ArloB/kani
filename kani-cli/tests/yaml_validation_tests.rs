@@ -1839,7 +1839,7 @@ fn base_url_and_literal_page_urls_must_be_http() {
             "{METADATA_BASE}browser_scripts:\n  grab: |\n    passPayload(\"{{}}\");\nendpoints:\n  \
              manga_details:\n    via: browser_payload\n    page_url: \"{page_url}\"\n    \
              script: grab\n    container: \":root\"\n    fields:\n      id: '\"$manga_id$\"'\n      \
-             title: 'self.ptr(\"/t\").text()'\n      status: '\"unknown\"'\n"
+             title: 'self.ptr(\"/t\").str()'\n      status: '\"unknown\"'\n"
         )
     };
     for bad in [
@@ -1851,5 +1851,40 @@ fn base_url_and_literal_page_urls_must_be_http() {
     }
     for ok in ["https://example.com/m/$manga_id$", "$manga_id$"] {
         assert_valid(&with_page_url(ok));
+    }
+}
+
+#[test]
+fn an_element_method_on_a_receiver_that_cannot_be_an_element_is_refused() {
+    let yaml = |expr: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    container: \".item\"\n    \
+             fields:\n      id: 'self.attr(\"data-id\")'\n      title: '{expr}'\n"
+        )
+    };
+    for (expr, receiver) in [
+        (r#"self.select("img").attr("src")"#, "a list"),
+        (r#"self.select("a").text()"#, "a list"),
+        (r#"self.first("a").text().first("b")"#, "a string"),
+        (r#""x".attr("y")"#, "a string"),
+        (r#"self.attr("n").int().text()"#, "a number"),
+        (r#"self.first("a").has_class("x").text()"#, "a boolean"),
+        (r#"json("/id").text()"#, "a JSON value"),
+        (r#"self.ptr("/id").text()"#, "a JSON value"),
+    ] {
+        assert_invalid_containing(
+            &yaml(expr),
+            &format!(
+                "endpoints.search.fields.title: this method needs an HTML element, but its receiver is {receiver}"
+            ),
+        );
+    }
+    for ok in [
+        r#"self.first("img").attr("src")"#,
+        r#"self.select("a").at(0).text()"#,
+        r#"self.select("a").map(self.attr("href")).join(",")"#,
+        r#"dom("h1").text().trim()"#,
+    ] {
+        assert_valid(&yaml(ok));
     }
 }

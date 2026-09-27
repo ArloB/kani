@@ -232,6 +232,14 @@ fn lower(source: &str) -> Result<Expr, String> {
             .collect::<Vec<_>>()
             .join("; ")
     })?;
+    let arena = parsed.to_arena().map_err(|errors| {
+        errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    kani_yaml::dsl::check_receivers(&arena)?;
     Expr::try_from(parsed).map_err(|errors| {
         errors
             .iter()

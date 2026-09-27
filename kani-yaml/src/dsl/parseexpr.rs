@@ -472,6 +472,14 @@ impl TryFrom<SpannedParseExpr> for Expr {
     }
 }
 
+impl SpannedParseExpr {
+    /// Lowers to the flat arena form whatever the expression's size, for analyses that walk
+    /// every node in one pass.
+    pub fn to_arena(&self) -> Result<Expr, Vec<YamlError>> {
+        lower_arena(self.0.clone(), self.1)
+    }
+}
+
 fn parse_node_count(root: &ParseExpr) -> usize {
     let mut count = 0usize;
     let mut stack = vec![root];

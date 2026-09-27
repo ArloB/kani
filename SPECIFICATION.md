@@ -2067,6 +2067,12 @@ The `kani-cli validate` command checks:
 23. **Arithmetic templates:** a `route`, query or header value made only of placeholders, number
     literals, operators and parentheses, containing a number, a parenthesis or `*`, is refused. See
     [Variable Interpolation](#variable-interpolation).
+24. **Receiver kinds:** an element-only method (`attr`, `text`, `inner_html`, `select`, `first`,
+    `has_class`, `children`) is refused when its receiver is known from the root and the preceding
+    calls to be a list, string, number, boolean or JSON value. `self.select("img").attr("src")` and
+    `json("/id").text()` are refused with the field path and expression. A receiver whose kind
+    depends on data, such as `self`, a variable or `.at(0)` on a list, is left to runtime. Any receiver
+    check added after 1.0 reports a warning, never an error, so a file valid under 1.0 stays valid.
 
 ### 3.10 Scripting Hooks
 
