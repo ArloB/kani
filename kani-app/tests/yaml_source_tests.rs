@@ -2046,3 +2046,69 @@ endpoints:
         );
     }
 }
+
+#[tokio::test]
+async fn a_hook_cannot_rewrite_a_request_to_a_non_http_url() {
+    let svc = test_service().await;
+    for (n, target) in ["ftp://example.com/x", "file://localhost/etc/passwd"]
+        .iter()
+        .enumerate()
+    {
+        let yaml = format!(
+            r#"id: hook-scheme-{n}
+name: hook-scheme-{n}
+version: "1.0.0"
+base_url: "https://example.com"
+pre_request: |
+  req.url = "{target}";
+  proceed()
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".title").text()'
+"#
+        );
+        let source_id = svc.install_yaml_source(yaml.as_bytes()).await.unwrap();
+        let err = svc
+            .get_popular_manga(source_id, 1, 20, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("only http and https"), "{target}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn a_browser_page_url_built_from_an_id_must_be_http() {
+    let yaml = r#"id: page-url-scheme
+name: page-url-scheme
+version: "1.0.0"
+base_url: "https://example.com"
+browser_scripts:
+  grab: |
+    passPayload("{}");
+endpoints:
+  manga_details:
+    via: browser_payload
+    page_url: "$manga_id$"
+    script: grab
+    container: ":root"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.ptr("/t").text()'
+      status: '"unknown"'
+"#;
+    let svc = test_service().await;
+    let source_id = svc.install_yaml_source(yaml.as_bytes()).await.unwrap();
+    for id in ["javascript:passPayload(1)", "file://localhost/etc/passwd"] {
+        let err = svc
+            .get_manga_details(source_id, id)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("only http and https"), "{id}: {err}");
+    }
+}

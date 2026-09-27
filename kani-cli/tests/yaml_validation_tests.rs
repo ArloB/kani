@@ -1818,3 +1818,38 @@ fn arithmetic_in_a_request_template_is_refused_but_text_templates_are_not() {
     }
     assert_valid(&yaml("/$query$", "headers", "Bearer $query$"));
 }
+
+#[test]
+fn base_url_and_literal_page_urls_must_be_http() {
+    let with_base = |base: &str| {
+        format!("id: scheme\nname: Scheme\nversion: \"0.1.0\"\nbase_url: \"{base}\"\n")
+    };
+    for bad in [
+        "ftp://example.com",
+        "file:///srv/manga",
+        "example.com",
+        "javascript:x",
+    ] {
+        assert_invalid_containing(&with_base(bad), "base_url: only http and https");
+    }
+    assert_valid(&with_base("https://example.com"));
+
+    let with_page_url = |page_url: &str| {
+        format!(
+            "{METADATA_BASE}browser_scripts:\n  grab: |\n    passPayload(\"{{}}\");\nendpoints:\n  \
+             manga_details:\n    via: browser_payload\n    page_url: \"{page_url}\"\n    \
+             script: grab\n    container: \":root\"\n    fields:\n      id: '\"$manga_id$\"'\n      \
+             title: 'self.ptr(\"/t\").text()'\n      status: '\"unknown\"'\n"
+        )
+    };
+    for bad in [
+        "javascript:passPayload(1)",
+        "file:///m/$manga_id$",
+        "ftp://h/$manga_id$",
+    ] {
+        assert_invalid_containing(&with_page_url(bad), "page_url: only http and https");
+    }
+    for ok in ["https://example.com/m/$manga_id$", "$manga_id$"] {
+        assert_valid(&with_page_url(ok));
+    }
+}

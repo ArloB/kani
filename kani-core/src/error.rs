@@ -11,6 +11,10 @@ pub enum Error {
     #[error("Path traversal blocked: {0}")]
     PathTraversal(String),
 
+    /// A URL whose scheme is not http or https; never retried.
+    #[error("{0}")]
+    UnsupportedScheme(String),
+
     #[error("Not found: {0}")]
     NotFound(String),
 

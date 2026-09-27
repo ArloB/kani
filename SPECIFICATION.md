@@ -2022,7 +2022,7 @@ The `kani-cli validate` command checks:
    and cache namespaces, so a separator such as `:` or `_` would let two extensions' namespaces
    collide.
 3. **Version format:** Must be valid semver.
-4. **Base URL format:** Must be a valid URL with scheme.
+4. **Base URL format:** Must be an absolute `http` or `https` URL with a host.
 5. **DSL syntax:** All DSL strings must parse without errors.
 6. **Field completeness:** every endpoint must declare its required row fields, and none of them
    may be marked `optional: true`:
@@ -2466,13 +2466,18 @@ declaring it in `cache:` (§3.2), which the runtime refuses on the first call.
 
 ## 7. Outbound Request Policy
 
-Every request an extension causes, directly or through the host, passes two checks. They apply
+Every request an extension causes, directly or through the host, passes three checks. They apply
 to the first request and to every redirect hop.
 
-1. **Host policy (`AllowedHost`).** A source may contact only its `base_url` host, matched
+1. **Scheme.** Only absolute `http` and `https` URLs are requested or loaded. The rule is applied
+   at `base_url` validation and install, at every built route and fetched-option URL, after a
+   `pre_request` hook rewrites `req.url`, on each redirect target, on every browser capture target
+   (`page_url`, hook and WASM captures, the solver), on page image downloads, in the image proxy,
+   and on repository URLs. A refused scheme is a permanent error: a download does not retry it.
+2. **Host policy (`AllowedHost`).** A source may contact only its `base_url` host, matched
    exactly, unless it declares `unrestricted_http: true`. The check runs on the final request,
    after any `pre_request` hook has rewritten it.
-2. **Forbidden addresses.** Private, loopback, link-local (including cloud metadata
+3. **Forbidden addresses.** Private, loopback, link-local (including cloud metadata
    `169.254.169.254`), CGNAT, multicast, documentation and reserved ranges are refused whatever
    the host policy allows. For a hostname, the validating resolver filters the addresses it
    resolves to at connect time, so DNS rebinding cannot change the answer after the check. For an

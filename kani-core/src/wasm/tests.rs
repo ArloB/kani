@@ -39,14 +39,20 @@ async fn handle_capacity_counts_all_types() {
 fn restricted_allows_matching_host() {
     let mut state = HostState::default();
     state.allowed_host = AllowedHost::Restricted("example.com".to_string());
-    assert!(state.check_allowed_host("example.com").is_ok());
+    assert!(
+        state
+            .check_allowed_url(&url("https://example.com/"))
+            .is_ok()
+    );
 }
 
 #[test]
 fn restricted_rejects_different_host() {
     let mut state = HostState::default();
     state.allowed_host = AllowedHost::Restricted("example.com".to_string());
-    let err = state.check_allowed_host("other.com").unwrap_err();
+    let err = state
+        .check_allowed_url(&url("https://other.com/"))
+        .unwrap_err();
     assert!(err.contains("blocked"));
 }
 
@@ -54,14 +60,34 @@ fn restricted_rejects_different_host() {
 fn unrestricted_allows_any_host() {
     let mut state = HostState::default();
     state.allowed_host = AllowedHost::Unrestricted;
-    assert!(state.check_allowed_host("anything.example.com").is_ok());
-    assert!(state.check_allowed_host("evil.com").is_ok());
+    assert!(
+        state
+            .check_allowed_url(&url("https://anything.example.com/"))
+            .is_ok()
+    );
+    assert!(state.check_allowed_url(&url("https://evil.com/")).is_ok());
+}
+
+fn url(s: &str) -> url::Url {
+    s.parse().unwrap()
+}
+
+#[test]
+fn unrestricted_still_refuses_non_http_schemes() {
+    let mut state = HostState::default();
+    state.allowed_host = AllowedHost::Unrestricted;
+    for bad in ["ftp://example.com/x", "file://localhost/etc/passwd"] {
+        let err = state.check_allowed_url(&url(bad)).unwrap_err();
+        assert!(err.contains("only http and https"), "{bad}: {err}");
+    }
 }
 
 #[test]
 fn metadata_only_rejects_all() {
     let state = HostState::default();
-    let err = state.check_allowed_host("example.com").unwrap_err();
+    let err = state
+        .check_allowed_url(&url("https://example.com/"))
+        .unwrap_err();
     assert!(err.contains("not permitted"));
 }
 

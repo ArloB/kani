@@ -519,6 +519,24 @@ fn egress_forbidden(
             && crate::network::is_loopback_url_host(url))
 }
 
+fn refuse_non_http_redirect(resp: &rquest::Response) -> Result<()> {
+    let Some(location) = resp
+        .headers()
+        .get(rquest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .filter(|_| resp.status().is_redirection())
+    else {
+        return Ok(());
+    };
+    let target = url::Url::parse(&resp.uri().to_string())
+        .and_then(|base| base.join(location))
+        .map(String::from)
+        .unwrap_or_else(|_| location.to_string());
+    crate::network::require_http_url(&target).map_err(|reason| {
+        crate::error::Error::UnsupportedScheme(format!("redirect refused: {reason}"))
+    })
+}
+
 /// Redirect policy for the auto-following client: follow up to `REDIRECT_LIMIT`
 /// hops, refusing a forbidden egress target per hop and, when given, any hop the
 /// source's host policy would not allow as a first request.
@@ -788,6 +806,8 @@ impl SmartClient {
 
     pub(crate) async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
+        crate::network::require_http_url(&request.uri().to_string())
+            .map_err(crate::error::Error::UnsupportedScheme)?;
         self.refuse_forbidden_egress(&request.uri().to_string())?;
 
         let domain = request.uri().host().map(base_domain).unwrap_or_default();
@@ -891,6 +911,7 @@ impl SmartClient {
                 }
             };
             let status = resp.status();
+            refuse_non_http_redirect(&resp)?;
 
             if is_retryable(status) {
                 if attempt < MAX_RETRIES
@@ -1085,6 +1106,8 @@ impl SmartClient {
         // Unified with the auto-following client's policy limit.
         const MAX_REDIRECTS: usize = REDIRECT_LIMIT;
 
+        crate::network::require_http_url(initial_url)
+            .map_err(crate::error::Error::UnsupportedScheme)?;
         self.refuse_forbidden_egress(initial_url)?;
         let mut current_url = initial_url.to_string();
         let mut solver_headers = rquest::header::HeaderMap::new();
@@ -1722,6 +1745,7 @@ impl SmartClient {
     ) -> std::result::Result<String, SolverCaptureError> {
         use std::sync::atomic::Ordering;
 
+        crate::network::require_http_url(url).map_err(SolverCaptureError::Failed)?;
         if self.solver_capture_support.load(Ordering::Relaxed) == 2 {
             return Err(SolverCaptureError::Unsupported);
         }
@@ -2689,6 +2713,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_capture_of_a_non_http_url_never_reaches_the_solver() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let client = SmartClient::new(Some(server.uri())).unwrap();
+        for url in [
+            "file:///etc/passwd",
+            "javascript:passPayload(1)",
+            "ftp://a.example/x",
+        ] {
+            let error = client
+                .solver_capture(url, "passPayload(1)", 1000, None, false)
+                .await
+                .expect_err(url);
+            assert!(
+                matches!(&error, SolverCaptureError::Failed(m) if m.contains("only http and https")),
+                "{url}: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn a_script_that_never_submits_is_distinguished_from_a_broken_solver() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -3198,6 +3247,50 @@ mod tests {
             "/dest",
             "`../dest` joined against `/a/redir`"
         );
+    }
+
+    #[tokio::test]
+    async fn a_non_http_url_is_refused_at_every_client_entry_point() {
+        let client = SmartClient::new_for_test().unwrap();
+        for url in ["ftp://files.example/x", "file:///etc/passwd"] {
+            let err = match client.inner().get(url).build() {
+                Ok(req) => match client.send_request(req).await {
+                    Ok(_) => panic!("send_request fetched {url}"),
+                    Err(e) => e.to_string(),
+                },
+                Err(e) => {
+                    assert!(e.is_builder(), "{url}: {e}");
+                    "only http and https: no request can be built".to_string()
+                }
+            };
+            assert!(
+                err.contains("only http and https"),
+                "send_request {url}: {err}"
+            );
+            let err = match client.safe_get(url, None).await {
+                Ok(_) => panic!("safe_get fetched {url}"),
+                Err(e) => e.to_string(),
+            };
+            assert!(err.contains("only http and https"), "safe_get {url}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_followed_redirect_to_a_non_http_scheme_is_refused() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redir"))
+            .respond_with(
+                ResponseTemplate::new(302).insert_header("location", "ftp://files.example/x"),
+            )
+            .mount(&server)
+            .await;
+        let client = SmartClient::new_for_test().unwrap();
+        let err = match client.get(&format!("{}/redir", server.uri())).await {
+            Ok(resp) => panic!("followed to {:?}", resp.url()),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("only http and https"), "{err}");
     }
 
     #[tokio::test]

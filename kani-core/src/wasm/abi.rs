@@ -217,7 +217,7 @@ impl http::Host for HostState {
             .parse::<url::Url>()
             .map_err(|e| format!("Invalid URL: {}", e))?;
 
-        self.check_allowed_host(url.host_str().unwrap_or(""))?;
+        self.check_allowed_url(&url)?;
 
         let mut builder = self
             .http_client

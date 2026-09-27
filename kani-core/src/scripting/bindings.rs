@@ -233,6 +233,7 @@ pub(crate) fn check_capture_target(
     let url = page_url
         .parse::<url::Url>()
         .map_err(|error| format!("Invalid browser page URL: {error}"))?;
+    crate::network::require_http_url(page_url)?;
     allowed_host.allows_host(url.host_str().unwrap_or_default())?;
     if crate::network::is_forbidden_url_host(page_url) {
         return Err(format!(
@@ -359,6 +360,20 @@ pub fn make_hook_sandbox() -> Engine {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn a_browser_capture_target_must_be_http() {
+        let unrestricted = crate::wasm::AllowedHost::Unrestricted;
+        for bad in [
+            "javascript:passPayload(1)",
+            "file://localhost/etc/passwd",
+            "ftp://a.example/",
+        ] {
+            let err = check_capture_target(&unrestricted, bad).unwrap_err();
+            assert!(err.contains("only http and https"), "{bad}: {err}");
+        }
+        assert!(check_capture_target(&unrestricted, "https://a.example/").is_ok());
+    }
 
     fn ctx(
         v8_process: Option<crate::v8_process::V8ProcessHandle>,

@@ -86,6 +86,7 @@ impl AppService {
         confirm_fingerprint: Option<&str>,
         user_id: Option<crate::ids::UserId>,
     ) -> Result<RepoAddResult> {
+        kani_core::network::require_http_url(url).map_err(ServiceError::Validation)?;
         self.check_repo_blocked(url).await?;
 
         let (index, index_bytes) = self.fetch_and_verify_index(url).await?;
@@ -643,6 +644,7 @@ impl AppService {
             requires_capabilities: &validated.requires_capabilities,
             scripts: &crate::source::yaml_source::yaml_hook_scripts(&validated),
             icon: validated.metadata.icon.as_deref(),
+            base_url: &validated.base_url,
         })
         .await?;
 
@@ -738,6 +740,7 @@ impl AppService {
             requires_capabilities: &metadata.requires_capabilities,
             scripts: &kani_core::scripting::HookScripts::from_metadata(&metadata),
             icon: metadata.icon.as_deref(),
+            base_url: &metadata.base_url,
         })
         .await?;
         let instance_pre = self

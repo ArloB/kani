@@ -48,6 +48,10 @@ pub fn validate(
         )));
     }
 
+    if let Err(e) = kani_shared::request::require_http_url(&ext.base_url) {
+        errors.push(YamlError::Validation(format!("base_url: {e}")));
+    }
+
     let id_encoding = ext.id_encoding.as_ref();
     if let Some(block) = id_encoding {
         errors.append(&mut validate_id_encoding(block));
@@ -866,7 +870,17 @@ fn validate_endpoint(
         match via {
             EndpointVia::BrowserPayload => {
                 let page_url = match &body.page_url {
-                    Some(u) if !u.is_empty() => Some(u.clone()),
+                    Some(u) if !u.is_empty() => {
+                        let (texts, _) = kani_shared::request::template_parts(u);
+                        if !texts[0].is_empty()
+                            && let Err(e) = kani_shared::request::require_http_url(&texts.join("x"))
+                        {
+                            errors.push(YamlError::Validation(format!(
+                                "endpoints.{name}.page_url: {e}"
+                            )));
+                        }
+                        Some(u.clone())
+                    }
                     _ => {
                         errors.push(YamlError::Validation(format!(
                             "endpoints.{name}: 'page_url' is required when 'via: browser_payload' is set"

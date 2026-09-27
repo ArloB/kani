@@ -22,6 +22,23 @@ pub enum QueryValue {
     Template(String),
 }
 
+/// Refuses any URL that is not absolute `http` or `https` with a host. Every place Kani fetches
+/// or loads a URL on a source's behalf applies it, so `file:`, `ftp:` or `javascript:` never
+/// reach a client or a browser.
+pub fn require_http_url(url: &str) -> Result<(), String> {
+    let rest = ["https://", "http://"].iter().find_map(|scheme| {
+        url.get(..scheme.len())
+            .filter(|head| head.eq_ignore_ascii_case(scheme))
+            .map(|_| &url[scheme.len()..])
+    });
+    match rest.and_then(|r| r.chars().next()) {
+        Some(c) if !matches!(c, '/' | '?' | '#') && !c.is_whitespace() => Ok(()),
+        _ => Err(format!(
+            "only http and https URLs can be requested, not {url:?}"
+        )),
+    }
+}
+
 /// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
 /// names, starting and ending with text. A `$` that opens no placeholder stays literal.
 pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {

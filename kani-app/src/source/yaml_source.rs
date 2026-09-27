@@ -435,6 +435,7 @@ impl YamlSource {
             // Enforce the source's AllowedHost policy on the browser target before any
             // V8 dispatch, mirroring the HTTP path — a restricted source must not be
             // able to point the browser at an arbitrary host.
+            kani_core::network::require_http_url(&page_url).map_err(invalid)?;
             let host = page_url
                 .parse::<url::Url>()
                 .ok()

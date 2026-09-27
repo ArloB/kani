@@ -118,6 +118,7 @@ pub struct ArtifactFacts<'a> {
     pub requires_capabilities: &'a [String],
     pub scripts: &'a crate::scripting::HookScripts,
     pub icon: Option<&'a str>,
+    pub base_url: &'a str,
 }
 
 /// Scripts that do not compile on the engine they run on. A source loaded anyway would run
@@ -150,6 +151,7 @@ pub fn check_artifact(
         check_dsl_schema_version(facts.dsl_schema_version),
         check_required_capabilities(facts.requires_capabilities, solver),
         check_icon(facts.icon),
+        crate::network::require_http_url(facts.base_url).map_err(|e| format!("base_url: {e}")),
     ]
     .into_iter()
     .filter_map(Result::err)
@@ -199,6 +201,7 @@ mod tests {
                 requires_capabilities: &caps,
                 scripts: &crate::scripting::HookScripts::default(),
                 icon: Some("PHN2Zz4="),
+                base_url: "ftp://files.example",
             },
             "1.0.0",
             SolverCapability::Capture,
@@ -209,6 +212,7 @@ mod tests {
             "schema version",
             "teleport",
             "PNG or WebP",
+            "base_url: only http and https",
         ];
         assert_eq!(problems.len(), expected.len(), "{problems:?}");
         for (problem, needle) in problems.iter().zip(expected) {

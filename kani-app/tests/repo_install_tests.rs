@@ -806,3 +806,19 @@ async fn a_local_grant_opens_its_host_to_its_own_source_only() {
         "the shared client is unchanged"
     );
 }
+
+#[tokio::test]
+async fn a_repository_url_must_be_http() {
+    let svc = test_service().await;
+    for url in [
+        "file:///srv/repo",
+        "ftp://repo.example/",
+        "javascript:alert(1)",
+    ] {
+        let err = svc.add_repo(url, None, None).await.unwrap_err();
+        assert!(
+            matches!(&err, kani_app::ServiceError::Validation(m) if m.contains("only http and https")),
+            "{url}: {err:?}"
+        );
+    }
+}
