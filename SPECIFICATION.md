@@ -1485,6 +1485,10 @@ chapter_list:
                           # report a count and the host will rely on `has_next_page`.
 ```
 
+When `has_next_page` is omitted there is no next page, in both backends. A page that extracted no
+rows never has a next page, whatever the rule says, so a static `true` cannot loop the client over
+empty pages.
+
 #### PagesEndpoint
 
 ```yaml
@@ -1764,7 +1768,7 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: true. Static or DSL expression.
+    has_next_page: bool | string # Default: false. Static or DSL expression.
     pagination: PaginationConfig
 
   search:                       # -> search_manga
@@ -1779,7 +1783,7 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: true. Static or DSL expression.
+    has_next_page: bool | string # Default: false. Static or DSL expression.
     pagination: PaginationConfig
 
   manga_details:                # -> get_manga_details

@@ -171,6 +171,9 @@ fn arg_or_field_req<T: JsonRows>(
 }
 
 fn resolve_has_next_page<T: JsonRows>(result: &T, hnp: HasNextPage) -> bool {
+    if result.rows_len() == 0 {
+        return false;
+    }
     match hnp {
         HasNextPage::Static(b) => b,
         HasNextPage::FromScalar => result.get_scalar_bool("has_next_page"),
@@ -401,6 +404,20 @@ mod tests {
         let out = unpack_chapter_list(&chapters, HasNextPage::Static(false), TotalPages::None, &[]);
         assert_eq!(out.skipped, 1);
         assert_eq!(out.value.chapters.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_page_never_has_a_next_page_and_an_omitted_rule_means_false() {
+        let empty = json!({"rows": [], "scalars": {"has_next_page": true}});
+        for hnp in [HasNextPage::Static(true), HasNextPage::FromScalar] {
+            let list = unpack_manga_list(&empty, hnp, TotalPages::None, &[]).value;
+            assert!(!list.has_next_page, "manga list, {hnp:?}");
+            let chapters = unpack_chapter_list(&empty, hnp, TotalPages::None, &[]).value;
+            assert!(!chapters.has_next_page, "chapter list, {hnp:?}");
+        }
+        let omitted = json!({"rows": [{"id": "m1", "title": "A"}]});
+        let list = unpack_manga_list(&omitted, HasNextPage::FromScalar, TotalPages::None, &[]);
+        assert!(!list.value.has_next_page);
     }
 
     #[test]
