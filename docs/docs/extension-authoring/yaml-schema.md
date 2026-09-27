@@ -186,7 +186,8 @@ Cache declarations specify namespace scope, TTL, entry limit, and an optional ke
 hooks can read and write declared namespaces through `ctx.cache`.
 
 A `factory` contains several source identities and dot-path overrides. Building the template
-validates each expansion and emits one extension per source.
+validates each expansion and emits one extension per source. An `overrides` path must already exist
+in the template; new entries go under `add`, so a misspelt path fails the build.
 
 ## Browser endpoints
 

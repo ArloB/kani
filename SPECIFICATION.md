@@ -1933,16 +1933,29 @@ factory:
 
 1. `kani-cli build my-source.yaml` detects the `.yaml` extension and enters factory mode.
 2. The factory block is validated (`validate_factory`): sources must be non-empty; IDs must be non-empty, unique, and non-duplicate; `base_url` and `name` must be non-empty.
-3. For each source entry, the template's YAML value tree is cloned and the source's named fields (`id`, `name`, `base_url`, `language`, `mihon_source_id`) are written as top-level overrides; then the dot-path `overrides` map is applied recursively.
+3. For each source entry, the template's YAML value tree is cloned and the source's named fields (`id`, `name`, `base_url`, `language`, `mihon_source_id`) are written as top-level overrides; then the dot-path `overrides` and `add` maps are applied.
 4. The expanded YAML is validated as a standalone extension (all standard validation rules apply).
 5. A Rust crate is generated to `kani-extensions/kani-{source.id}/` and then compiled to `wasm_sources/{source.id}.wasm`.
 
-**Dot-path override semantics:** keys use `.` as a path separator. Each segment descends into a YAML mapping. If an intermediate key is absent, a new empty mapping is created. Leaf values replace whatever was there. Unknown paths produce a stderr warning but do not abort the build.
+**Dot-path override semantics:** keys use `.` as a path separator, and each segment descends into
+a YAML mapping. Every path under `overrides` must already exist in the template, down to the leaf,
+which is replaced. Map entries count too, so a typo such as `endpoints.search.queries.pgae` fails the
+build with an error naming the path instead of adding a query nobody reads. To create an entry the
+template lacks, put it under `add`: its parent must exist and its final key must not.
+
+```yaml
+      overrides:
+        endpoints.search.route: "/find?q=$query$"
+      add:
+        endpoints.search.queries.lang: ja
+```
 
 **Validation rules for `factory`:**
 - `factory.sources` must not be empty.
 - Each source's `id` must be non-empty and unique within the factory block.
 - Each source's `name` and `base_url` must be non-empty.
+- Each `overrides` path must exist in the template; each `add` path must have an existing parent and
+  a new final key.
 
 ### 3.8 Browser Payload Endpoints
 

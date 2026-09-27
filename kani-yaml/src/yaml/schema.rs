@@ -100,6 +100,9 @@ pub struct FactorySource {
     /// Dot-path keyed overrides applied on top of the template (e.g. "endpoints.search.route").
     #[serde(default)]
     pub overrides: BTreeMap<String, serde_yaml::Value>,
+    /// Dot-path keyed entries the template does not have yet; the parent must exist.
+    #[serde(default)]
+    pub add: BTreeMap<String, serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]

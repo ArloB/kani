@@ -196,7 +196,16 @@ fn build_factory_yaml(
     for source_def in &sources {
         println!("── Factory source: {}", source_def.id);
 
-        let expanded = apply_factory_overrides(base_value.clone(), source_def);
+        let expanded = apply_factory_overrides(base_value.clone(), source_def).map_err(|errs| {
+            for e in &errs {
+                eprintln!("error: {e}");
+            }
+            CliError::Other(format!(
+                "source '{}': {} override error(s)",
+                source_def.id,
+                errs.len()
+            ))
+        })?;
 
         let expanded_src = serde_yaml::to_string(&expanded).map_err(|e| {
             CliError::Other(format!(
@@ -249,11 +258,11 @@ fn build_factory_yaml(
 pub fn apply_factory_overrides(
     mut base: serde_yaml::Value,
     source: &crate::yaml::schema::FactorySource,
-) -> serde_yaml::Value {
+) -> Result<serde_yaml::Value, Vec<String>> {
     {
         let map = match &mut base {
             serde_yaml::Value::Mapping(m) => m,
-            _ => return base,
+            _ => return Ok(base),
         };
 
         map.insert(
@@ -285,32 +294,58 @@ pub fn apply_factory_overrides(
         }
     }
 
+    let mut errors = Vec::new();
     for (dot_path, value) in &source.overrides {
-        set_dot_path(&mut base, dot_path, value.clone());
+        if let Err(e) = set_dot_path(&mut base, dot_path, value.clone(), false) {
+            errors.push(format!(
+                "factory source '{}': overrides.{dot_path}: {e}; use add: to create it",
+                source.id
+            ));
+        }
+    }
+    for (dot_path, value) in &source.add {
+        if let Err(e) = set_dot_path(&mut base, dot_path, value.clone(), true) {
+            errors.push(format!(
+                "factory source '{}': add.{dot_path}: {e}",
+                source.id
+            ));
+        }
     }
 
-    base
+    if errors.is_empty() {
+        Ok(base)
+    } else {
+        Err(errors)
+    }
 }
 
-fn set_dot_path(root: &mut serde_yaml::Value, path: &str, value: serde_yaml::Value) {
-    let mut parts = path.splitn(2, '.');
-    let key = parts.next().expect("non-empty path");
-    let rest = parts.next();
-
-    match root {
-        serde_yaml::Value::Mapping(map) => {
-            let k = serde_yaml::Value::String(key.to_string());
-            if let Some(tail) = rest {
-                let child = map
-                    .entry(k)
-                    .or_insert(serde_yaml::Value::Mapping(Default::default()));
-                set_dot_path(child, tail, value);
-            } else {
-                map.insert(k, value);
-            }
-        }
+fn set_dot_path(
+    root: &mut serde_yaml::Value,
+    path: &str,
+    value: serde_yaml::Value,
+    create: bool,
+) -> Result<(), String> {
+    let (parent_path, leaf) = path.rsplit_once('.').unwrap_or(("", path));
+    let mut node = root;
+    for segment in parent_path.split('.').filter(|s| !s.is_empty()) {
+        node = match node {
+            serde_yaml::Value::Mapping(map) => map
+                .get_mut(segment)
+                .ok_or_else(|| format!("'{segment}' does not exist in the template"))?,
+            _ => return Err(format!("'{segment}' is not inside a mapping")),
+        };
+    }
+    let serde_yaml::Value::Mapping(map) = node else {
+        return Err(format!("'{leaf}' is not inside a mapping"));
+    };
+    match (map.contains_key(leaf), create) {
+        (true, true) => Err(format!(
+            "'{leaf}' already exists in the template; use overrides: to replace it"
+        )),
+        (false, false) => Err(format!("'{leaf}' does not exist in the template")),
         _ => {
-            eprintln!("warning: override path '{path}' traverses a non-mapping node; skipping");
+            map.insert(serde_yaml::Value::String(leaf.to_string()), value);
+            Ok(())
         }
     }
 }
