@@ -1888,3 +1888,24 @@ fn an_element_method_on_a_receiver_that_cannot_be_an_element_is_refused() {
         assert_valid(&yaml(ok));
     }
 }
+
+#[test]
+fn the_selected_chapter_sort_is_a_chapter_list_argument() {
+    let yaml = |endpoint: &str, fields: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/c/$manga_id$\"\n    \
+             queries:\n      order: $sort$\n    fields:\n{fields}"
+        )
+    };
+    assert_valid(&yaml(
+        "chapter_list",
+        "      id: 'self.attr(\"data-id\")'\n",
+    ));
+    assert_invalid_containing(
+        &yaml(
+            "manga_details",
+            "      id: '\"$manga_id$\"'\n      title: 'dom(\"h1\").text()'\n      status: '\"unknown\"'\n",
+        ),
+        "sort",
+    );
+}

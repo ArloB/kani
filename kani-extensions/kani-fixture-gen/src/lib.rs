@@ -97,8 +97,8 @@ impl MangaExtension for FixtureGen {
     ) -> ExtensionResult<MangaList> {
         let mut req = HttpRequest::get(format!("{}/search", self.base_url))
             .endpoint_id("search")
-            .query("q", query)
-            .query("kw", format!("title-{} extra", query));
+            .query("kw", format!("title-{} extra", query))
+            .query("q", query);
 
         let __filter_mapping: [(String, kani_shared::request::FilterMapping); 1] = [(
             "genre".to_string(),
@@ -147,12 +147,15 @@ impl MangaExtension for FixtureGen {
     fn get_chapter_list(
         &self,
         manga_id: &str,
-        _page: i32,
-        _page_size: Option<i32>,
-        _sort: Option<String>,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
+        let _ = (page, page_size, &sort);
+        let sort = sort.unwrap_or_default();
         let req = HttpRequest::get(format!("{}/manga/{}/chapters", self.base_url, manga_id))
-            .endpoint_id("chapter_list");
+            .endpoint_id("chapter_list")
+            .query("order", sort);
         let bp = BlueprintBuilder::new(".ch")
             .request(req)
             .field("id", Expr::self_ref().attr("data-id"))
@@ -186,7 +189,16 @@ impl MangaExtension for FixtureGen {
     }
 
     fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {
-        Ok(vec![])
+        Ok(vec![
+            wit_types::SortOption {
+                id: "date_desc".to_string(),
+                name: "Newest first".to_string(),
+            },
+            wit_types::SortOption {
+                id: "number_asc".to_string(),
+                name: "Oldest first".to_string(),
+            },
+        ])
     }
 
     fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {

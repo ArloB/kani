@@ -216,12 +216,35 @@ pub(crate) fn emit_manga_details(
     }
 }
 
+fn emit_chapter_list_args(ep: &ValidatedEndpoint) -> String {
+    let mut referenced = kani_shared::request::template_parts(&ep.route).1;
+    for q in &ep.queries {
+        match &q.value {
+            crate::yaml::model::QueryValue::Arg(name) => referenced.push(name.clone()),
+            crate::yaml::model::QueryValue::Template(t) => {
+                referenced.extend(kani_shared::request::template_parts(t).1)
+            }
+            crate::yaml::model::QueryValue::Static(_) => {}
+        }
+    }
+    let uses = |name: &str| referenced.iter().any(|v| v == name);
+    let mut lines = vec!["let _ = (page, page_size, &sort);".to_string()];
+    if uses("page_size") {
+        lines.push("let page_size = page_size.unwrap_or(100);".to_string());
+    }
+    if uses("sort") {
+        lines.push("let sort = sort.unwrap_or_default();".to_string());
+    }
+    lines.join("\n") + "\n"
+}
+
 pub(crate) fn emit_chapter_list(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
+    let arg_prologue = emit_chapter_list_args(ep);
     let req_block = emit_request_block(
         &ep.route,
         &ep.method,
@@ -242,7 +265,8 @@ pub(crate) fn emit_chapter_list(
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
         let bp_chain = emit_blueprint_chain_no_request(ep, ext, "chapter_list");
         return format!(
-            "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+            "fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>, sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {arg_prologue}\
              {decode_prologue}\
              {bp_chain}\n\
              {browser_fetch}\n\
@@ -262,7 +286,8 @@ pub(crate) fn emit_chapter_list(
             }
         };
         format!(
-            "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+            "fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>, sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {arg_prologue}\
              {decode_prologue}\
              {bp_bytes}\n\
              {req_block}\n\
@@ -277,7 +302,8 @@ pub(crate) fn emit_chapter_list(
             ResponseType::Html => "extract::html(None, &bp)?",
         };
         format!(
-            "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+            "fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>, sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {arg_prologue}\
              {decode_prologue}\
              {req_block}\n\
              {bp_chain}\n\

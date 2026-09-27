@@ -60,6 +60,8 @@ endpoints:
 
   chapter_list:
     route: "/manga/$manga_id$/chapters"
+    queries:
+      order: $sort$
     container: ".ch"
     has_next_page: false
     fields:
@@ -76,5 +78,12 @@ endpoints:
     fields:
       index: "index()"
       url: 'self.attr("data-url")'
+
+chapter_sort:
+  options:
+    - id: date_desc
+      label: Newest first
+    - id: number_asc
+      label: Oldest first
 
 preferences: []

@@ -169,6 +169,27 @@ async fn chapter_list_result_parity() {
     let yids: Vec<_> = yr.chapters.iter().map(|c| &c.id).collect();
     assert_eq!(wids, yids);
     assert_eq!(wids, vec!["ch-1", "ch-2"]);
+
+    y.get_chapter_list("manga-1", 1, None, Some("date_desc".into()))
+        .await
+        .unwrap();
+    let y_order = origin
+        .last_request("/manga/manga-1/chapters")
+        .unwrap()
+        .query_param("order");
+    w.get_chapter_list("manga-1", 1, None, Some("date_desc".into()))
+        .await
+        .unwrap();
+    let w_order = origin
+        .last_request("/manga/manga-1/chapters")
+        .unwrap()
+        .query_param("order");
+    assert_eq!(
+        y_order.as_deref(),
+        Some("date_desc"),
+        "the selected sort reaches the source"
+    );
+    assert_eq!(w_order, y_order);
 }
 
 #[tokio::test]

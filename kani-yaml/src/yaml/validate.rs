@@ -24,7 +24,7 @@ use kani_shared::ast::OnFailurePolicy;
 const POPULAR_ARGS: &[&str] = &["page", "page_size", "filters"];
 const SEARCH_ARGS: &[&str] = &["query", "page", "page_size", "filters"];
 const DETAILS_ARGS: &[&str] = &["manga_id"];
-const CHAPTER_LIST_ARGS: &[&str] = &["manga_id", "page", "page_size"];
+const CHAPTER_LIST_ARGS: &[&str] = &["manga_id", "page", "page_size", "sort"];
 const PAGES_ARGS: &[&str] = &["chapter_id", "manga_id"];
 
 const MANGA_LIST_REQUIRED: &[&str] = &["id", "title"];

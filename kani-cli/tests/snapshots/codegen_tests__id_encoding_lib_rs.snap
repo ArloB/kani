@@ -123,10 +123,11 @@ impl MangaExtension for TestIdEncoding {
     fn get_chapter_list(
         &self,
         manga_id: &str,
-        _page: i32,
-        _page_size: Option<i32>,
-        _sort: Option<String>,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
+        let _ = (page, page_size, &sort);
         let __manga_decoded = kani_shared::encoding::decode_composite(
             manga_id,
             "|",

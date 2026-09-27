@@ -1152,6 +1152,7 @@ operator.
 | `$query$` | search | The search query string |
 | `$page$` | popular, search, chapter_list | The page number |
 | `$page_size$` | popular, search, chapter_list | The requested page size |
+| `$sort$` | chapter_list | The selected `chapter_sort` option id, or empty when none is selected |
 | `$manga_id$` | manga_details, chapter_list, pages | The manga identifier |
 | `$chapter_id$` | pages | The chapter identifier |
 | `$pref:key$` | any | Value of a user preference |
@@ -1295,6 +1296,10 @@ chapter_sort:
 ```
 
 Validation rules: `options` must be non-empty; each option `id` must be non-empty; `default`, when present, must name one of the declared option ids.
+
+Sorting happens at the source. The selected option id reaches `chapter_list` as `$sort$`, usable in
+its `route` and `queries` (for example `order: $sort$`), in both backends. The host does not reorder
+the rows it gets back, so an option changes the result only through the request it produces.
 
 #### Endpoint Chaining (`then` / `for_each`)
 
