@@ -649,12 +649,20 @@ mod shared_tests {
     }
 
     #[tokio::test]
-    async fn date_parse_rfc3339_invalid_errors() {
-        let err = json_eval_err(Expr::DateParseRfc3339 {
-            target: Box::new(lit("not-a-date")),
+    async fn a_malformed_rfc3339_date_is_null_like_the_other_parsers() {
+        for bad in ["not-a-date", "2024-13-45T00:00:00Z", "2024-01-15"] {
+            let v = json_eval_opt(Expr::DateParseRfc3339 {
+                target: Box::new(lit(bad)),
+            })
+            .await;
+            assert_eq!(v, serde_json::Value::Null, "{bad}");
+        }
+        let date_only = json_eval(Expr::DateParse {
+            target: Box::new(lit("2024-01-15")),
+            format: "[year]-[month]-[day]".into(),
         })
         .await;
-        assert!(err.contains("Invalid RFC3339"));
+        assert_eq!(date_only.as_i64(), Some(1_705_276_800), "midnight UTC");
     }
 
     #[tokio::test]

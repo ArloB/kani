@@ -544,9 +544,12 @@ where
 
         Expr::DateParseRfc3339 { target } => Some(recurse(target, env).await.and_then(|v| {
             v.map_str("date_parse_rfc3339", |date| {
-                time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
-                    .map(|dt| Value::Int(dt.unix_timestamp()))
-                    .map_err(|e| format!("Invalid RFC3339 date '{}': {}", date, e))
+                Ok(time::OffsetDateTime::parse(
+                    &date,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map(|dt| Value::Int(dt.unix_timestamp()))
+                .unwrap_or(Value::Null))
             })
         })),
 

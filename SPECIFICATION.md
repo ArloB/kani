@@ -205,7 +205,7 @@ Applying an operator to incompatible types (e.g., `String + Number`) is a runtim
 
 | Method | Input Type | Return Type | Description |
 |--------|-----------|-------------|-------------|
-| `.date_parse("format")` | String | Int/Null | Parse a date string using the given format pattern (Rust `time` crate syntax). Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
+| `.date_parse("format")` | String | Int/Null | Parse a date string using the given format pattern (Rust `time` crate syntax). Times without an offset are read as UTC, and a date-only format gives midnight UTC, whatever the host's time zone. Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
 | `.date_parse_rfc3339()` | String | Int/Null | Parse an RFC 3339 / ISO 8601 date string. Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
 
 #### URL Methods
