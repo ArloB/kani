@@ -1521,9 +1521,22 @@ pages:
 **`transform`:** an optional per-page field naming a transform from the host's
 transform registry (`kani_core::transform`), the declarative equivalent of a
 compiled extension setting `Page.transform`. The name is carried to the image
-proxy, which resolves it against the upstream response headers and applies it if
-it resolves; an unknown name, or one whose parameters are absent from the
-response, is a passthrough. An empty value counts as absent.
+proxy and the downloader, which resolve it against the upstream response headers.
+Resolution is strict, because an image delivered untransformed is a scrambled page
+saved as a success:
+
+- An unknown name, a transform of the wrong kind, or parameters that are present but
+  unusable fail the page. Examples of unusable parameters: `x-enc-seed` without
+  `x-enc-len`, an unparseable seed, a grid other than `5x5`, or `lcg-tile-5x5`
+  without an inline seed. A download fails without writing the page and is not
+  retried. The proxy refuses the image.
+- A transform passes the image through only on positive evidence that it is not
+  scrambled. For `lcg-tile-5x5-from-header`, that evidence is that the response
+  carries no scramble header at all, or carries explicit zero seeds. This follows
+  the source's own protocol. The body must still be a real image; one that is not
+  fails the page.
+
+An empty value counts as absent.
 
 ### 3.3 Pagination
 

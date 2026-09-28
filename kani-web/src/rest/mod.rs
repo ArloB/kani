@@ -727,13 +727,16 @@ pub(crate) async fn image_proxy(
                                 )));
                             }
                             let ct_string = ct_str.to_string();
-                            let resolved = transform_hint.as_deref().and_then(|hint| {
-                                kani_core::transform::registry().resolve(
-                                    hint,
-                                    kani_core::transform::TransformKind::Image,
-                                    resp.headers(),
-                                )
-                            });
+                            let resolved = match transform_hint.as_deref() {
+                                Some(hint) => kani_core::transform::registry()
+                                    .resolve(
+                                        hint,
+                                        kani_core::transform::TransformKind::Image,
+                                        resp.headers(),
+                                    )
+                                    .map_err(|e| AppError::Other(e.to_string()))?,
+                                None => None,
+                            };
                             drop(permit);
                             break (resp, ct_string, resolved);
                         }

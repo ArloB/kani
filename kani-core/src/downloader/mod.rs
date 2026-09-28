@@ -303,7 +303,10 @@ impl DownloaderManager {
             e,
             error::Error::HttpStatus { status, .. }
                 if matches!(status, 400 | 401 | 403 | 404 | 405 | 410 | 451)
-        ) || matches!(e, error::Error::UnsupportedScheme(_))
+        ) || matches!(
+            e,
+            error::Error::UnsupportedScheme(_) | error::Error::Transform(_)
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -429,13 +432,12 @@ impl DownloaderManager {
             });
         }
 
-        let resolved = transform.and_then(|hint| {
-            crate::transform::registry().resolve(
-                hint,
-                crate::transform::TransformKind::Image,
-                resp.headers(),
-            )
-        });
+        let resolved = match transform {
+            Some(hint) => crate::transform::registry()
+                .resolve(hint, crate::transform::TransformKind::Image, resp.headers())
+                .map_err(|e| error::Error::Transform(format!("page {page}: {e}")))?,
+            None => None,
+        };
 
         let announced = resp
             .headers()
@@ -447,6 +449,14 @@ impl DownloaderManager {
         // Content-Type and URL both say nothing can still be identified from
         // its magic bytes.
         let first_chunk = resp.chunk().await?;
+        if transform.is_some()
+            && resolved.is_none()
+            && crate::probe::sniff_image_mime(first_chunk.as_deref().unwrap_or(&[])).is_none()
+        {
+            return Err(error::Error::Transform(format!(
+                "page {page}: the transform found nothing to undo, but the body is not an image"
+            )));
+        }
         let (extension, filename) = if let Some(r) = &resolved {
             let ext = r.output().file_extension;
             (ext, format!("{:04}.{}", page, ext))
@@ -1029,6 +1039,84 @@ impl PageListFetcher for MockPageListFetcher {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[tokio::test]
+    async fn a_page_whose_transform_cannot_be_applied_fails_and_writes_nothing() {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mut png = Vec::new();
+        image::DynamicImage::new_rgb8(4, 4)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let server = MockServer::start().await;
+        let serve = |route: &str, body: Vec<u8>, headers: &[(&str, &str)]| {
+            let mut t = ResponseTemplate::new(200).set_body_raw(body, "image/png");
+            for (k, v) in headers {
+                t = t.insert_header(*k, *v);
+            }
+            Mock::given(path(route.to_string())).respond_with(t)
+        };
+        serve("/partial", png.clone(), &[("x-enc-seed", "777")])
+            .mount(&server)
+            .await;
+        serve("/plain", png.clone(), &[]).mount(&server).await;
+        serve("/garbage", b"not an image at all".to_vec(), &[])
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new(None)
+            .unwrap()
+            .with_allow_loopback_egress(true);
+        for (route, hint, needle) in [
+            ("/partial", "lcg-tile-5x5-from-header", "x-enc-len"),
+            ("/plain", "no-such-transform", "unknown transform"),
+            ("/garbage", "lcg-tile-5x5-from-header", "not an image"),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let started = std::time::Instant::now();
+            let err = DownloaderManager::download_page_with_retry_for_test(
+                &client,
+                &format!("{}{route}", server.uri()),
+                0,
+                tmp.path(),
+                5,
+                1000,
+                &server.uri(),
+                Some(hint),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains(needle), "{route}: {err}");
+            assert!(
+                started.elapsed() < std::time::Duration::from_millis(900),
+                "{route} was retried"
+            );
+            assert_eq!(
+                std::fs::read_dir(tmp.path()).unwrap().count(),
+                0,
+                "{route} wrote a file"
+            );
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let saved = DownloaderManager::download_page_with_retry_for_test(
+            &client,
+            &format!("{}/plain", server.uri()),
+            0,
+            tmp.path(),
+            1,
+            1,
+            &server.uri(),
+            Some("lcg-tile-5x5-from-header"),
+        )
+        .await;
+        assert!(
+            saved.is_ok(),
+            "an unscrambled page with no scramble headers is saved: {saved:?}"
+        );
+    }
 
     #[tokio::test]
     async fn a_page_url_that_is_not_http_fails_at_once_and_writes_nothing() {
