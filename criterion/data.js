@@ -1,6 +1,6 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789984530289,
-  "repoUrl": "https://github.com/ArloB/kani",
+  "lastUpdate": 1790592770983,
+  "repoUrl": "https://github.com/kani-app/kani",
   "entries": {
     "Benchmark": [
       {
@@ -237,6 +237,40 @@ window.BENCHMARK_DATA = {
             "name": "blueprint_eval/json_200_rows",
             "value": 1242720,
             "range": "± 19681",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Arlo Burke",
+            "username": "ArloB",
+            "email": "arlo.burke2@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "4b1cb5e141b5c6151c74ac66790dca964bbe7e31",
+          "message": "Add kani-cli check, sharing the server's install checks (#38)\n\n* Add kani-cli check, sharing the server's install checks\n* Report undeclared cache namespaces in kani-cli check\n* Make the hooks fixture use the real cache API, and keep fixtures valid\n* Refuse unknown keys in YAML extensions\n* Never run a source with its scripts silently dropped",
+          "timestamp": "2026-09-26T04:25:23Z",
+          "url": "https://github.com/kani-app/kani/commit/4b1cb5e141b5c6151c74ac66790dca964bbe7e31"
+        },
+        "date": 1790592769728,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "blueprint_eval/html_200_rows",
+            "value": 3730409,
+            "range": "± 13372",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "blueprint_eval/json_200_rows",
+            "value": 1215283,
+            "range": "± 17082",
             "unit": "ns/iter"
           }
         ]
