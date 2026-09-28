@@ -321,3 +321,17 @@ fn cursor_pagination_generates_the_same_blueprint_the_interpreter_builds() {
         "paginated with a cursor:\n{lib}"
     );
 }
+
+#[test]
+fn a_composite_get_url_is_resolved_by_the_shared_function() {
+    let validated = load_and_validate("id_encoding.yaml");
+    let lib = codegen::generate(&validated, false).lib_rs;
+    for needle in [
+        "kani_shared::request::source_url(",
+        "\"/series/$manga.hid$/$manga.slug$\"",
+        "kani_shared::ast::IdEncoding::Base64Url",
+        "&[\"hid\", \"slug\"]",
+    ] {
+        assert!(lib.contains(needle), "{needle} missing:\n{lib}");
+    }
+}

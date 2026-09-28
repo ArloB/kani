@@ -110,10 +110,26 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     }
 
     if let Some(url_template) = &ext.get_url {
-        let rust_template = url_template.replace("$manga_id$", "{manga_id}");
+        let composite = match ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref()) {
+            Some(e) => {
+                let encoding = match e.encoding {
+                    crate::yaml::schema::YamlIdEncoding::Base64Url => "Base64Url",
+                    crate::yaml::schema::YamlIdEncoding::Base64 => "Base64",
+                    crate::yaml::schema::YamlIdEncoding::Passthrough => "Passthrough",
+                    crate::yaml::schema::YamlIdEncoding::Hex => "Hex",
+                };
+                format!(
+                    "Some(&kani_shared::request::CompositeId {{ delimiter: {:?}, encoding: kani_shared::ast::IdEncoding::{encoding}, fields: &{:?} }})",
+                    e.delimiter,
+                    e.fields.iter().map(String::as_str).collect::<Vec<_>>()
+                )
+            }
+            None => "None".to_string(),
+        };
         parts.push(format!(
             "fn get_url(&self, manga_id: &str) -> ExtensionResult<String> {{\n\
-             Ok(format!(\"{rust_template}\"))\n\
+             kani_shared::request::source_url(&self.base_url, {url_template:?}, manga_id, {composite})\n    \
+             .map_err(kani_shared::ExtensionError::parse)\n\
              }}"
         ));
     }

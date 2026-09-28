@@ -806,15 +806,7 @@ impl YamlSource {
     }
 
     pub async fn get_source_url(&self, manga_id: &str) -> Result<String> {
-        let template = self.config.get_url.as_deref().ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "get_url not configured".to_string(),
-            ))
-        })?;
-        let mut args = Self::build_args(&[("manga_id", manga_id)]);
-        kani_yaml::resolve_get_url_manga_id(&self.config, &mut args)
-            .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
-        kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
+        kani_yaml::source_url(&self.config, manga_id)
             .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }
 

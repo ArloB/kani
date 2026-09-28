@@ -291,22 +291,29 @@ pub fn resolve_composite_ids(
     Ok(())
 }
 
-/// Decode the `manga_id` arg against the extension's top-level `id_encoding.manga`
-/// block and add the decoded sub-fields (`manga_<field>`) to `args`.
-///
-/// `get_url` is not an endpoint, so it carries no `composite_id_decodes` of its own
-/// (those are only collected per-endpoint from a route/page_url — see
-/// `collect_composite_id_decodes`); this is the equivalent for the one template that
-/// lives outside the endpoints map. A no-op when the extension declares no
-/// `id_encoding.manga`, or when `manga_id` isn't present in `args`.
-pub fn resolve_get_url_manga_id(
-    ext: &yaml::model::ValidatedExtension,
-    args: &mut std::collections::HashMap<String, String>,
-) -> Result<(), String> {
-    match ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref()) {
-        Some(entry) => decode_composite_arg(entry, "manga", "manga_id", args),
-        None => Ok(()),
-    }
+/// The source-site URL for `manga_id` from the extension's `get_url` template, decoding a
+/// composite id through the same [`kani_shared::request::source_url`] generated code calls.
+pub fn source_url(ext: &yaml::model::ValidatedExtension, manga_id: &str) -> Result<String, String> {
+    use yaml::schema::YamlIdEncoding;
+    let template = ext
+        .get_url
+        .as_deref()
+        .ok_or_else(|| "get_url not configured".to_string())?;
+    let entry = ext.id_encoding.as_ref().and_then(|b| b.manga.as_ref());
+    let fields: Vec<&str> = entry
+        .map(|e| e.fields.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+    let composite = entry.map(|e| kani_shared::request::CompositeId {
+        delimiter: &e.delimiter,
+        encoding: match e.encoding {
+            YamlIdEncoding::Base64Url => kani_shared::ast::IdEncoding::Base64Url,
+            YamlIdEncoding::Base64 => kani_shared::ast::IdEncoding::Base64,
+            YamlIdEncoding::Passthrough => kani_shared::ast::IdEncoding::Passthrough,
+            YamlIdEncoding::Hex => kani_shared::ast::IdEncoding::Hex,
+        },
+        fields: &fields,
+    });
+    kani_shared::request::source_url(&ext.base_url, template, manga_id, composite.as_ref())
 }
 
 /// Maps active filters onto query parameters, per an endpoint's `filter_mapping`
@@ -448,9 +455,6 @@ mod url_tests {
 
     #[test]
     fn get_url_resolves_a_dotted_composite_id() {
-        // `resolve_get_url_manga_id` is a thin `id_encoding.manga` lookup around this
-        // same decode step, exercised directly here to avoid hand-building the ~25-field
-        // `ValidatedExtension` just to reach it.
         use super::decode_composite_arg;
         use super::yaml::schema::{IdEncodingEntry, YamlIdEncoding};
 

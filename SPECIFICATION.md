@@ -1080,7 +1080,11 @@ endpoints:
   pages: PagesEndpoint
 
 # === Canonical manga URL (optional) ===
-get_url: string         # URL template for a manga's page on the source site.
+get_url: string         # URL template for a manga's page on the source site: a path joined to
+                        # base_url, or an absolute http(s) URL used as-is. Takes $manga_id$ and,
+                        # with id_encoding.manga, the decoded $manga.<field>$ parts, each
+                        # percent-encoded as a route value. Both backends resolve it with
+                        # kani_shared::request::source_url; an id that does not decode is an error.
                         # Use `$manga_id$` as the placeholder. Without it the
                         # host cannot produce an "open on source site" link.
 

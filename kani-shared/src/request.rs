@@ -203,6 +203,41 @@ pub fn form_encode(text: &str) -> String {
     out
 }
 
+/// How a source packs its composite manga id, for resolving `$manga.<field>$` placeholders.
+pub struct CompositeId<'a> {
+    pub delimiter: &'a str,
+    pub encoding: crate::ast::IdEncoding,
+    pub fields: &'a [&'a str],
+}
+
+/// The source-site URL for a manga, from the extension's `get_url` template. Both backends call
+/// this, so a composite id decodes and every placeholder is encoded the same way.
+pub fn source_url(
+    base_url: &str,
+    template: &str,
+    manga_id: &str,
+    composite: Option<&CompositeId<'_>>,
+) -> Result<String, String> {
+    let mut args = HashMap::from([("manga_id".to_string(), manga_id.to_string())]);
+    if let Some(c) = composite {
+        let decoded =
+            crate::encoding::decode_composite(manga_id, c.delimiter, &c.encoding, c.fields)
+                .map_err(|e| {
+                    format!("manga_id {manga_id:?} is not a valid manga id for this source: {e}")
+                })?;
+        for (field, value) in decoded {
+            args.insert(format!("manga_{field}"), value);
+        }
+    }
+    let absolute = ["https://", "http://"].iter().any(|scheme| {
+        template
+            .get(..scheme.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(scheme))
+    });
+    let base = if absolute { "" } else { base_url };
+    build_url(base, template, &args)
+}
+
 /// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
 /// names, starting and ending with text. A `$` that opens no placeholder stays literal.
 pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {
@@ -612,5 +647,63 @@ mod body_tests {
             content_type: "text/plain".into(),
         };
         assert_eq!(render_body(&fits, &args()).unwrap().1, b"q=2");
+    }
+}
+
+#[cfg(test)]
+mod source_url_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn a_composite_id_resolves_to_the_canonical_page_with_each_part_encoded() {
+        let id = crate::encoding::encode_composite(
+            &["123", "one-piece: part 1/2 & more?"],
+            "|",
+            &crate::ast::IdEncoding::Base64Url,
+        )
+        .unwrap();
+        let composite = CompositeId {
+            delimiter: "|",
+            encoding: crate::ast::IdEncoding::Base64Url,
+            fields: &["hid", "slug"],
+        };
+        let url = source_url(
+            "https://ex.com/",
+            "/series/$manga.hid$/$manga.slug$",
+            &id,
+            Some(&composite),
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://ex.com/series/123/one-piece%3A%20part%201%2F2%20%26%20more%3F"
+        );
+        let err = source_url(
+            "https://ex.com",
+            "/s/$manga.slug$",
+            "not*base64",
+            Some(&composite),
+        )
+        .unwrap_err();
+        assert!(err.contains("is not a valid manga id"), "{err}");
+    }
+
+    #[test]
+    fn a_plain_or_absolute_template_is_joined_and_encoded() {
+        assert_eq!(
+            source_url("https://ex.com", "/m/$manga_id$", "a b/c", None).unwrap(),
+            "https://ex.com/m/a%20b%2Fc"
+        );
+        assert_eq!(
+            source_url(
+                "https://ex.com",
+                "https://other.example/m/$manga_id$",
+                "x",
+                None
+            )
+            .unwrap(),
+            "https://other.example/m/x"
+        );
     }
 }
