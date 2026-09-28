@@ -4,6 +4,7 @@ version: "0.1.0"
 base_url: "https://example.com"
 language: en
 
+get_url: "/series/$manga.hid$/$manga.slug$"
 id_encoding:
   manga:
     fields: [hid, slug]

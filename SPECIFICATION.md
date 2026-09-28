@@ -1080,7 +1080,11 @@ endpoints:
   pages: PagesEndpoint
 
 # === Canonical manga URL (optional) ===
-get_url: string         # URL template for a manga's page on the source site.
+get_url: string         # URL template for a manga's page on the source site: a path joined to
+                        # base_url, or an absolute http(s) URL used as-is. Takes $manga_id$ and,
+                        # with id_encoding.manga, the decoded $manga.<field>$ parts, each
+                        # percent-encoded as a route value. Both backends resolve it with
+                        # kani_shared::request::source_url; an id that does not decode is an error.
                         # Use `$manga_id$` as the placeholder. Without it the
                         # host cannot produce an "open on source site" link.
 
@@ -1543,9 +1547,9 @@ chapter_list:
                           # report a count and the host will rely on `has_next_page`.
 ```
 
-When `has_next_page` is omitted there is no next page, in both backends. A page that extracted no
-rows never has a next page, whatever the rule says, so a static `true` cannot loop the client over
-empty pages.
+When `has_next_page` is omitted there is no next page unless `total_pages` or native
+`pagination` shows one (§3.3 precedence), in both backends. A page that extracted no rows never has
+a next page, whatever the rule says, so a static `true` cannot loop the client over empty pages.
 
 #### PagesEndpoint
 
@@ -1619,7 +1623,20 @@ last chunk held rows past the slice, or when the walk could have continued. No c
 between requests, so an earlier page changing upstream cannot make a stored token return a
 different slice. Every chunk counts against the operation budget (§5.2), which bounds a deep page.
 
-**`has_next_page` detection:** If the blueprint includes a `scalars` entry named `has_next_page`, its value from the last fetched chunk is used. Otherwise the framework falls back to: last chunk was full (≥ `native_page_size` items) → more pages available.
+**`has_next_page` precedence.** `pagination`, `has_next_page` and `total_pages` apply to `popular`,
+`search` and `chapter_list`, in both backends. Whether another page exists is decided by the first
+of these that applies:
+
+1. A page with no rows has no next page.
+2. A declared `has_next_page`: a static value, or an expression. For an expression, the value from
+   the last fetched chunk is used.
+3. A known `total_pages`, static or from a scalar: there is another page while `page < total_pages`.
+   With `pagination`, the total is rescaled from native pages to the client's page size.
+4. Native `pagination`: the last chunk was full (≥ `native_page_size` items).
+5. Otherwise there is none.
+
+A `chapter_list` with `pagination` is fetched chunk by chunk like any list, so a chapter list
+spanning several native chunks is read completely in both backends.
 
 For endpoints where the source supports arbitrary page sizes (the client's `page_size` is passed directly), omit `pagination` and use `$page$` / `$page_size$` in `queries` as before.
 
@@ -1859,7 +1876,8 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: false. Static or DSL expression.
+    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
+    total_pages: integer | string # Optional. Static count or DSL expression.
     pagination: PaginationConfig
 
   search:                       # -> search_manga
@@ -1874,7 +1892,8 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: false. Static or DSL expression.
+    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
+    total_pages: integer | string # Optional. Static count or DSL expression.
     pagination: PaginationConfig
 
   manga_details:                # -> get_manga_details
@@ -1898,7 +1917,9 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string
+    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
+    total_pages: integer | string # Optional. Static count or DSL expression.
+    pagination: PaginationConfig
 
   pages:                        # -> get_pages
     route: string
@@ -2249,7 +2270,7 @@ The body must return a `HookAction` value:
 | `retry()` | Re-send the request immediately (counts against `max_hook_requests`). |
 | `retry_after(seconds)` | Re-send after a delay (counts against `max_hook_requests`). |
 | `fail(kind, reason)` | Abort with an `ExtensionError` of the named kind. |
-| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. |
+| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. Interpreted YAML sources only (§5). |
 
 #### Cache in hook scripts
 
@@ -2437,6 +2458,7 @@ found difference here and to that check.
 | Feature | Interpreted YAML | Generated WASM |
 |---------|------------------|----------------|
 | `for_each[].deduplicate_by` (§3.2) | Supported | Rejected at generation |
+| `refresh_auth(...)` in a hook (§3.10) | Supported | Rejected at generation; a hand-written WASM extension that returns it gets an `Auth` error saying so |
 
 ### 5.1 Interpreted YAML backend
 

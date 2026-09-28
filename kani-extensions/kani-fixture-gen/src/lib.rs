@@ -138,7 +138,7 @@ impl MangaExtension for FixtureGen {
         let rows = extract::paginated_html(page, page_size, &bp)?;
         Ok(kani_shared::unpack::unpack_manga_list(
             &rows,
-            kani_shared::unpack::HasNextPage::FromScalar,
+            kani_shared::unpack::HasNextPage::Derived { page },
             kani_shared::unpack::TotalPages::None,
             &[],
         )
@@ -173,6 +173,7 @@ impl MangaExtension for FixtureGen {
         sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
         let _ = (page, page_size, &sort);
+        let page_size = page_size.unwrap_or(100);
         let sort = sort.unwrap_or_default();
         let req = HttpRequest::get(format!(
             "{}/manga/{}/chapters",
@@ -187,11 +188,12 @@ impl MangaExtension for FixtureGen {
             .field("language", Expr::lit("en"))
             .field("number", Expr::num(0.0))
             .field_opt("title", Expr::self_ref().first(".title").text())
+            .paginated(2, "p", OffsetType::PageNumber { start: 1 })
             .build();
-        let rows = extract::html(None, &bp)?;
+        let rows = extract::paginated_html(page, page_size, &bp)?;
         Ok(kani_shared::unpack::unpack_chapter_list(
             &rows,
-            kani_shared::unpack::HasNextPage::Static(false),
+            kani_shared::unpack::HasNextPage::Derived { page },
             kani_shared::unpack::TotalPages::None,
             &[],
         )

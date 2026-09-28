@@ -124,6 +124,13 @@ impl HttpRequest {
         self,
     ) -> Result<(String, String, Vec<(String, String)>, Vec<(String, String)>), ExtensionError>
     {
+        if self.body.is_some() {
+            return Err(ExtensionError::invalid_input(
+                "a request body cannot go through raw paginated extraction; generate the \
+                 extension without --embedded-bytes"
+                    .to_string(),
+            ));
+        }
         let url = self.build_final_url()?;
         let method = match self.method {
             HttpMethod::Get => "GET",

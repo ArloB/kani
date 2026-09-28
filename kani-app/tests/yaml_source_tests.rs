@@ -2268,3 +2268,39 @@ async fn a_hook_cannot_grow_a_body_past_the_limit_and_a_retry_resends_it() {
         "the retry re-sent the identical body"
     );
 }
+
+#[tokio::test]
+async fn a_composite_id_opens_its_canonical_page_with_each_part_encoded() {
+    let yaml = r#"id: composite-url
+name: composite-url
+version: "1.0.0"
+base_url: "https://example.com"
+get_url: "/series/$manga.hid$/$manga.slug$"
+id_encoding:
+  manga:
+    fields: [hid, slug]
+    delimiter: "|"
+    encoding: base64_url
+endpoints:
+  manga_details:
+    route: /title/$manga.slug$
+    container: ":root"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.first(".title").text()'
+      status: '"unknown"'
+"#;
+    let svc = test_service().await;
+    let source_id = svc.install_yaml_source(yaml.as_bytes()).await.unwrap();
+    let id = kani_shared::encoding::encode_composite(
+        &["123", "one-piece: part 1/2 & more?"],
+        "|",
+        &kani_shared::ast::IdEncoding::Base64Url,
+    )
+    .unwrap();
+    let url = svc.get_source_url(source_id, &id).await.unwrap();
+    assert_eq!(
+        url,
+        "https://example.com/series/123/one-piece%3A%20part%201%2F2%20%26%20more%3F"
+    );
+}

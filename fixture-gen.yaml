@@ -69,8 +69,11 @@ endpoints:
     route: "/manga/$manga_id$/chapters"
     queries:
       order: $sort$
+    pagination:
+      native_page_size: 2
+      offset_param: p
+      offset_type: page
     container: ".ch"
-    has_next_page: false
     fields:
       id: 'self.attr("data-id")'
       number: '0.0'

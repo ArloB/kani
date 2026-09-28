@@ -163,8 +163,14 @@ async fn chapter_list_result_parity() {
     let w = compiled_or_skip!(origin);
     let y = interpreted(&origin.base());
 
-    let wr = w.get_chapter_list("manga-1", 1, None, None).await.unwrap();
-    let yr = y.get_chapter_list("manga-1", 1, None, None).await.unwrap();
+    let wr = w
+        .get_chapter_list("manga-1", 1, Some(2), None)
+        .await
+        .unwrap();
+    let yr = y
+        .get_chapter_list("manga-1", 1, Some(2), None)
+        .await
+        .unwrap();
     let wids: Vec<_> = wr.chapters.iter().map(|c| &c.id).collect();
     let yids: Vec<_> = yr.chapters.iter().map(|c| &c.id).collect();
     assert_eq!(wids, yids);
@@ -340,4 +346,47 @@ async fn request_bodies_are_byte_identical_on_both_backends() {
         "the compiled backend sends the same bytes"
     );
     assert_eq!(w_req.header("content-type"), y_req.header("content-type"));
+}
+
+#[tokio::test]
+async fn a_chapter_list_spanning_two_native_chunks_matches_on_both_backends() {
+    let origin = TestOrigin::start().await;
+    seed(&origin);
+    let w = compiled_or_skip!(origin);
+    let y = interpreted(&origin.base());
+    let last = r#"<html><body><div class="ch" data-id="ch-3"><span class="title">Chapter 3</span></div></body></html>"#;
+    let chunks = || vec![Response::html(CHAPTERS_HTML), Response::html(last)];
+
+    let mut results = Vec::new();
+    for backend in [&y, &w] {
+        origin.script("/manga/manga-1/chapters", chunks());
+        let list = backend
+            .get_chapter_list("manga-1", 1, Some(3), None)
+            .await
+            .unwrap();
+        let seen = origin.last_request("/manga/manga-1/chapters").unwrap();
+        results.push((
+            list.chapters
+                .iter()
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>(),
+            list.has_next_page,
+            seen.query_param("p"),
+        ));
+    }
+    assert_eq!(
+        results[0].0,
+        ["ch-1", "ch-2", "ch-3"],
+        "both chunks were read"
+    );
+    assert!(!results[0].1, "the short second chunk ends the list");
+    assert_eq!(
+        results[0].2.as_deref(),
+        Some("2"),
+        "the second chunk was requested"
+    );
+    assert_eq!(
+        results[1], results[0],
+        "the compiled backend pages the same way"
+    );
 }

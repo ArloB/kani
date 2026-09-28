@@ -687,7 +687,7 @@ impl YamlSource {
                     ("page_size", &page_size.to_string()),
                 ]);
                 let result = self.eval_endpoint(ep, "popular", &args, filters).await?;
-                Ok(unpack_manga_list(&result, ep, "popular"))
+                Ok(unpack_manga_list(&result, ep, "popular", page))
             }
             None => Err(Error::Extension(
                 kani_shared::extension::ExtensionError::parse(
@@ -717,7 +717,7 @@ impl YamlSource {
             ("page_size", &page_size_str),
         ]);
         let result = self.eval_endpoint(ep, "search", &args, filters).await?;
-        Ok(unpack_manga_list(&result, ep, "search"))
+        Ok(unpack_manga_list(&result, ep, "search", page))
     }
 
     pub async fn search_manga(
@@ -770,7 +770,7 @@ impl YamlSource {
             ("sort", sort_str),
         ]);
         let result = self.eval_endpoint(ep, "chapter_list", &args, &[]).await?;
-        Ok(unpack_chapter_list(&result, ep, "chapter_list"))
+        Ok(unpack_chapter_list(&result, ep, "chapter_list", page))
     }
 
     pub async fn get_pages(&self, manga_id: &str, chapter_id: &str) -> Result<Chapter> {
@@ -806,15 +806,7 @@ impl YamlSource {
     }
 
     pub async fn get_source_url(&self, manga_id: &str) -> Result<String> {
-        let template = self.config.get_url.as_deref().ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "get_url not configured".to_string(),
-            ))
-        })?;
-        let mut args = Self::build_args(&[("manga_id", manga_id)]);
-        kani_yaml::resolve_get_url_manga_id(&self.config, &mut args)
-            .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
-        kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
+        kani_yaml::source_url(&self.config, manga_id)
             .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }
 
@@ -977,12 +969,12 @@ fn classify_eval_error(e: String) -> kani_shared::extension::ExtensionError {
 }
 
 /// Lower an endpoint's `has_next_page` config to the shared unpack spec.
-fn hnp_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::HasNextPage {
+fn hnp_spec(ep: &kani_yaml::ValidatedEndpoint, page: i32) -> kani_shared::unpack::HasNextPage {
+    use kani_yaml::yaml::model::ValidatedHnp;
     match &ep.has_next_page {
-        kani_yaml::yaml::model::ValidatedHnp::Static(b) => {
-            kani_shared::unpack::HasNextPage::Static(*b)
-        }
-        _ => kani_shared::unpack::HasNextPage::FromScalar,
+        ValidatedHnp::Static(b) => kani_shared::unpack::HasNextPage::Static(*b),
+        ValidatedHnp::Scalar(_) => kani_shared::unpack::HasNextPage::FromScalar,
+        ValidatedHnp::Default => kani_shared::unpack::HasNextPage::Derived { page },
     }
 }
 
@@ -1025,9 +1017,14 @@ fn unpack_manga_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
     endpoint: &str,
+    page: i32,
 ) -> MangaList {
-    let unpacked =
-        kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep), &[]);
+    let unpacked = kani_shared::unpack::unpack_manga_list(
+        result,
+        hnp_spec(ep, page),
+        total_pages_spec(ep),
+        &[],
+    );
     warn_skipped_rows(endpoint, unpacked.skipped);
     unpacked.value.into()
 }
@@ -1111,9 +1108,14 @@ fn unpack_chapter_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
     endpoint: &str,
+    page: i32,
 ) -> ChapterList {
-    let unpacked =
-        kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep), &[]);
+    let unpacked = kani_shared::unpack::unpack_chapter_list(
+        result,
+        hnp_spec(ep, page),
+        total_pages_spec(ep),
+        &[],
+    );
     warn_skipped_rows(endpoint, unpacked.skipped);
     unpacked.value.into()
 }
