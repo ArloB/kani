@@ -2523,6 +2523,11 @@ cannot grant themselves anything. A grant:
   multicast addresses, whether named directly or reached through DNS;
 - is still subject to the host policy: a restricted source reaches a granted host only if it is
   the source's `base_url` host.
+- does not cover browser captures. The solver's browser has its own network and is never given
+  the grant, so a `browser_payload` endpoint, hook or WASM capture whose target is a granted host,
+  a private IP literal, or a name that resolves to a forbidden address fails with "local-network
+  grants do not cover browser captures" or "browser capture of a forbidden host refused" before
+  the solver is contacted. Direct HTTP endpoints to the same host keep working.
 
 Changing a grant reloads the source.
 

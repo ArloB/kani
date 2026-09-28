@@ -1051,6 +1051,37 @@ impl SmartClient {
         )
     }
 
+    async fn refuse_local_capture(&self, url: &str) -> std::result::Result<(), String> {
+        if self.local_grants.permits_url(url) {
+            return Err(format!(
+                "local-network grants do not cover browser captures: {url}"
+            ));
+        }
+        let allow_loopback = self
+            .allow_loopback_egress
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let refused = |ip: std::net::IpAddr| {
+            crate::network::is_forbidden_ip(ip) && !(allow_loopback && ip.is_loopback())
+        };
+        let parsed = url::Url::parse(url).map_err(|e| format!("invalid capture URL: {e}"))?;
+        let port = parsed.port_or_known_default().unwrap_or(80);
+        let addresses: Vec<std::net::IpAddr> = match parsed.host() {
+            Some(url::Host::Ipv4(v4)) => vec![v4.into()],
+            Some(url::Host::Ipv6(v6)) => vec![v6.into()],
+            Some(url::Host::Domain(domain)) => tokio::net::lookup_host((domain, port))
+                .await
+                .map(|found| found.map(|a| a.ip()).collect())
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        if addresses.into_iter().any(refused) {
+            return Err(format!(
+                "browser capture of a forbidden host refused: {url}"
+            ));
+        }
+        Ok(())
+    }
+
     /// Refuses a first hop to a forbidden IP literal, which the validating resolver never sees.
     fn refuse_forbidden_egress(&self, url: &str) -> Result<()> {
         if egress_forbidden(&self.allow_loopback_egress, &self.local_grants, url) {
@@ -1746,6 +1777,9 @@ impl SmartClient {
         use std::sync::atomic::Ordering;
 
         crate::network::require_http_url(url).map_err(SolverCaptureError::Failed)?;
+        self.refuse_local_capture(url)
+            .await
+            .map_err(SolverCaptureError::Failed)?;
         if self.solver_capture_support.load(Ordering::Relaxed) == 2 {
             return Err(SolverCaptureError::Unsupported);
         }
@@ -2735,6 +2769,45 @@ mod tests {
                 "{url}: {error:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_capture_of_a_granted_or_local_target_never_reaches_the_solver() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let grants = crate::network::LocalGrants::parse(&["192.168.1.50".to_string()]).unwrap();
+        let client = SmartClient::new(Some(server.uri()))
+            .unwrap()
+            .with_local_grants(grants)
+            .unwrap();
+
+        for (url, reason) in [
+            (
+                "http://192.168.1.50/manga",
+                "local-network grants do not cover browser captures",
+            ),
+            ("http://10.0.0.7/manga", "forbidden"),
+            ("http://localhost:8080/manga", "forbidden"),
+        ] {
+            let error = client
+                .solver_capture(url, "passPayload(1)", 1000, None, false)
+                .await
+                .expect_err(url);
+            assert!(
+                matches!(&error, SolverCaptureError::Failed(m) if m.contains(reason)),
+                "{url}: {error:?}"
+            );
+        }
+        assert!(
+            client
+                .refuse_forbidden_egress("http://192.168.1.50/manga")
+                .is_ok(),
+            "direct HTTP to the granted host still works"
+        );
     }
 
     #[tokio::test]
