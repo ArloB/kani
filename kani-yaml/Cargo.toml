@@ -19,7 +19,6 @@ serde_yaml  = "0.9"
 chumsky     = "1.0.0-alpha.8"
 thiserror   = "2.0"
 rhai        = { version = "1.19", features = ["sync"] }
-base64      = "0.22"
 semver      = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
