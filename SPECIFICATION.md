@@ -2550,9 +2550,25 @@ use (TOFU) key pinning.
 - **Key change after trust** returns HTTP `409` (`REPO_KEY_CHANGED`); re-trust requires an explicit re-add.
 - **Blocked repos** (admin-managed `blocked_repos`, merged with a compile-time list) return HTTP `403`.
 
+**One verified-index sequence, on every path.** Add, refresh, list, install and update all use the
+index the same way:
+
+1. The repository URL must be `http`/`https` and not blocked. `index.json` and `index.json.sig`
+   are fetched through the SSRF-protected client; redirects follow §7.
+2. The signature over the exact index bytes is verified before any field is used. On refresh,
+   install and update, it is checked against the **pinned** maintainer key. On first add, the one
+   field read beforehand is the `maintainer_key` the index claims, which the signature must match
+   and the operator then confirms (TOFU).
+3. The verified index must name the pinned key. Only then is it parsed and an entry selected.
+4. The exact signed bytes and their signature are stored. Every later use re-verifies them
+   against the pinned key, so a cached index that was altered, or a pin that changed since it was
+   cached, is refused ("no longer verifies against the pinned key; refresh the repository") before
+   any entry is selected. An index cached before signatures were stored must be refreshed first.
+5. The selected entry's artifact is fetched and verified as in §6.3.
+
 ### 6.3 Install pipeline
 
-`install_or_update_from_repo` (serialized per extension id by an install lock): locate the manifest entry → check `min_kani_version` → download the artifact through the SSRF-protected client with size caps (`MAX_INDEX_BYTES` 1 MiB, `MAX_ARTIFACT_BYTES` 10 MiB) → verify `sha256` → verify the author Ed25519 signature → check that the artifact's own `id` equals the index entry's `id` (and, on update, the updated source's name) → **only then** write the file (`save_yaml`/`save_wasm`, both path-traversal guarded) → upsert the `sources` row (`name` is UNIQUE) → `registry.insert` (new) or `registry.hot_swap` (update). A verification failure writes no file and makes no DB change.
+`install_or_update_from_repo` (serialized per extension id by an install lock): re-verify the cached signed index against the pinned key (§6.2) → locate the manifest entry → check `min_kani_version` → download the artifact through the SSRF-protected client with size caps (`MAX_INDEX_BYTES` 1 MiB, `MAX_ARTIFACT_BYTES` 10 MiB) → verify `sha256` → verify the author Ed25519 signature → check that the artifact's own `id` equals the index entry's `id` (and, on update, the updated source's name) → **only then** write the file (`save_yaml`/`save_wasm`, both path-traversal guarded) → upsert the `sources` row (`name` is UNIQUE) → `registry.insert` (new) or `registry.hot_swap` (update). A verification failure writes no file and makes no DB change.
 
 Every fallible step that has no side effects (verification, YAML validation, WASM compilation and
 instantiation, capability checks) runs before anything is written. Artifacts are written to a

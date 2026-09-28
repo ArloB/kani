@@ -822,3 +822,65 @@ async fn a_repository_url_must_be_http() {
         );
     }
 }
+
+async fn added_repo(ext_id: &str) -> (kani_app::service::AppService, i64) {
+    let repo = TestRepo::new(ext_id);
+    let port = start_mock_server(repo.build_routes("Pinned Repo")).await;
+    let url = format!("http://127.0.0.1:{port}");
+    let fp = fingerprint(&repo.maintainer_key);
+    let svc = test_service().await;
+    let RepoAddResult::Added { id, .. } = svc.add_repo(&url, Some(&fp), None).await.unwrap() else {
+        panic!("expected Added");
+    };
+    (svc, id)
+}
+
+#[tokio::test]
+async fn a_cached_index_that_no_longer_verifies_is_never_used() {
+    let ext_id = unique_ext_id();
+
+    let (svc, repo_id) = added_repo(&ext_id).await;
+    sqlx::query("UPDATE repo_trust SET index_cache = replace(index_cache, '\"version\"', '\"version\" ') WHERE id = ?")
+        .bind(repo_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    for err in [
+        svc.install_source_from_repo(repo_id, &ext_id, None)
+            .await
+            .unwrap_err(),
+        svc.list_repo_extensions(repo_id)
+            .await
+            .map(|_| ())
+            .unwrap_err(),
+    ] {
+        assert!(
+            err.to_string().contains("no longer verifies"),
+            "tampered cache: {err}"
+        );
+    }
+
+    let (svc, repo_id) = added_repo(&ext_id).await;
+    sqlx::query("UPDATE repo_trust SET maintainer_key = ? WHERE id = ?")
+        .bind(pk_b64(&gen_key()))
+        .bind(repo_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    let err = svc
+        .install_source_from_repo(repo_id, &ext_id, None)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no longer verifies"),
+        "changed pin: {err}"
+    );
+
+    let (svc, repo_id) = added_repo(&ext_id).await;
+    assert!(
+        svc.install_source_from_repo(repo_id, &ext_id, None)
+            .await
+            .unwrap()
+            > 0
+    );
+}

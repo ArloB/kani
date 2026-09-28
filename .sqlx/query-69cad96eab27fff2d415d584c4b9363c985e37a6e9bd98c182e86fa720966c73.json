@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!\", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust WHERE id = ?",
+  "query": "SELECT id as \"id!\", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at, index_sig FROM repo_trust ORDER BY name",
   "describe": {
     "columns": [
       {
@@ -42,10 +42,15 @@
         "name": "created_at",
         "ordinal": 7,
         "type_info": "Text"
+      },
+      {
+        "name": "index_sig",
+        "ordinal": 8,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -55,8 +60,9 @@
       false,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "7a10a871aac4606a0f0615dd12e3e7299b9b6ddf2d74f388b7e723f1f7bb3df7"
+  "hash": "69cad96eab27fff2d415d584c4b9363c985e37a6e9bd98c182e86fa720966c73"
 }

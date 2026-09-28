@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) VALUES (?, ?, ?, ?) RETURNING id",
+  "query": "INSERT INTO repo_trust (url, name, maintainer_key, index_cache, index_sig) VALUES (?, ?, ?, ?, ?) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 4
+      "Right": 5
     },
     "nullable": [
       false
     ]
   },
-  "hash": "36f93fd541104fe70a5813fbf0687cd066f58b0ea5a993fd5034b029245edda3"
+  "hash": "38b9db7edd7fd9fdcf4eea24d1ae5174a8fdbbaa9577f93c48e77899149112c9"
 }
