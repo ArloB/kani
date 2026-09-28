@@ -21,12 +21,25 @@ fn pk_b64(key: &SigningKey) -> String {
 }
 
 /// Seeds trusted repository state without exercising repository enrollment.
-async fn seed_repo(state: &kani_web::state::AppState, url: &str, name: &str, pk: &str) -> i64 {
+async fn seed_repo(
+    state: &kani_web::state::AppState,
+    url: &str,
+    name: &str,
+    key: &SigningKey,
+) -> i64 {
+    use kani_app::source::signing::{sign_artifact, signature_b64};
+    let pk = pk_b64(key);
     let index_json = serde_json::json!({"name": name, "maintainer_key": pk, "extensions": []});
     let index_str = serde_json::to_string(&index_json).unwrap();
+    let sig = signature_b64(&sign_artifact(index_str.as_bytes(), key));
     sqlx::query_scalar!(
-        "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) VALUES (?, ?, ?, ?) RETURNING id",
-        url, name, pk, index_str
+        "INSERT INTO repo_trust (url, name, maintainer_key, index_cache, index_sig) \
+         VALUES (?, ?, ?, ?, ?) RETURNING id",
+        url,
+        name,
+        pk,
+        index_str,
+        sig
     )
     .fetch_one(&state.db)
     .await
@@ -75,7 +88,7 @@ async fn add_repo_with_non_https_url_returns_400() {
 async fn get_repo_returns_200_for_seeded_repo() {
     let state = test_state().await;
     let key = gen_key();
-    let repo_id = seed_repo(&state, "https://example-repo.com", "My Repo", &pk_b64(&key)).await;
+    let repo_id = seed_repo(&state, "https://example-repo.com", "My Repo", &key).await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
@@ -98,13 +111,7 @@ async fn get_repo_returns_200_for_seeded_repo() {
 async fn delete_repo_returns_no_content() {
     let state = test_state().await;
     let key = gen_key();
-    let repo_id = seed_repo(
-        &state,
-        "https://to-delete.example.com",
-        "Repo",
-        &pk_b64(&key),
-    )
-    .await;
+    let repo_id = seed_repo(&state, "https://to-delete.example.com", "Repo", &key).await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
@@ -124,13 +131,7 @@ async fn delete_repo_returns_no_content() {
 async fn list_repo_extensions_returns_empty_for_seeded_repo() {
     let state = test_state().await;
     let key = gen_key();
-    let repo_id = seed_repo(
-        &state,
-        "https://ext-list.example.com",
-        "Ext Repo",
-        &pk_b64(&key),
-    )
-    .await;
+    let repo_id = seed_repo(&state, "https://ext-list.example.com", "Ext Repo", &key).await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;

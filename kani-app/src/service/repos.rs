@@ -62,7 +62,7 @@ impl AppService {
     pub async fn list_repos(&self) -> Result<Vec<RepoRow>> {
         let rows = sqlx::query_as!(
             RepoRow,
-            r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust ORDER BY name"#
+            r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at, index_sig FROM repo_trust ORDER BY name"#
         )
         .fetch_all(&self.db_read)
         .await?;
@@ -72,7 +72,7 @@ impl AppService {
     pub async fn get_repo(&self, id: i64) -> Result<RepoRow> {
         sqlx::query_as!(
             RepoRow,
-            r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust WHERE id = ?"#,
+            r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at, index_sig FROM repo_trust WHERE id = ?"#,
             id
         )
         .fetch_optional(&self.db_read)
@@ -89,7 +89,7 @@ impl AppService {
         kani_core::network::require_http_url(url).map_err(ServiceError::Validation)?;
         self.check_repo_blocked(url).await?;
 
-        let (index, index_bytes) = self.fetch_and_verify_index(url).await?;
+        let (index, index_text, index_sig) = self.fetch_and_verify_index(url).await?;
         let new_key = index.maintainer_key.clone();
         let new_fp = fingerprint_from_b64(&new_key).map_err(ServiceError::Validation)?;
 
@@ -110,19 +110,17 @@ impl AppService {
                     repo_url: url.to_string(),
                 });
             }
-            let index_json =
-                serde_json::to_string(&index).map_err(|e| ServiceError::Internal(e.to_string()))?;
             let name = index.name.clone();
             sqlx::query!(
                 "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), \
-                 index_cache = ? WHERE id = ?",
+                 index_cache = ?, index_sig = ? WHERE id = ?",
                 name,
-                index_json,
+                index_text,
+                index_sig,
                 row.id
             )
             .execute(&self.db)
             .await?;
-            let _ = index_bytes;
             self.audit(user_id, "repo.refresh", Some(url), None).await;
             return Ok(RepoAddResult::Added { id: row.id, name });
         }
@@ -134,16 +132,15 @@ impl AppService {
                     repo_url: url.to_string(),
                 });
             }
-            let index_json =
-                serde_json::to_string(&index).map_err(|e| ServiceError::Internal(e.to_string()))?;
             let name = index.name.clone();
             let id = sqlx::query_scalar!(
-                "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
-                 VALUES (?, ?, ?, ?) RETURNING id",
+                "INSERT INTO repo_trust (url, name, maintainer_key, index_cache, index_sig) \
+                 VALUES (?, ?, ?, ?, ?) RETURNING id",
                 url,
                 name,
                 new_key,
-                index_json
+                index_text,
+                index_sig
             )
             .fetch_one(&self.db)
             .await?;
@@ -170,11 +167,14 @@ impl AppService {
         let base = repo.url.trim_end_matches('/');
         let index_url = format!("{base}/index.json");
 
-        let index_resp = self
-            .proxy_client
-            .safe_get_conditional(&index_url, None)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Failed to fetch index.json: {e}")))?;
+        let index_resp = if repo.index_sig.is_some() {
+            self.proxy_client
+                .safe_get_conditional(&index_url, None)
+                .await
+        } else {
+            self.proxy_client.safe_get(&index_url, None).await
+        }
+        .map_err(|e| ServiceError::Internal(format!("Failed to fetch index.json: {e}")))?;
 
         let index = if matches!(index_resp, SmartResponse::NotModified { .. }) {
             sqlx::query!(
@@ -183,22 +183,13 @@ impl AppService {
             )
             .execute(&self.db)
             .await?;
-            parse_index_cache(&repo)?
+            verified_index(&repo)?
         } else {
             let index_bytes = index_resp
                 .bytes_limited(MAX_INDEX_BYTES)
                 .await
                 .map_err(|e| ServiceError::Internal(format!("Failed to read index.json: {e}")))?
                 .to_vec();
-            let parsed: RepoIndex = serde_json::from_slice(&index_bytes)
-                .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
-
-            if parsed.maintainer_key != repo.maintainer_key {
-                return Err(ServiceError::Validation(
-                    "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),
-                ));
-            }
-
             let sig_url = format!("{base}/index.json.sig");
             let sig_raw = self
                 .proxy_client
@@ -219,16 +210,19 @@ impl AppService {
                 .trim()
                 .to_string();
 
-            signing::verify_artifact(&index_bytes, &repo.maintainer_key, &sig_b64)
-                .map_err(|e| ServiceError::Validation(format!("Index signature invalid: {e}")))?;
-
-            let index_json = serde_json::to_string(&parsed)
-                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            let index_text = String::from_utf8(index_bytes)
+                .map_err(|_| ServiceError::Validation("index.json is not UTF-8".to_string()))?;
+            let parsed = verify_index(&index_text, &sig_b64, &repo.maintainer_key).map_err(|e| {
+                ServiceError::Validation(format!(
+                    "{e} — if the maintainer key changed, re-add the repo to confirm the new key."
+                ))
+            })?;
             sqlx::query!(
                 "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), \
-                 index_cache = ? WHERE id = ?",
+                 index_cache = ?, index_sig = ? WHERE id = ?",
                 parsed.name,
-                index_json,
+                index_text,
+                sig_b64,
                 id
             )
             .execute(&self.db)
@@ -278,7 +272,7 @@ impl AppService {
 
     pub async fn list_repo_extensions(&self, id: i64) -> Result<Vec<RepoExtensionEntry>> {
         let repo = self.get_repo(id).await?;
-        let index = parse_index_cache(&repo)?;
+        let index = verified_index(&repo)?;
         Ok(index.extensions)
     }
 
@@ -407,7 +401,7 @@ impl AppService {
         Ok(())
     }
 
-    async fn fetch_and_verify_index(&self, repo_url: &str) -> Result<(RepoIndex, Vec<u8>)> {
+    async fn fetch_and_verify_index(&self, repo_url: &str) -> Result<(RepoIndex, String, String)> {
         let base = repo_url.trim_end_matches('/');
         let index_url = format!("{base}/index.json");
         let sig_url = format!("{base}/index.json.sig");
@@ -422,8 +416,12 @@ impl AppService {
             .map_err(|e| ServiceError::Internal(format!("Failed to read index.json: {e}")))?
             .to_vec();
 
-        let index: RepoIndex = serde_json::from_slice(&index_bytes)
-            .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
+        let claimed_key = serde_json::from_slice::<serde_json::Value>(&index_bytes)
+            .ok()
+            .and_then(|v| v.get("maintainer_key")?.as_str().map(str::to_string))
+            .ok_or_else(|| {
+                ServiceError::Validation("index.json has no maintainer_key".to_string())
+            })?;
 
         let sig_raw = self
             .proxy_client
@@ -438,10 +436,14 @@ impl AppService {
             .trim()
             .to_string();
 
-        signing::verify_artifact(&index_bytes, &index.maintainer_key, &sig_b64)
+        signing::verify_artifact(&index_bytes, &claimed_key, &sig_b64)
             .map_err(|e| ServiceError::Validation(format!("Index signature invalid: {e}")))?;
+        let index_text = String::from_utf8(index_bytes)
+            .map_err(|_| ServiceError::Validation("index.json is not UTF-8".to_string()))?;
+        let index: RepoIndex = serde_json::from_str(&index_text)
+            .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
 
-        Ok((index, index_bytes))
+        Ok((index, index_text, sig_b64))
     }
 
     async fn install_or_update_from_repo(
@@ -461,7 +463,7 @@ impl AppService {
         let repo = self.get_repo(repo_id).await?;
         self.check_repo_blocked(&repo.url).await?;
 
-        let index = parse_index_cache(&repo)?;
+        let index = verified_index(&repo)?;
         let entry = index
             .extensions
             .iter()
@@ -1015,12 +1017,34 @@ impl AppService {
     }
 }
 
-fn parse_index_cache(repo: &RepoRow) -> Result<RepoIndex> {
-    let json = repo.index_cache.as_deref().ok_or_else(|| {
-        ServiceError::Internal("Repository index not yet fetched — refresh first".to_string())
-    })?;
-    serde_json::from_str(json)
-        .map_err(|e| ServiceError::Internal(format!("Failed to parse repo index: {e}")))
+fn verify_index(
+    text: &str,
+    sig_b64: &str,
+    pinned_key: &str,
+) -> std::result::Result<RepoIndex, String> {
+    signing::verify_artifact(text.as_bytes(), pinned_key, sig_b64)
+        .map_err(|e| format!("Index signature invalid for the pinned key: {e}"))?;
+    let index: RepoIndex =
+        serde_json::from_str(text).map_err(|e| format!("Invalid index.json: {e}"))?;
+    if index.maintainer_key != pinned_key {
+        return Err("Index names a different maintainer key than the one pinned".to_string());
+    }
+    Ok(index)
+}
+
+fn verified_index(repo: &RepoRow) -> Result<RepoIndex> {
+    let (Some(text), Some(sig)) = (repo.index_cache.as_deref(), repo.index_sig.as_deref()) else {
+        return Err(ServiceError::Validation(
+            "Repository index not yet fetched with its signature — refresh the repository"
+                .to_string(),
+        ));
+    };
+    verify_index(text, sig, &repo.maintainer_key).map_err(|e| {
+        ServiceError::Validation(format!(
+            "The cached repository index no longer verifies against the pinned key ({e}); \
+             refresh the repository"
+        ))
+    })
 }
 
 /// The `host[:port]` authority of an absolute URL, used to keep an extension

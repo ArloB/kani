@@ -33,17 +33,8 @@ async fn seed_repo_with_entry(
             "author_key": "x",
             "url": artifact_url,
         }],
-    })
-    .to_string();
-    sqlx::query_scalar(
-        "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
-         VALUES (?, 'Test Repo', 'KEY', ?) RETURNING id",
-    )
-    .bind(repo_url)
-    .bind(index)
-    .fetch_one(&svc.db)
-    .await
-    .unwrap()
+    });
+    common::seed_signed_repo(&svc.db, repo_url, index).await
 }
 
 #[tokio::test]

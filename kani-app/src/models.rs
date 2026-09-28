@@ -412,6 +412,8 @@ pub struct RepoRow {
     pub last_refreshed_at: Option<String>,
     pub index_cache: Option<String>,
     pub created_at: String,
+    #[serde(skip)]
+    pub index_sig: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

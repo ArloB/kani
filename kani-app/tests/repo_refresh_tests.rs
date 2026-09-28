@@ -12,15 +12,25 @@ use kani_shared_test::origin::{Response, TestOrigin};
 const INDEX_JSON: &str = r#"{"name":"Test Repo","maintainer_key":"KEY","extensions":[]}"#;
 
 async fn seed_repo(svc: &AppService, url: &str, index_cache: Option<&str>) -> i64 {
+    if let Some(text) = index_cache {
+        return common::seed_signed_repo(&svc.db, url, serde_json::from_str(text).unwrap()).await;
+    }
     sqlx::query_scalar(
         "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
-         VALUES (?, 'Test Repo', 'KEY', ?) RETURNING id",
+         VALUES (?, 'Test Repo', 'KEY', NULL) RETURNING id",
     )
     .bind(url)
-    .bind(index_cache)
     .fetch_one(&svc.db)
     .await
     .unwrap()
+}
+
+async fn cached(svc: &AppService, id: i64) -> Option<String> {
+    sqlx::query_scalar("SELECT index_cache FROM repo_trust WHERE id = ?")
+        .bind(id)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -29,6 +39,7 @@ async fn a_304_yields_the_cached_index() {
     origin.set("/index.json", Response::status(304));
     let svc = test_service().await;
     let id = seed_repo(&svc, &origin.base(), Some(INDEX_JSON)).await;
+    let seeded = cached(&svc, id).await;
 
     svc.refresh_repo(id, None).await.unwrap();
 
@@ -40,7 +51,7 @@ async fn a_304_yields_the_cached_index() {
             .unwrap();
     assert_eq!(
         cache.as_deref(),
-        Some(INDEX_JSON),
+        seeded.as_deref(),
         "the 304 reused the cached index unchanged"
     );
     let refreshed: Option<String> =
@@ -107,6 +118,7 @@ async fn a_repo_that_starts_failing_does_not_lose_its_cached_index() {
     origin.set("/index.json", Response::status(500));
     let svc = test_service().await;
     let id = seed_repo(&svc, &origin.base(), Some(INDEX_JSON)).await;
+    let seeded = cached(&svc, id).await;
 
     let res = svc.refresh_repo(id, None).await;
 
@@ -119,7 +131,7 @@ async fn a_repo_that_starts_failing_does_not_lose_its_cached_index() {
             .unwrap();
     assert_eq!(
         cache.as_deref(),
-        Some(INDEX_JSON),
+        seeded.as_deref(),
         "the cached index survived the failed refresh"
     );
 }
