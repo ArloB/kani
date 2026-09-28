@@ -2270,7 +2270,7 @@ The body must return a `HookAction` value:
 | `retry()` | Re-send the request immediately (counts against `max_hook_requests`). |
 | `retry_after(seconds)` | Re-send after a delay (counts against `max_hook_requests`). |
 | `fail(kind, reason)` | Abort with an `ExtensionError` of the named kind. |
-| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. |
+| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. Interpreted YAML sources only (§5). |
 
 #### Cache in hook scripts
 
@@ -2458,6 +2458,7 @@ found difference here and to that check.
 | Feature | Interpreted YAML | Generated WASM |
 |---------|------------------|----------------|
 | `for_each[].deduplicate_by` (§3.2) | Supported | Rejected at generation |
+| `refresh_auth(...)` in a hook (§3.10) | Supported | Rejected at generation; a hand-written WASM extension that returns it gets an `Auth` error saying so |
 
 ### 5.1 Interpreted YAML backend
 

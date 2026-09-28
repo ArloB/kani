@@ -633,6 +633,11 @@ pub fn guest_error(e: kani::extension::types::ExtensionError) -> crate::error::E
     let ext = ext_error_from_wit(e);
     if crate::budget::is_budget_exceeded(&ext.message) {
         crate::error::Error::BudgetExceeded(ext.message)
+    } else if let Some(target) = ext.message.strip_prefix("__refresh_auth__:") {
+        crate::error::Error::Extension(kani_shared::extension::ExtensionError::auth(format!(
+            "a hook asked to refresh auth through {target:?}, but refresh_auth is only supported \
+             in interpreted YAML sources"
+        )))
     } else {
         crate::error::Error::Extension(ext)
     }

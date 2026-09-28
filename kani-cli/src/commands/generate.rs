@@ -115,6 +115,40 @@ pub fn reject_interpreted_only(
             dropped.join(", ")
         )));
     }
+
+    let hooks = validated
+        .pre_request
+        .iter()
+        .map(|body| ("pre_request".to_string(), body))
+        .chain(
+            validated
+                .on_status
+                .iter()
+                .map(|(status, body)| (format!("on_status.{status}"), body)),
+        )
+        .chain(
+            validated
+                .endpoint_pre_request
+                .iter()
+                .map(|(ep, body)| (format!("endpoints.{ep}.pre_request"), body)),
+        )
+        .chain(validated.endpoint_on_status.iter().flat_map(|(ep, map)| {
+            map.iter()
+                .map(move |(status, body)| (format!("endpoints.{ep}.on_status.{status}"), body))
+        }));
+    let refreshing: Vec<String> = hooks
+        .filter(|(_, body)| {
+            kani_core::scripting::script_calls(body, "refresh_auth").unwrap_or(false)
+        })
+        .map(|(location, _)| location)
+        .collect();
+    if !refreshing.is_empty() {
+        return Err(CliError::Other(format!(
+            "`refresh_auth` is not supported in generated extensions, only in interpreted YAML \
+             sources: {}. Run this source interpreted.",
+            refreshing.join(", ")
+        )));
+    }
     Ok(())
 }
 
@@ -122,6 +156,33 @@ pub fn reject_interpreted_only(
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn a_hook_that_calls_refresh_auth_is_refused_for_a_generated_extension() {
+        let yaml = |hook: &str| {
+            format!(
+                "id: refresh\nname: Refresh\nversion: \"0.1.0\"\nbase_url: \"https://e.com\"\n{hook}\n\
+                 endpoints:\n  search:\n    route: /s\n    container: \".i\"\n    fields:\n      \
+                 id: 'self.attr(\"i\")'\n      title: 'self.attr(\"t\")'\n"
+            )
+        };
+        let validate = |text: String| {
+            kani_yaml::parse_and_validate(&text, std::path::Path::new("r.yaml")).unwrap()
+        };
+        let calling = validate(yaml(
+            "on_status:\n  \"401\": |\n    refresh_auth(\"search\")",
+        ));
+        let err = reject_interpreted_only(&calling).unwrap_err().to_string();
+        assert!(
+            err.contains("refresh_auth") && err.contains("on_status.401"),
+            "{err}"
+        );
+
+        let mentioning = validate(yaml(
+            "on_status:\n  \"401\": |\n    let s = \"refresh_auth(x)\"; proceed()",
+        ));
+        assert!(reject_interpreted_only(&mentioning).is_ok());
+    }
 
     #[test]
     fn a_script_name_that_escapes_the_scripts_dir_is_never_written() {

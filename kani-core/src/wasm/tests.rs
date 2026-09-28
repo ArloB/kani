@@ -556,3 +556,26 @@ async fn browser_capture_rejects_an_unparseable_url() {
 
     assert!(error.contains("Invalid browser page URL"), "got: {error}");
 }
+
+#[test]
+fn a_refresh_auth_from_a_guest_hook_is_a_clear_auth_error() {
+    use super::kani::extension::types::{ExtensionError as WitErr, ExtensionErrorKind as WitKind};
+    let err = super::guest_error(WitErr {
+        kind: WitKind::Unknown,
+        message: "__refresh_auth__:login".to_string(),
+        source_url: None,
+        retry_after_secs: None,
+    });
+    match err {
+        crate::error::Error::Extension(e) => {
+            assert_eq!(e.kind, kani_shared::extension::ExtensionErrorKind::Auth);
+            assert!(
+                e.message.contains("refresh_auth is only supported"),
+                "{}",
+                e.message
+            );
+            assert!(!e.message.contains("__refresh_auth__"), "{}", e.message);
+        }
+        other => panic!("{other:?}"),
+    }
+}
