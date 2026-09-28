@@ -47,6 +47,7 @@ async fn offset_pagination_two_pages() {
 
     let bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: server.uri(),
             method: "GET".into(),
             headers: vec![],
@@ -88,6 +89,7 @@ async fn page_number_pagination() {
 
     let bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: server.uri(),
             method: "GET".into(),
             headers: vec![],
@@ -139,6 +141,7 @@ async fn cursor_token_pagination_three_chunks() {
 
     let bp = BlueprintBuilder::new("/items")
         .with_request(RequestDef {
+            body: None,
             url: server.uri(),
             method: "GET".into(),
             headers: vec![],
@@ -187,6 +190,7 @@ async fn stops_when_has_next_page_false() {
 
     let bp = BlueprintBuilder::new("/items")
         .with_request(RequestDef {
+            body: None,
             url: server.uri(),
             method: "GET".into(),
             headers: vec![],
@@ -233,6 +237,7 @@ async fn paginated_extraction_preserves_declared_scalars() {
 
     let bp = BlueprintBuilder::new("/items")
         .with_request(RequestDef {
+            body: None,
             url: server.uri(),
             method: "GET".into(),
             headers: vec![],

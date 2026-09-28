@@ -205,6 +205,7 @@ async fn concurrent_installs_of_the_same_extension_serialise() {
 
 fn details_endpoint() -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$".into(),
         method: "GET".into(),
         headers: vec![],

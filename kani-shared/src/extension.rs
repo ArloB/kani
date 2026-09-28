@@ -353,7 +353,32 @@ pub struct RateLimitConfig {
     )]
     /// Maximum extra requests an `on_status` hook may issue for one original request.
     pub max_hook_requests: u32,
+    /// Requests one top-level operation may make, up to [`MAX_OPERATION_REQUESTS`].
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub max_requests: Option<u32>,
+    /// Response bytes one operation may read, up to [`MAX_OPERATION_RESPONSE_BYTES`].
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub max_response_bytes: Option<u64>,
+    /// Seconds one operation may run, up to [`MAX_OPERATION_SECONDS`].
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub max_operation_seconds: Option<u64>,
 }
+
+/// The most requests an extension may declare for one operation.
+pub const MAX_OPERATION_REQUESTS: u32 = 1024;
+/// The most response bytes an extension may declare for one operation.
+pub const MAX_OPERATION_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
+/// The most seconds an extension may declare for one operation.
+pub const MAX_OPERATION_SECONDS: u64 = 600;
 
 #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
 fn default_max_hook_requests() -> u32 {
@@ -367,6 +392,9 @@ impl Default for RateLimitConfig {
             burst: 8,
             max_concurrent: 4,
             max_hook_requests: 3,
+            max_requests: None,
+            max_response_bytes: None,
+            max_operation_seconds: None,
         }
     }
 }

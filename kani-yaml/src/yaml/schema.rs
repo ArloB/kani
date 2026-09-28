@@ -154,6 +154,15 @@ pub struct RateLimitCfg {
     pub max_concurrent: u32,
     #[serde(default = "default_max_hook_requests")]
     pub max_hook_requests: u32,
+    /// Requests one top-level operation may make.
+    #[serde(default)]
+    pub max_requests: Option<u32>,
+    /// Response bytes one top-level operation may read.
+    #[serde(default)]
+    pub max_response_bytes: Option<u64>,
+    /// Seconds one top-level operation may run.
+    #[serde(default)]
+    pub max_operation_seconds: Option<u64>,
 }
 
 fn default_rps() -> f64 {
@@ -245,6 +254,9 @@ pub struct EndpointBody {
     /// Per-element chained fetches: evaluated for each row, result stored as `merge_as` field.
     #[serde(default)]
     pub for_each: Vec<ForEachStep>,
+    /// The request body, for a non-GET endpoint.
+    #[serde(default)]
+    pub body: Option<BodyCfg>,
     /// When set, the endpoint is fetched via a headless browser rather than direct HTTP.
     #[serde(default)]
     pub via: Option<EndpointVia>,
@@ -424,6 +436,25 @@ pub enum TupleSplitKind {
     TupleSplit,
 }
 
+/// A request body: its kind decides how `$var$` placeholders are filled and encoded.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BodyCfg {
+    #[serde(rename = "type")]
+    pub kind: BodyKind,
+    pub content: serde_yaml::Value,
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyKind {
+    Json,
+    Form,
+    Raw,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 /// Fixed-size source pagination declaration lowered into a blueprint pagination config.
@@ -433,6 +464,9 @@ pub struct PaginationCfg {
     pub offset_type: YamlOffsetType,
     #[serde(default = "default_page_start")]
     pub page_start: u32,
+    /// JSON pointer to the next-page cursor in each response, for `offset_type: cursor`.
+    #[serde(default)]
+    pub cursor_field: Option<String>,
 }
 
 fn default_page_start() -> u32 {
@@ -444,6 +478,7 @@ fn default_page_start() -> u32 {
 pub enum YamlOffsetType {
     Item,
     Page,
+    Cursor,
 }
 
 #[derive(Debug, Deserialize, Clone)]

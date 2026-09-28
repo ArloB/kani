@@ -405,6 +405,7 @@ fn hook_ctx() -> kani_core::scripting::bindings::ScriptableCtx {
         browser_scripts: None,
         browser_profile_key: None,
         allowed_host: kani_core::wasm::AllowedHost::MetadataOnly,
+        operation_budget: None,
         cache_namespaces: std::sync::Arc::default(),
     }
 }

@@ -73,6 +73,7 @@ fn self_attr_field(name: &str, attr: &str) -> ValidatedField {
 
 fn list_endpoint(route: &str, container: &str) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.to_string(),
         method: "GET".into(),
         headers: vec![],
@@ -196,6 +197,7 @@ async fn manga_details_extracts_title_and_id() {
     let base_url = format!("http://127.0.0.1:{port}");
 
     let details_ep = ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$".into(),
         fields: vec![self_attr_field("id", "data-id"), text_field("title", "h1")],
         container: ".manga".into(),
@@ -360,6 +362,7 @@ async fn chapter_list_extracts_chapters_from_html() {
     let base_url = format!("http://127.0.0.1:{port}");
 
     let chapter_ep = ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$/chapters".into(),
         fields: vec![
             self_attr_field("id", "data-id"),
@@ -405,6 +408,7 @@ async fn get_pages_extracts_page_urls_from_html() {
     let base_url = format!("http://127.0.0.1:{port}");
 
     let pages_ep = ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$/chapter/$chapter_id$".into(),
         fields: vec![ValidatedField {
             name: "url".to_string(),
@@ -1702,6 +1706,7 @@ async fn a_source_supplied_id_cannot_rewrite_the_request_path() {
     origin.set("/manga/..%2Fadmin", Response::html("<html></html>"));
 
     let details_ep = ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$".into(),
         fields: vec![self_attr_field("id", "data-id"), text_field("title", "h1")],
         container: ".manga".into(),
@@ -1739,6 +1744,7 @@ async fn an_unresolved_route_placeholder_is_an_error_not_a_literal() {
     origin.set("/list", Response::html("<html></html>"));
 
     let ep = ValidatedEndpoint {
+        body: None,
         route: "/list/$missing$".into(),
         ..list_endpoint("/list/$missing$", ".item")
     };
@@ -2111,4 +2117,154 @@ endpoints:
             .to_string();
         assert!(err.contains("only http and https"), "{id}: {err}");
     }
+}
+
+fn refresh_cycle_source(origin: &kani_shared_test::origin::TestOrigin, hooks: &str) -> YamlSource {
+    let yaml = format!(
+        r#"id: refresh-cycle
+name: refresh-cycle
+version: "1.0.0"
+base_url: "{base}"
+{hooks}
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+  search:
+    route: /search
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+"#,
+        base = origin.base()
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("refresh-cycle.yaml"))
+        .expect("fixture validates");
+    yaml_source(&origin.base(), ext)
+}
+
+#[tokio::test]
+async fn a_refresh_auth_cycle_is_reported_as_a_cycle_after_bounded_requests() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let self_refresh = "on_status:\n  \"401\": |\n    refresh_auth(\"popular\")";
+    let two_endpoint = "on_status:\n  \"401\": |\n    if req.endpoint_id == \"popular\" { refresh_auth(\"search\") } else { refresh_auth(\"popular\") }";
+    for (case, hooks, max_hits) in [("self", self_refresh, 1), ("two-endpoint", two_endpoint, 2)] {
+        let origin = TestOrigin::start().await;
+        origin.set("/popular", Response::status(401));
+        origin.set("/search", Response::status(401));
+        let source = refresh_cycle_source(&origin, hooks);
+        let err = source.get_popular_manga(1, 20, &[]).await.unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("auth refresh cycle"), "{case}: {text}");
+        assert!(
+            matches!(&err, kani_core::error::Error::Extension(e) if e.kind == kani_shared::extension::ExtensionErrorKind::Auth),
+            "{case}: an auth error, got {err:?}"
+        );
+        assert!(
+            origin.total_hits() <= max_hits,
+            "{case}: {} requests",
+            origin.total_hits()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_refresh_through_another_endpoint_retries_the_original_request() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let origin = TestOrigin::start().await;
+    let page = r#"<div class="item" data-id="m1"><span class="t">One</span></div>"#;
+    origin.script(
+        "/popular",
+        vec![Response::status(401), Response::html(page)],
+    );
+    origin.set("/search", Response::html(page));
+    let hooks = "on_status:\n  \"401\": |\n    refresh_auth(\"search\")";
+    let list = refresh_cycle_source(&origin, hooks)
+        .get_popular_manga(1, 20, &[])
+        .await
+        .unwrap();
+    assert_eq!(list.manga.len(), 1);
+    assert_eq!((origin.hits("/popular"), origin.hits("/search")), (2, 1));
+}
+
+#[tokio::test]
+async fn refreshes_and_retries_share_one_operation_budget() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let origin = TestOrigin::start().await;
+    let page = r#"<div class="item" data-id="m1"><span class="t">One</span></div>"#;
+    origin.set("/popular", Response::status(401));
+    origin.set("/search", Response::html(page));
+    let hooks = "metadata:\n  rate_limit:\n    max_hook_requests: 50\n    max_requests: 4\n\
+                 on_status:\n  \"401\": |\n    refresh_auth(\"search\")";
+    let err = refresh_cycle_source(&origin, hooks)
+        .get_popular_manga(1, 20, &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, kani_core::error::Error::BudgetExceeded(m) if m.contains("requests")),
+        "{err:?}"
+    );
+    assert!(origin.total_hits() <= 4, "{} requests", origin.total_hits());
+}
+
+fn body_source(origin: &kani_shared_test::origin::TestOrigin, hooks: &str) -> YamlSource {
+    let yaml = format!(
+        r#"id: bodies
+name: bodies
+version: "1.0.0"
+base_url: "{base}"
+{hooks}
+endpoints:
+  search:
+    route: /search
+    method: POST
+    body:
+      type: form
+      content:
+        q: "$query$"
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+"#,
+        base = origin.base()
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("bodies.yaml")).unwrap();
+    yaml_source(&origin.base(), ext)
+}
+
+#[tokio::test]
+async fn a_hook_cannot_grow_a_body_past_the_limit_and_a_retry_resends_it() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let page = r#"<div class="item" data-id="m1"><span class="t">One</span></div>"#;
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::html(page));
+    let grow = "pre_request: |\n  let s = \"x\";\n  for i in 0..17 { s += s; }\n  req.body = s;\n  proceed()";
+    let err = body_source(&origin, grow)
+        .search_manga("a b", 1, 20, &[])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("over the 65536-byte limit"), "{err}");
+    assert_eq!(origin.total_hits(), 0, "nothing was sent");
+
+    let origin = TestOrigin::start().await;
+    origin.script("/search", vec![Response::status(500), Response::html(page)]);
+    let retry = "on_status:\n  \"500\": |\n    retry()";
+    let list = body_source(&origin, retry)
+        .search_manga("a b&c", 1, 20, &[])
+        .await
+        .unwrap();
+    assert_eq!(list.manga.len(), 1);
+    assert_eq!(origin.hits("/search"), 2);
+    assert_eq!(
+        origin.last_request("/search").unwrap().body,
+        b"q=a+b%26c",
+        "the retry re-sent the identical body"
+    );
 }

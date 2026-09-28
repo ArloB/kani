@@ -41,6 +41,7 @@ fn self_text_field(name: &str) -> ValidatedField {
 
 fn base_endpoint(container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/popular".into(),
         method: "GET".into(),
         headers: vec![],
@@ -123,12 +124,12 @@ async fn the_io_budget_is_enforced_per_call_not_per_source() {
     let origin = TestOrigin::start().await;
     origin.set("/detail", Response::html(r#"<div class="d">ok</div>"#));
 
-    origin.set("/popular", Response::html(&items(40)));
+    origin.set("/popular", Response::html(&items(130)));
     let backend = source_with_for_each(&origin, OnFailurePolicy::Fail);
-    let over = backend.get_popular_manga(1, 50, &[]).await;
+    let over = backend.get_popular_manga(1, 200, &[]).await;
     assert!(
-        over.is_err(),
-        "a 40-row listing must exceed the 32-request budget, got {:?} rows",
+        matches!(over, Err(kani_core::error::Error::BudgetExceeded(_))),
+        "a 130-row listing must exceed the 128-request budget, got {:?}",
         over.map(|l| l.manga.len())
     );
 
@@ -146,13 +147,14 @@ async fn a_page_set_exceeding_the_io_budget_is_refused_not_truncated() {
     let origin = TestOrigin::start().await;
     origin.set("/detail", Response::html(r#"<div class="d">ok</div>"#));
 
-    origin.set("/popular", Response::html(&items(60)));
-    let backend = source_with_for_each(&origin, OnFailurePolicy::Fail);
+    origin.set("/popular", Response::html(&items(140)));
+    let backend = source_with_for_each(&origin, OnFailurePolicy::Skip);
 
-    let res = backend.get_popular_manga(1, 100, &[]).await;
+    let res = backend.get_popular_manga(1, 200, &[]).await;
     assert!(
-        res.is_err(),
-        "60 per-row sub-fetches must overrun the 32 budget and error, not return a short set of {:?}",
+        matches!(res, Err(kani_core::error::Error::BudgetExceeded(_))),
+        "140 per-row sub-fetches must overrun the 128 budget and error even under skip, \
+         not return a short set of {:?}",
         res.map(|l| l.manga.len())
     );
 }

@@ -201,6 +201,7 @@ async fn extract_html_with_doc(
                         });
                         row.insert(field.name.clone(), serde_json::Value::Null);
                     }
+                    Err(e) if crate::budget::is_budget_exceeded(&e) => return Err(e),
                     Err(e) => match on_failure {
                         kani_shared::ast::OnFailurePolicy::Skip => {
                             row.insert(field.name.clone(), serde_json::Value::Null);
@@ -261,6 +262,8 @@ async fn extract_html_with_doc(
 
         for (p, body_result) in pending.into_iter().zip(bodies) {
             state.last_io_at = Some(std::time::Instant::now());
+            let body_result =
+                body_result.and_then(|body| state.charge_response_bytes(body.len()).map(|()| body));
             let outcome: Result<Value, String> = match body_result {
                 Ok(body) => {
                     let parsed = match p.kind {
@@ -291,6 +294,7 @@ async fn extract_html_with_doc(
                     v,
                     state.eval_budget.limits.max_string_length,
                 )?,
+                (Err(e), _) if crate::budget::is_budget_exceeded(&e) => return Err(e),
                 (Err(_), OnFailurePolicy::Skip) => {
                     results[p.row_index].insert(p.field_name.clone(), serde_json::Value::Null);
                 }
@@ -396,6 +400,7 @@ async fn eval_html_field(
         .await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
+            (Err(e), _) if crate::budget::is_budget_exceeded(&e) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {

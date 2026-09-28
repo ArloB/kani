@@ -649,12 +649,20 @@ mod shared_tests {
     }
 
     #[tokio::test]
-    async fn date_parse_rfc3339_invalid_errors() {
-        let err = json_eval_err(Expr::DateParseRfc3339 {
-            target: Box::new(lit("not-a-date")),
+    async fn a_malformed_rfc3339_date_is_null_like_the_other_parsers() {
+        for bad in ["not-a-date", "2024-13-45T00:00:00Z", "2024-01-15"] {
+            let v = json_eval_opt(Expr::DateParseRfc3339 {
+                target: Box::new(lit(bad)),
+            })
+            .await;
+            assert_eq!(v, serde_json::Value::Null, "{bad}");
+        }
+        let date_only = json_eval(Expr::DateParse {
+            target: Box::new(lit("2024-01-15")),
+            format: "[year]-[month]-[day]".into(),
         })
         .await;
-        assert!(err.contains("Invalid RFC3339"));
+        assert_eq!(date_only.as_i64(), Some(1_705_276_800), "midnight UTC");
     }
 
     #[tokio::test]
@@ -3267,5 +3275,88 @@ mod dsl_v2_tests {
         let rows = out["rows"].as_array().unwrap();
         assert_eq!(rows[0]["total"], 42);
         assert_eq!(rows[1]["total"], 42);
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn rows_whose_dedup_key_is_null_are_all_kept() {
+    let mut result = serde_json::json!({"rows": [
+        {"id": "a", "title": "one"},
+        {"title": "no id"},
+        {"id": "a", "title": "dup"},
+        {"title": "another without id"},
+    ]});
+    let key = kani_shared::ast::Expr::JsonPtr {
+        target: Box::new(kani_shared::ast::Expr::SelfRef),
+        pointer: "/id".into(),
+    };
+    crate::evaluator::json_eval::deduplicate_rows(&mut result, &key)
+        .await
+        .unwrap();
+    let titles: Vec<&str> = result["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["one", "no id", "another without id"]);
+}
+
+#[cfg(test)]
+mod json_array_filter_tests {
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    #[tokio::test]
+    async fn the_spec_title_merge_chain_evaluates_in_a_json_endpoint() {
+        let chain = Expr::json_array(vec![
+            Expr::self_ref().ptr("/attributes/altTitles").json_fold(),
+            Expr::self_ref().ptr("/attributes/title"),
+        ])
+        .filter(Expr::var("$item").ne(Expr::null()))
+        .json_fold()
+        .coalesce_keys(["en", "ja-ro", "ja"].map(Expr::lit))
+        .fallback_str("Unknown Title");
+        let doc = r#"{"data": [
+            {"attributes": {"altTitles": [{"ja": "B"}, {"de": "C"}], "title": {"en": "Primary Title"}}},
+            {"attributes": {"altTitles": [{"ja": "B"}], "title": null}},
+            {"attributes": {"altTitles": [], "title": null}}
+        ]}"#;
+        let present = Expr::json_array(vec![Expr::self_ref().ptr("/attributes/title")])
+            .filter(Expr::var("$item").ne(Expr::null()))
+            .array_len();
+        let rows = json_rows(
+            doc,
+            "/data",
+            vec![field("title", chain), field("present", present)],
+            vec![],
+        )
+        .await;
+        let titles: Vec<&str> = rows.iter().map(|r| r["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, ["Primary Title", "B", "Unknown Title"]);
+        let present: Vec<i64> = rows
+            .iter()
+            .map(|r| r["present"].as_i64().unwrap())
+            .collect();
+        assert_eq!(present, [1, 0, 0], "a null item is filtered out");
+    }
+
+    #[tokio::test]
+    async fn filter_keeps_a_json_array_a_json_array_in_an_html_endpoint() {
+        let kept = Expr::json_array(vec![Expr::lit("a"), Expr::null(), Expr::lit("b")])
+            .filter(Expr::var("$item").ne(Expr::null()));
+        let rows = html_rows(
+            "<html><body><div class=\"x\"></div></body></html>",
+            ".x",
+            vec![
+                field("len", kept.clone().array_len()),
+                field("folded", Expr::json_array(vec![kept]).json_fold()),
+            ],
+            vec![],
+        )
+        .await;
+        assert_eq!(rows[0]["len"], 2);
+        assert_eq!(rows[0]["folded"], serde_json::json!(["a", "b"]));
     }
 }

@@ -15,6 +15,14 @@ pub enum Error {
     #[error("{0}")]
     UnsupportedScheme(String),
 
+    /// A page whose declared transform cannot be applied; never retried or saved.
+    #[error("{0}")]
+    Transform(String),
+
+    /// One operation used up its request, response-byte or time budget.
+    #[error("{0}")]
+    BudgetExceeded(String),
+
     #[error("Not found: {0}")]
     NotFound(String),
 

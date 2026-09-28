@@ -2,8 +2,8 @@
 //! `transform` hint; the registry resolves it — while upstream headers are live —
 //! to a [`ResolvedTransform`] that carries the parsed parameters plus the output
 //! format, so a caller can decide buffer-vs-stream and extension/content-type
-//! before reading the body. Resolution is lenient: an unknown or unparseable hint
-//! returns `None` for passthrough.
+//! before reading the body. Resolution is strict: an unknown name or unusable
+//! parameters are errors, and passthrough needs positive evidence.
 
 use rquest::header::HeaderMap;
 use std::collections::HashMap;
@@ -28,6 +28,8 @@ pub enum TransformError {
         got: TransformKind,
     },
     Apply(String),
+    Unknown(String),
+    Parameters(String),
 }
 
 impl std::fmt::Display for TransformError {
@@ -40,6 +42,8 @@ impl std::fmt::Display for TransformError {
                 )
             }
             TransformError::Apply(msg) => write!(f, "transform failed: {msg}"),
+            TransformError::Unknown(name) => write!(f, "unknown transform {name:?}"),
+            TransformError::Parameters(msg) => write!(f, "transform parameters: {msg}"),
         }
     }
 }
@@ -85,7 +89,13 @@ pub trait Transform: Send + Sync {
     fn names(&self) -> &'static [&'static str];
     fn kind(&self) -> TransformKind;
     fn description(&self) -> &'static str;
-    fn resolve(&self, hint: &str, headers: &HeaderMap) -> Option<ResolvedTransform>;
+    /// `Ok(None)` only when the response positively shows the content needs no transform;
+    /// missing or unusable parameters are an error, never a passthrough.
+    fn resolve(
+        &self,
+        hint: &str,
+        headers: &HeaderMap,
+    ) -> Result<Option<ResolvedTransform>, TransformError>;
 }
 
 pub struct TransformRegistry {
@@ -113,24 +123,25 @@ impl TransformRegistry {
     }
 
     /// Resolve `hint` for the expected `kind`. The lookup key is the part before
-    /// an inline-parameter `:` (`lcg-tile-5x5:12345` → `lcg-tile-5x5`). A name
-    /// match with a different kind is a passthrough (warn + `None`), consistent
-    /// with the lenient semantics.
+    /// an inline-parameter `:` (`lcg-tile-5x5:12345` → `lcg-tile-5x5`). An unknown
+    /// name, a different kind or unusable parameters are errors, so a page that
+    /// needs a transform is never delivered untransformed.
     pub fn resolve(
         &self,
         hint: &str,
         kind: TransformKind,
         headers: &HeaderMap,
-    ) -> Option<ResolvedTransform> {
+    ) -> Result<Option<ResolvedTransform>, TransformError> {
         let key = hint.split(':').next().unwrap_or(hint);
-        let t = self.transforms.get(key)?;
+        let t = self
+            .transforms
+            .get(key)
+            .ok_or_else(|| TransformError::Unknown(key.to_string()))?;
         if t.kind() != kind {
-            tracing::warn!(
-                "transform '{key}' is {:?}, not the expected {:?} — skipping",
-                t.kind(),
-                kind
-            );
-            return None;
+            return Err(TransformError::KindMismatch {
+                expected: kind,
+                got: t.kind(),
+            });
         }
         t.resolve(hint, headers)
     }
@@ -174,14 +185,18 @@ mod tests {
         fn description(&self) -> &'static str {
             "returns the bytes unchanged"
         }
-        fn resolve(&self, _hint: &str, _headers: &HeaderMap) -> Option<ResolvedTransform> {
-            Some(ResolvedTransform::new(
+        fn resolve(
+            &self,
+            _hint: &str,
+            _headers: &HeaderMap,
+        ) -> Result<Option<ResolvedTransform>, TransformError> {
+            Ok(Some(ResolvedTransform::new(
                 TransformOutput {
                     file_extension: "bin",
                     content_type: "application/octet-stream",
                 },
                 |data| Ok(data.to_vec()),
-            ))
+            )))
         }
     }
 
@@ -196,27 +211,30 @@ mod tests {
         let r = reg();
         let resolved = r
             .resolve("identity", TransformKind::Image, &HeaderMap::new())
+            .unwrap()
             .expect("identity resolves");
         assert_eq!(resolved.apply(b"hello").unwrap(), b"hello");
     }
 
     #[test]
-    fn resolve_unknown_hint_returns_none() {
+    fn an_unknown_hint_is_an_error_not_a_passthrough() {
+        let err = reg()
+            .resolve("nope", TransformKind::Image, &HeaderMap::new())
+            .err()
+            .expect("unknown transform refused");
         assert!(
-            reg()
-                .resolve("nope", TransformKind::Image, &HeaderMap::new())
-                .is_none()
+            matches!(err, TransformError::Unknown(ref n) if n == "nope"),
+            "{err}"
         );
     }
 
     #[test]
-    fn resolve_kind_mismatch_is_passthrough() {
-        assert!(
-            reg()
-                .resolve("identity", TransformKind::Text, &HeaderMap::new())
-                .is_none(),
-            "a name match with the wrong kind is a passthrough, not a match"
-        );
+    fn a_kind_mismatch_is_an_error_not_a_passthrough() {
+        let err = reg()
+            .resolve("identity", TransformKind::Text, &HeaderMap::new())
+            .err()
+            .expect("wrong kind refused");
+        assert!(matches!(err, TransformError::KindMismatch { .. }), "{err}");
     }
 
     #[test]
@@ -228,6 +246,7 @@ mod tests {
                     TransformKind::Image,
                     &HeaderMap::new()
                 )
+                .unwrap()
                 .is_some()
         );
     }

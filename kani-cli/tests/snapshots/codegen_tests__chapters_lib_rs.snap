@@ -103,12 +103,17 @@ impl MangaExtension for TestChapters {
     fn get_chapter_list(
         &self,
         manga_id: &str,
-        _page: i32,
-        _page_size: Option<i32>,
-        _sort: Option<String>,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
-        let req = HttpRequest::get(format!("{}/manga/{}/chapters", self.base_url, manga_id))
-            .endpoint_id("chapter_list");
+        let _ = (page, page_size, &sort);
+        let req = HttpRequest::get(format!(
+            "{}/manga/{}/chapters",
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id)
+        ))
+        .endpoint_id("chapter_list");
         let bp = BlueprintBuilder::new(".chapter-list .chapter")
             .request(req)
             .field("id", Expr::self_ref().attr("data-id"))

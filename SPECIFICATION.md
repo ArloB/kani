@@ -176,7 +176,7 @@ These are the starting points for extraction chains:
 | `.map(body)` | List | List | Iterate over the list. For each element, evaluate `body` with `$item` bound to the current element and `$index` bound to its 0-based position. `Null` results are dropped. Returns a new `List`. |
 | `.flat_map(body)` | List | List | Like `.map(body)`, but each `body` evaluation must return a `List`; all result lists are concatenated into a single flat `List`. Useful when each element expands into multiple values. |
 | `.fold(base, body)` | List | Any | Left fold over the list. Evaluates `base` as the initial accumulator, then for each element evaluates `body` with `$acc` bound to the running accumulator, `$item` to the current element, and `$index` to its 0-based position. The result of each `body` evaluation becomes the new `$acc`. Returns the final accumulator value. |
-| `.filter(predicate)` | List | List | Keep only elements for which `predicate` evaluates to `true`. `predicate` is evaluated with `$item` and `$index` in scope. Elements where the predicate returns `false` or `Null` are dropped. Produces a `List` of the same element type. |
+| `.filter(predicate)` | List or Json array | same as input | Keep only elements for which `predicate` evaluates to `true`. `predicate` is evaluated with `$item` and `$index` in scope; a JSON `null` element is `$item == null`. Elements where the predicate returns `false` or `Null` are dropped. A `List` stays a `List`; a `Json` array stays a `Json` array, so `.json_fold()` and `.array_len()` still apply. |
 | `if cond then a else b` | — | Any | If `cond` is `true`, evaluates and returns `a`; if `false` or `Null`, evaluates and returns `b`. Short-circuits: only the selected branch is evaluated. `cond` must be `Bool` (or `Null`, which is treated as `false`). |
 | `.not()` | Bool/Null | Bool | Boolean negation. `Null` is treated as `false`, so `.not()` on `Null` returns `true`. |
 
@@ -205,7 +205,7 @@ Applying an operator to incompatible types (e.g., `String + Number`) is a runtim
 
 | Method | Input Type | Return Type | Description |
 |--------|-----------|-------------|-------------|
-| `.date_parse("format")` | String | Int/Null | Parse a date string using the given format pattern (Rust `time` crate syntax). Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
+| `.date_parse("format")` | String | Int/Null | Parse a date string using the given format pattern (Rust `time` crate syntax). Times without an offset are read as UTC, and a date-only format gives midnight UTC, whatever the host's time zone. Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
 | `.date_parse_rfc3339()` | String | Int/Null | Parse an RFC 3339 / ISO 8601 date string. Returns a Unix timestamp (`Int`) or `Null` on parse failure. `Null` input propagates as `Null`. |
 
 #### URL Methods
@@ -765,7 +765,7 @@ Returns the keys of a JSON object as a `List<String>`. Returns an empty `List` i
 { "op": "json_array", "items": [{ ... }, { ... }] }
 ```
 
-Constructs a `Json` array from N evaluated expressions. Unlike `{ "op": "list" }` (which produces a `List` value), `json_array` produces a `Json` value that supports `.json_fold()`, `.filter()`, and other JSON-native operations. **Rust builder only** — not directly parseable from the text DSL.
+Constructs a `Json` array from N evaluated expressions. Unlike `{ "op": "list" }` (which produces a `List` value), `json_array` produces a `Json` value that supports `.json_fold()`, `.filter()` (which keeps it a `Json` array), `.array_len()`, and other JSON-native operations, in both HTML and JSON endpoints. **Rust builder only** — not directly parseable from the text DSL.
 
 #### Boolean Operations
 
@@ -992,11 +992,11 @@ A complete blueprint is a JSON object with the following fields:
 |-------|------|-------------|
 | `native_page_size` | integer | How many items the source returns per chunk (its real page size). |
 | `offset_param` | string | Query parameter name the source uses for the offset/page (e.g. `"offset"`, `"page"`). |
-| `offset_type` | string/object | `"ItemOffset"` (param = absolute item count: 0, 32, 64, …), `{"PageNumber": {"start": 1}}` (param = page number starting at `start`), or `{"CursorToken": {"next_cursor_field": "/next"}}` (JSON Pointer to the cursor field in each chunk's response). |
+| `offset_type` | string/object | `"ItemOffset"` (param = absolute item count: 0, 32, 64, …), `{"PageNumber": {"start": 1}}` (param = page number starting at `start`), or `{"CursorToken": {"next_cursor_field": "__next_cursor"}}` (the name of a blueprint scalar that yields each chunk's next cursor). |
 
 When `pagination` is set, the blueprint must be submitted via `paginated-extract-html` / `paginated-extract-json` rather than `extract-html` / `extract-json`. The host handles chunk-fetching, stitching, and `has_next_page` detection automatically.
 
-**`CursorToken` mode:** The host reads the cursor value from `next_cursor_field` (a JSON Pointer into the chunk response) after each fetch, injects it as the `offset_param` query value on the next request, and stops when the field is absent or `null`. Use this for APIs that return a next-page token rather than a numeric offset (an API exposing `offset`+`total` can also be expressed this way, but opaque-token APIs require it).
+**`CursorToken` mode:** After each fetch the host reads the next cursor from the scalar named `next_cursor_field` (a string, or a number used as its decimal text), injects it as the `offset_param` query value on the next request, and walks from the first chunk to the requested slice as described in §3.3. YAML's `cursor_field: /next` lowers to a scalar `__next_cursor` evaluating `json("/next")`. Use this for APIs that return a next-page token rather than a numeric offset (an API exposing `offset`+`total` can also be expressed this way, but opaque-token APIs require it).
 
 ### 2.4 Binary Encoding
 
@@ -1012,8 +1012,10 @@ Blueprints are serialized with **[`postcard`](https://docs.rs/postcard)** (a com
 | 4 | Added `endpoint_id: Option<String>` to `RequestDef` for per-endpoint hook dispatch (§3.10). |
 | 5 | Added `endpoint_id: Option<String>` to `Expr::Fetch` so sub-fetches (`then:` / `for_each:` steps) participate in per-endpoint hook dispatch. |
 | 6 | Added `Expr::Arena`, flat storage for large expressions. Appended as a new variant, so version 5 payloads still decode. |
+| 7 | Added `body: Option<RequestBody>` to `RequestDef` (the rendered request body). This changes the serialized layout of every blueprint that carries a request, so versions 5 and 6 are no longer readable and extensions built with them must be rebuilt. |
 
-The current version is **6**. The host reads versions **5 and 6**; versions 1–4 are rejected.
+The current version is **7**. The host reads version **7** only; earlier versions are rejected
+with a "recompile the extension" error.
 
 **Compatibility rule.** A WASM extension depends on the host in two independent ways, and each
 has its own rule. Both are checked when an artifact is installed, reloaded, and loaded at startup,
@@ -1022,7 +1024,7 @@ so an incompatible extension is refused up front instead of failing on its first
 - *Blueprint format.* postcard is not self-describing: appending a variant to an enum leaves
   older payloads decodable, but adding, removing, or reordering a field or variant does not.
   Within 1.x, a version bump may only append enum variants, and the host keeps reading every
-  version from 5 onwards. A change that cannot be expressed that way needs a new variant, not a
+  version from 7 onwards. A change that cannot be expressed that way needs a new variant, not a
   changed one. The extension's metadata records the version it was built with
   (`dsl_schema_version`); install and reload refuse an unreadable one, and at startup it is
   registered as a load degradation for that source. `decode_blueprint` still checks the prefix on
@@ -1119,6 +1121,10 @@ endpoint_name:
   queries:                # Query parameters (optional)
     param: value          # Static value
     param: $variable$     # Dynamic value from function arguments
+  body:                   # Request body (optional; not on GET). See "Request bodies" below.
+    type: json | form | raw
+    content: any          # json: any YAML value; form: map of field -> value; raw: text
+    content_type: string  # raw only (required there)
   type: string            # Response type: "html" (default) or "json"
 
   # --- Extraction ---
@@ -1137,6 +1143,24 @@ endpoint_name:
       optional: true
 ```
 
+#### Request bodies
+
+A non-GET endpoint may send a body. Placeholders are filled from the same arguments as the route,
+and the body is encoded by its `type`. Both backends render it with one function
+(`kani_shared::request::render_body`), so they send the same bytes.
+
+| `type` | Content | Encoding and `Content-Type` |
+|---|---|---|
+| `json` | any YAML value | Serialized as JSON, `application/json`. A string that is exactly one placeholder for a numeric argument (`$page$`, `$page_size$`) becomes a JSON number; every other placeholder, and any text around one, becomes a JSON string escaped by the serializer, so quotes, backslashes, newlines and non-ASCII text are always valid JSON. Keys are not interpolated. |
+| `form` | map of field name to value | Each value is filled, then the pairs are encoded once as `application/x-www-form-urlencoded` (space becomes `+`, other reserved or non-ASCII bytes become `%XX`), in declaration order. |
+| `raw` | text | Filled as text and sent as-is with the required `content_type`. |
+
+The body is sent on every attempt, including hook `retry()`s. A `pre_request` hook may read or
+replace it as `req.body`. The final bytes are limited to 64 KiB, checked at send time after
+placeholders are filled and after any hook has replaced the body; a larger body fails the request.
+`content_type` may be set only for `raw`. A `then` or `for_each` step may not target an endpoint
+that declares a body, because sub-fetches do not send one.
+
 #### Variable Interpolation
 
 Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function
@@ -1147,11 +1171,22 @@ sent as `2+1`. Compute offsets with `pagination` (§3.3) instead. A join such as
 number, parenthesis or `*`, is an ordinary template. In a route, `/` is a path separator, not an
 operator.
 
+Encoding is the same in both backends:
+
+- **Route:** each placeholder value is percent-encoded as one path segment (everything except
+  letters, digits, `-`, `_`, `.` and `~`), so an id containing `/`, `?`, `#`, `%` or a space fills
+  exactly one slot. `a b/%2F` becomes `a%20b%2F%252F`; an already-encoded value is encoded again.
+- **Queries:** the interpolated value is form-encoded once when the URL is built (`a b` becomes
+  `a+b`).
+- **Headers:** placeholders are interpolated as text, with no encoding. A resulting value containing
+  CR, LF or NUL fails the request instead of being sent.
+
 | Variable | Available In | Description |
 |----------|-------------|-------------|
 | `$query$` | search | The search query string |
 | `$page$` | popular, search, chapter_list | The page number |
 | `$page_size$` | popular, search, chapter_list | The requested page size |
+| `$sort$` | chapter_list | The selected `chapter_sort` option id, or empty when none is selected |
 | `$manga_id$` | manga_details, chapter_list, pages | The manga identifier |
 | `$chapter_id$` | pages | The chapter identifier |
 | `$pref:key$` | any | Value of a user preference |
@@ -1296,6 +1331,10 @@ chapter_sort:
 
 Validation rules: `options` must be non-empty; each option `id` must be non-empty; `default`, when present, must name one of the declared option ids.
 
+Sorting happens at the source. The selected option id reaches `chapter_list` as `$sort$`, usable in
+its `route` and `queries` (for example `order: $sort$`), in both backends. The host does not reorder
+the rows it gets back, so an option changes the result only through the request it produces.
+
 #### Endpoint Chaining (`then` / `for_each`)
 
 Endpoints can chain sub-fetches to enrich their results without writing Rust. Two flavours:
@@ -1327,6 +1366,24 @@ endpoints:
 - `fail` — propagate the error (default).
 - `"<dsl expr>"` — any other string is treated as a DSL expression evaluated as a fallback value.
 
+**Evaluation order and scope.** A chained endpoint runs in these phases, in order. Each phase sees
+only the context listed; validation refuses `self`/`index()` in a `then` step and `dom()` in
+`deduplicate_by`, and both backends build the same blueprint, so a phase cannot silently read another
+phase's context.
+
+| # | Phase | `self` | `dom()` / `json()` | Variables in scope |
+|---|---|---|---|---|
+| 1 | `bindings`, then each `then` step's `url_expr`, fetch and `on_failure` | none | main document | preferences, earlier bindings, earlier `$merge_as` |
+| 2 | `scalars` (including an expression `has_next_page`) | none | main document | as above, plus every `then` result as `$merge_as` |
+| 3 | row `fields`, then each `for_each` step's `url_expr` | the container element | main document | as above, plus `index()` |
+| 4 | the `for_each` sub-endpoint's own fields | the sub-page's container element | the sub-page | the sub-endpoint's own bindings only |
+| 5 | a `for_each` `on_failure` fallback | the container element | main document | as in phase 3 |
+| 6 | merge: the sub-endpoint's first row becomes the row's `merge_as` field | — | — | — |
+| 7 | `deduplicate_by` (interpreted only) | the finished JSON row | `json()` is the row; no `dom()` | none |
+
+A sub-fetch that fails, whether by network error, a non-2xx status a hook did not accept, or an extraction
+error, is handled by the step's `on_failure`. It is never silently turned into an empty result.
+
 **`for_each` keeps only the sub-fetch's first row.** The sub-endpoint is extracted
 normally, but the value stored as `merge_as` is its first row, not the whole list —
 so a sub-endpoint whose container matches several elements silently contributes only
@@ -1335,7 +1392,8 @@ the first.
 **`deduplicate_by`** is a DSL expression evaluated against each *main-result* row once
 its sub-fetch has merged in; the row is a JSON object, so `self` and `json()` both address
 it. Rows repeating an earlier row's key are dropped, the first
-occurrence is kept, and the original order is preserved. Use it where a source lists the
+occurrence is kept, and the original order is preserved. A row whose key is null has no
+identity to repeat, so it is always kept. Use it where a source lists the
 same entry under several categories on one page and only the sub-fetch reveals they are
 the same.
 
@@ -1353,7 +1411,8 @@ key cannot be evaluated; `kani-cli generate` and factory `kani-cli build` reject
 sets it rather than emitting a crate that ignores it (§5).
 
 Sub-fetch parallelism is not configurable per step. Every request a source makes,
-including sub-fetches, is bounded by `metadata.rate_limit.max_concurrent` (default 4).
+including sub-fetches, is bounded by `metadata.rate_limit.max_concurrent` (default 4), and
+the total counts against the operation budget (§5.2).
 A `concurrency:` key on a `for_each` step is accepted and ignored: it was
 documented and range-checked before 1.0 but never read, so honouring it now would
 change behaviour for anyone who set it. Remove it from your source; use
@@ -1484,6 +1543,10 @@ chapter_list:
                           # report a count and the host will rely on `has_next_page`.
 ```
 
+When `has_next_page` is omitted there is no next page, in both backends. A page that extracted no
+rows never has a next page, whatever the rule says, so a static `true` cannot loop the client over
+empty pages.
+
 #### PagesEndpoint
 
 ```yaml
@@ -1501,9 +1564,22 @@ pages:
 **`transform`:** an optional per-page field naming a transform from the host's
 transform registry (`kani_core::transform`), the declarative equivalent of a
 compiled extension setting `Page.transform`. The name is carried to the image
-proxy, which resolves it against the upstream response headers and applies it if
-it resolves; an unknown name, or one whose parameters are absent from the
-response, is a passthrough. An empty value counts as absent.
+proxy and the downloader, which resolve it against the upstream response headers.
+Resolution is strict, because an image delivered untransformed is a scrambled page
+saved as a success:
+
+- An unknown name, a transform of the wrong kind, or parameters that are present but
+  unusable fail the page. Examples of unusable parameters: `x-enc-seed` without
+  `x-enc-len`, an unparseable seed, a grid other than `5x5`, or `lcg-tile-5x5`
+  without an inline seed. A download fails without writing the page and is not
+  retried. The proxy refuses the image.
+- A transform passes the image through only on positive evidence that it is not
+  scrambled. For `lcg-tile-5x5-from-header`, that evidence is that the response
+  carries no scramble header at all, or carries explicit zero seeds. This follows
+  the source's own protocol. The body must still be a real image; one that is not
+  fails the page.
+
+An empty value counts as absent.
 
 ### 3.3 Pagination
 
@@ -1524,7 +1600,24 @@ When `pagination` is set on an endpoint, the framework calls `paginated-extract-
 |-------|-------------|
 | `item` | Offset param = absolute item count: 0, 32, 64, … |
 | `page` | Offset param = page number. Defaults to 1-based. Use `page_start: 0` for 0-based. |
-| `cursor` | Cursor-token pagination. Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request and stops when the field is absent or null. |
+| `cursor` | Cursor-token pagination, JSON endpoints only (not browser endpoints). Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request. See below. |
+
+**Cursor pagination walks from the start.** A cursor can only be obtained from the response
+before it, so a request for page `p` of size `n` fetches from the first chunk (no cursor) onwards,
+tracking each chunk's absolute position, and returns exactly items `[(p-1)·n, p·n)`. A client page
+may straddle chunks: with `native_page_size: 32` and size 20, page 2 is items 21–40, taken from the
+first and second chunks. The walk stops at the first of these:
+
+- the requested slice is complete;
+- the cursor is null, missing or empty;
+- a chunk has no rows;
+- the response's `has_next_page` is false;
+- the next cursor is one already followed in this walk.
+
+Rows beyond the stop are unreachable, so a page past it is empty. `has_next_page` is true when the
+last chunk held rows past the slice, or when the walk could have continued. No cursor is cached
+between requests, so an earlier page changing upstream cannot make a stored token return a
+different slice. Every chunk counts against the operation budget (§5.2), which bounds a deep page.
 
 **`has_next_page` detection:** If the blueprint includes a `scalars` entry named `has_next_page`, its value from the last fetched chunk is used. Otherwise the framework falls back to: last chunk was full (≥ `native_page_size` items) → more pages available.
 
@@ -1740,6 +1833,9 @@ metadata:
     burst: integer              # Optional. Default: 8.
     max_concurrent: integer     # Optional. Default: 4.
     max_hook_requests: integer  # Optional. Default: 3. Max hook-driven retries per request (§3.10).
+    max_requests: integer       # Optional. Default: 128, at most 1024. Requests per operation (§5.2).
+    max_response_bytes: integer # Optional. Default: 64 MiB, at most 256 MiB, per operation.
+    max_operation_seconds: integer # Optional. Default: 120, at most 600, per operation.
   languages: [string]           # Optional.
   description: string           # Optional.
   sections:
@@ -1763,7 +1859,7 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: true. Static or DSL expression.
+    has_next_page: bool | string # Default: false. Static or DSL expression.
     pagination: PaginationConfig
 
   search:                       # -> search_manga
@@ -1778,7 +1874,7 @@ endpoints:
     bindings: map<string, string>
     fields: map<string, FieldDef>
     scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: true. Static or DSL expression.
+    has_next_page: bool | string # Default: false. Static or DSL expression.
     pagination: PaginationConfig
 
   manga_details:                # -> get_manga_details
@@ -1887,7 +1983,7 @@ pagination:
   offset_param: string               # Query param name for offset/page/cursor
   offset_type: "item" | "page" | "cursor"
   page_start: integer                # For "page" type: starting page number (default: 1)
-  cursor_field: string               # For "cursor" type: JSON Pointer to next-page token in response
+  cursor_field: string               # Required for "cursor" type (and only allowed there): JSON Pointer to the next-page token
 
 # Scripting (top-level, optional; see §3.10)
 scripts:
@@ -2153,7 +2249,7 @@ The body must return a `HookAction` value:
 | `retry()` | Re-send the request immediately (counts against `max_hook_requests`). |
 | `retry_after(seconds)` | Re-send after a delay (counts against `max_hook_requests`). |
 | `fail(kind, reason)` | Abort with an `ExtensionError` of the named kind. |
-| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). |
+| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. |
 
 #### Cache in hook scripts
 
@@ -2356,6 +2452,24 @@ backend. Both backends share `build_blueprint` and `build_blueprint_core` in `ka
 
 The evaluator (`kani-core/src/evaluator/shared.rs`) enforces host-side caps (not author-overridable): `MAX_EVAL_ITERATIONS` (100 000), `MAX_EVAL_DEPTH` (50), `MAX_LIST_SIZE` (10 000), `MAX_STRING_LENGTH` (1 000 000). Exceeding a cap aborts evaluation with a limit error.
 
+**Operation budget.** Every top-level operation (one popular, search, details, chapter-list or pages
+call, or one WASM guest call) has one budget, shared by everything that operation causes: the main
+request, every pagination chunk, `then` and `for_each` sub-fetches, hook `retry()`/`retry_after()`
+and `refresh_auth` re-runs, and browser captures from `page_url`, hooks or WASM.
+
+| Dimension | Default | Hard cap | Declared as |
+|---|---|---|---|
+| Requests | 128 | 1024 | `metadata.rate_limit.max_requests` |
+| Response bytes read | 64 MiB | 256 MiB | `metadata.rate_limit.max_response_bytes` |
+| Elapsed time | 120 s | 600 s | `metadata.rate_limit.max_operation_seconds` |
+
+Validation refuses a declared value of 0 or above the cap. When any dimension runs out, the whole
+operation fails with a "budget exceeded" error naming the dimension, which the host reports as
+`BudgetExceeded`. No partial result is returned, and no `on_failure` policy (`skip` or a fallback)
+can absorb it, so a large listing never turns into rows with silently missing sub-fetches.
+`max_concurrent` limits how many of those requests run at once; the budget limits how many there
+are.
+
 ### 5.3 Selection and supersession
 
 Sources live in a single directory (`wasm_storage_path`), one artifact per source. Installing or
@@ -2503,6 +2617,11 @@ cannot grant themselves anything. A grant:
   multicast addresses, whether named directly or reached through DNS;
 - is still subject to the host policy: a restricted source reaches a granted host only if it is
   the source's `base_url` host.
+- does not cover browser captures. The solver's browser has its own network and is never given
+  the grant, so a `browser_payload` endpoint, hook or WASM capture whose target is a granted host,
+  a private IP literal, or a name that resolves to a forbidden address fails with "local-network
+  grants do not cover browser captures" or "browser capture of a forbidden host refused" before
+  the solver is contacted. Direct HTTP endpoints to the same host keep working.
 
 Changing a grant reloads the source.
 

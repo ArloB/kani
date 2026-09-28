@@ -43,6 +43,7 @@ fn text_field(name: &str, selector: &str) -> ValidatedField {
 
 fn popular_endpoint() -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/popular".into(),
         method: "GET".into(),
         headers: vec![],
@@ -250,6 +251,7 @@ fn json_field(name: &str, ptr: &str) -> ValidatedField {
 
 fn json_endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.into(),
         response_type: ResponseType::Json,
         container: container.into(),

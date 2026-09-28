@@ -30,6 +30,13 @@ endpoints:
 
   search:
     route: "/search"
+    method: POST
+    body:
+      type: json
+      content:
+        q: "$query$"
+        page: "$page$"
+        label: "p$page$"
     queries:
       q: $query$
       kw: "title-$query$ extra"
@@ -60,6 +67,8 @@ endpoints:
 
   chapter_list:
     route: "/manga/$manga_id$/chapters"
+    queries:
+      order: $sort$
     container: ".ch"
     has_next_page: false
     fields:
@@ -72,9 +81,18 @@ endpoints:
 
   pages:
     route: "/manga/$manga_id$/chapter/$chapter_id$"
+    headers:
+      X-Ref: "m-$manga_id$"
     container: ".page"
     fields:
       index: "index()"
       url: 'self.attr("data-url")'
+
+chapter_sort:
+  options:
+    - id: date_desc
+      label: Newest first
+    - id: number_asc
+      label: Oldest first
 
 preferences: []

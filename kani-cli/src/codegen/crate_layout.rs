@@ -48,11 +48,14 @@ pub(crate) fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) ->
     };
     let rate_limit = match &ext.metadata.rate_limit {
         Some(rl) => format!(
-            "Some(kani_shared::RateLimitConfig {{ requests_per_second: {rps}_f32, burst: {burst}_u32, max_concurrent: {max_concurrent}_u32, max_hook_requests: {max_hook_requests}_u32 }})",
+            "Some(kani_shared::RateLimitConfig {{ requests_per_second: {rps}_f32, burst: {burst}_u32, max_concurrent: {max_concurrent}_u32, max_hook_requests: {max_hook_requests}_u32, max_requests: {max_requests:?}, max_response_bytes: {max_response_bytes:?}, max_operation_seconds: {max_operation_seconds:?} }})",
             rps = rl.requests_per_second,
             burst = rl.burst,
             max_concurrent = rl.max_concurrent,
             max_hook_requests = rl.max_hook_requests,
+            max_requests = rl.max_requests,
+            max_response_bytes = rl.max_response_bytes,
+            max_operation_seconds = rl.max_operation_seconds,
         ),
         None => "None".to_string(),
     };

@@ -280,9 +280,13 @@ impl Value {
     pub(crate) fn into_list(self, op: &str) -> Result<Vec<Value>, String> {
         match self {
             Value::List(v) => Ok(v),
-            Value::Json(serde_json::Value::Array(arr)) => {
-                Ok(arr.into_iter().map(Value::Json).collect())
-            }
+            Value::Json(serde_json::Value::Array(arr)) => Ok(arr
+                .into_iter()
+                .map(|v| match v {
+                    serde_json::Value::Null => Value::Null,
+                    v => Value::Json(v),
+                })
+                .collect()),
             _ => Err(format!("{}: expected a List", op)),
         }
     }
@@ -544,9 +548,12 @@ where
 
         Expr::DateParseRfc3339 { target } => Some(recurse(target, env).await.and_then(|v| {
             v.map_str("date_parse_rfc3339", |date| {
-                time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
-                    .map(|dt| Value::Int(dt.unix_timestamp()))
-                    .map_err(|e| format!("Invalid RFC3339 date '{}': {}", date, e))
+                Ok(time::OffsetDateTime::parse(
+                    &date,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map(|dt| Value::Int(dt.unix_timestamp()))
+                .unwrap_or(Value::Null))
             })
         })),
 
@@ -697,11 +704,51 @@ where
             .await,
         ),
 
+        Expr::ArrayLen { target } => Some(
+            recurse(target, env)
+                .await
+                .and_then(|v| v.into_json("array_len"))
+                .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
+        ),
+
+        Expr::JsonArray(items) => Some(
+            (async {
+                let mut arr = Vec::with_capacity(items.len());
+                for item in items {
+                    let v = recurse(item, env.clone()).await?;
+                    arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
+                }
+                Ok(Value::Json(serde_json::Value::Array(arr)))
+            })
+            .await,
+        ),
+
+        Expr::JsonFold { target } => Some(
+            (async {
+                let items = recurse(target, env)
+                    .await
+                    .and_then(|v| v.into_list("json_fold"))?;
+                let mut merged: Option<serde_json::Value> = None;
+                for item in items {
+                    let v = item.into_json("json_fold")?;
+                    if v.is_null() {
+                        continue;
+                    }
+                    merged = Some(match merged {
+                        None => v,
+                        Some(acc) => json_merge_two(acc, v)?,
+                    });
+                }
+                Ok(merged.map(Value::Json).unwrap_or(Value::Null))
+            })
+            .await,
+        ),
+
         Expr::Filter { target, filter } => Some(
             (async {
-                let items = recurse(target, env.clone())
-                    .await
-                    .and_then(|v| v.into_list("filter"))?;
+                let receiver = recurse(target, env.clone()).await?;
+                let json_array = matches!(receiver, Value::Json(serde_json::Value::Array(_)));
+                let items = receiver.into_list("filter")?;
                 if items.len() > limits.max_list_size {
                     return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
@@ -715,6 +762,14 @@ where
                         Value::Bool(false) | Value::Null => {}
                         _ => return Err("filter: predicate must return Bool".into()),
                     }
+                }
+                if json_array {
+                    return Ok(Value::Json(serde_json::Value::Array(
+                        results
+                            .into_iter()
+                            .map(|v| v.to_json().unwrap_or(serde_json::Value::Null))
+                            .collect(),
+                    )));
                 }
                 Ok(Value::List(results))
             })
@@ -1050,6 +1105,21 @@ pub async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
+    fetch_body_with(state, req, false).await
+}
+
+pub(super) async fn fetch_sub_body(
+    state: &mut crate::wasm::HostState,
+    req: &kani_shared::ast::RequestDef,
+) -> Result<String, String> {
+    fetch_body_with(state, req, true).await
+}
+
+async fn fetch_body_with(
+    state: &mut crate::wasm::HostState,
+    req: &kani_shared::ast::RequestDef,
+    any_error_status_fails: bool,
+) -> Result<String, String> {
     use crate::scripting::{HookActionKind, ScriptableCtx, ScriptableRequest, ScriptableResponse};
 
     let hook_registry = state.hook_registry.clone();
@@ -1059,9 +1129,13 @@ pub async fn fetch_body(
         url: req.url.clone(),
         headers: req.headers.clone(),
         queries: req.queries.clone(),
-        body: None,
+        body: req
+            .body
+            .as_ref()
+            .and_then(|b| String::from_utf8(b.bytes.clone()).ok()),
         endpoint_id: req.endpoint_id.clone(),
     };
+    let declared_body = req.body.clone();
 
     let max_hook_retries = state.max_hook_requests;
     let mut hook_retries = 0u32;
@@ -1077,6 +1151,7 @@ pub async fn fetch_body(
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
                 allowed_host: state.allowed_host.clone(),
+                operation_budget: Some(std::sync::Arc::clone(&state.operation_budget)),
                 cache_namespaces: std::sync::Arc::default(),
             };
             let action = registry
@@ -1113,7 +1188,29 @@ pub async fn fetch_body(
                     .source_redirect_policy(state.allowed_host.clone()),
             );
         for (k, v) in &working.headers {
+            kani_shared::request::check_header_value(k, v)?;
             builder = builder.header(k, v);
+        }
+        let body = match (&working.body, &declared_body) {
+            (Some(text), declared) => Some((
+                declared.as_ref().map(|b| b.content_type.clone()),
+                text.clone().into_bytes(),
+            )),
+            (None, Some(declared)) => {
+                Some((Some(declared.content_type.clone()), declared.bytes.clone()))
+            }
+            (None, None) => None,
+        };
+        if let Some((content_type, bytes)) = body {
+            kani_shared::request::check_body_size(bytes.len())?;
+            let has_type = working
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+            if let (Some(ct), false) = (content_type, has_type) {
+                builder = builder.header("Content-Type", ct);
+            }
+            builder = builder.body(bytes);
         }
         let request = builder.build().map_err(|e| e.to_string())?;
 
@@ -1162,6 +1259,7 @@ pub async fn fetch_body(
             .await
             .map_err(|e| e.to_string())?
             .to_vec();
+        state.charge_response_bytes(raw_body.len())?;
 
         // Only a source with hooks sees a lossily-decoded body; without them the
         // strict conversion below still rejects a non-UTF-8 payload.
@@ -1182,6 +1280,7 @@ pub async fn fetch_body(
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
                 allowed_host: state.allowed_host.clone(),
+                operation_budget: Some(std::sync::Arc::clone(&state.operation_budget)),
                 cache_namespaces: std::sync::Arc::default(),
             };
             let action = registry
@@ -1213,7 +1312,13 @@ pub async fn fetch_body(
         }
 
         let code = status.as_u16();
-        if !proceeded && (code == 429 || code == 401 || code == 403 || (500..600).contains(&code)) {
+        if !proceeded
+            && (code == 429
+                || code == 401
+                || code == 403
+                || (500..600).contains(&code)
+                || (any_error_status_fails && !status.is_success()))
+        {
             let ra = retry_after.map(|s| s.to_string()).unwrap_or_default();
             return Err(format!("{HTTP_STATUS_ERR_PREFIX}{code}:{ra}"));
         }
@@ -1314,6 +1419,7 @@ pub(super) fn charge_fetch_request(
         kani_shared::ast::HttpMethod::Delete => "DELETE",
     };
     Ok(kani_shared::ast::RequestDef {
+        body: None,
         url: url.to_string(),
         method: method_str.to_string(),
         headers,
@@ -1348,6 +1454,7 @@ pub(super) async fn send_prepared_request(
         .request(method, url.to_string())
         .redirect(client.source_redirect_policy(allowed_host));
     for (k, v) in &req.headers {
+        kani_shared::request::check_header_value(k, v)?;
         builder = builder.header(k, v);
     }
     let request = builder.build().map_err(|e| e.to_string())?;
@@ -1359,6 +1466,10 @@ pub(super) async fn send_prepared_request(
     .await
     .map_err(|_| "HTTP request timed out after 90 seconds".to_string())?
     .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("{HTTP_STATUS_ERR_PREFIX}{}:", status.as_u16()));
+    }
 
     const MAX_BYTES: usize = 15 * 1024 * 1024;
     let body = response
@@ -1390,6 +1501,7 @@ pub(super) async fn eval_fetch_field(
     };
 
     let req = kani_shared::ast::RequestDef {
+        body: None,
         url: url.to_string(),
         method: method_str.to_string(),
         headers,
@@ -1397,7 +1509,7 @@ pub(super) async fn eval_fetch_field(
         endpoint_id,
     };
 
-    let body = fetch_body(state, &req).await?;
+    let body = fetch_sub_body(state, &req).await?;
 
     let result = match kind {
         kani_shared::ast::SubBlueprintKind::Html => {
@@ -1524,6 +1636,38 @@ pub(super) fn header_pair(key: Value, value: Value) -> Result<(String, String), 
     }
 }
 
+fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_json::Value, String> {
+    use serde_json::Value as J;
+    match (a, b) {
+        (J::Object(mut ma), J::Object(mb)) => {
+            for (k, v) in mb {
+                ma.insert(k, v);
+            }
+            Ok(J::Object(ma))
+        }
+        (J::Array(mut va), J::Array(vb)) => {
+            va.extend(vb);
+            Ok(J::Array(va))
+        }
+        (a, b) => Err(format!(
+            "json_merge: cannot merge {} with {}",
+            type_str(&a),
+            type_str(&b)
+        )),
+    }
+}
+
+fn type_str(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1535,6 +1679,7 @@ mod tests {
 
     fn simple_request(url: &str) -> RequestDef {
         RequestDef {
+            body: None,
             url: url.to_string(),
             method: "GET".to_string(),
             headers: vec![],

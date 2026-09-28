@@ -134,6 +134,8 @@ pub struct SeenRequest {
     pub query: Option<String>,
     /// Header names lowercased.
     pub headers: Vec<(String, String)>,
+    /// The request body, read to its `Content-Length`.
+    pub body: Vec<u8>,
 }
 
 impl SeenRequest {
@@ -285,7 +287,36 @@ async fn handle(mut stream: tokio::net::TcpStream, state: Arc<OriginState>) {
     if n == 0 {
         return;
     }
-    let request = String::from_utf8_lossy(&buf[..n]).to_string();
+    let mut raw = buf[..n].to_vec();
+    let header_end = loop {
+        if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+        let Ok(more) = stream.read(&mut buf).await else {
+            return;
+        };
+        if more == 0 {
+            break raw.len();
+        }
+        raw.extend_from_slice(&buf[..more]);
+    };
+    let content_length = String::from_utf8_lossy(&raw[..header_end])
+        .lines()
+        .filter_map(|l| l.split_once(':'))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    while raw.len() < header_end + content_length {
+        let Ok(more) = stream.read(&mut buf).await else {
+            return;
+        };
+        if more == 0 {
+            break;
+        }
+        raw.extend_from_slice(&buf[..more]);
+    }
+    let body = raw[header_end..].to_vec();
+    let request = String::from_utf8_lossy(&raw[..header_end]).to_string();
 
     let mut request_lines = request.lines();
     let start_line = request_lines.next().unwrap_or_default();
@@ -313,6 +344,7 @@ async fn handle(mut stream: tokio::net::TcpStream, state: Arc<OriginState>) {
         path: bare_path.clone(),
         query: query.clone(),
         headers: headers.clone(),
+        body,
     };
     state
         .last_request

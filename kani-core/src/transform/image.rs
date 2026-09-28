@@ -21,9 +21,16 @@ impl Transform for LcgTileDescramble {
         "LCG tile descrambler; seed from the x-scramble-seed header or an inline hint parameter"
     }
 
-    fn resolve(&self, hint: &str, headers: &HeaderMap) -> Option<ResolvedTransform> {
-        let plan = ScramblePlan::from(hint, headers)?;
-        Some(ResolvedTransform::new(
+    fn resolve(
+        &self,
+        hint: &str,
+        headers: &HeaderMap,
+    ) -> std::result::Result<Option<ResolvedTransform>, TransformError> {
+        let Some(plan) = ScramblePlan::from(hint, headers).map_err(TransformError::Parameters)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ResolvedTransform::new(
             TransformOutput {
                 file_extension: "jpg",
                 content_type: "image/jpeg",
@@ -32,7 +39,7 @@ impl Transform for LcgTileDescramble {
                 plan.apply(data)
                     .map_err(|e| TransformError::Apply(e.to_string()))
             },
-        ))
+        )))
     }
 }
 
@@ -58,36 +65,77 @@ struct TileLayer {
 }
 
 impl ScramblePlan {
-    fn from(hint: &str, headers: &HeaderMap) -> Option<Self> {
-        let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-
-        let byte_layer = match (
-            header("x-enc-seed").and_then(parse_scramble_seed),
-            header("x-enc-len").and_then(|v| v.trim().parse::<usize>().ok()),
-        ) {
-            (Some(seed), Some(len)) => Some(ByteLayer {
-                seed,
-                len,
-                xorshift: header("x-enc-algo").map(str::trim) == Some("2"),
-            }),
-            _ => None,
+    fn from(hint: &str, headers: &HeaderMap) -> std::result::Result<Option<Self>, String> {
+        let header = |name: &str| -> std::result::Result<Option<&str>, String> {
+            headers
+                .get(name)
+                .map(|v| {
+                    v.to_str()
+                        .map(str::trim)
+                        .map_err(|_| format!("{name} is not text"))
+                })
+                .transpose()
+        };
+        let integer = |name: &str| -> std::result::Result<Option<i64>, String> {
+            header(name)?
+                .map(|v| {
+                    v.parse::<i64>()
+                        .map_err(|_| format!("{name} {v:?} is not an integer"))
+                })
+                .transpose()
         };
 
-        let grid_ok = header("x-scramble-grid").map(str::trim).unwrap_or("5x5") == "5x5";
-        let tile_layer = resolve_scramble_seed(hint, headers)
-            .filter(|_| grid_ok)
-            .map(|seed| TileLayer {
-                seed: seed ^ decode_scramble_hash(header("x-scramble-hash")),
-                xorshift: header("x-scramble-algo").map(str::trim) == Some("3"),
-            });
+        let enc_seed = integer("x-enc-seed")?;
+        let enc_len = integer("x-enc-len")?;
+        let byte_layer = match (enc_seed, enc_len) {
+            (None, None) | (Some(0), _) => None,
+            (Some(seed), Some(len)) => Some(ByteLayer {
+                seed: seed as i32,
+                len: usize::try_from(len).map_err(|_| format!("x-enc-len {len} is negative"))?,
+                xorshift: header("x-enc-algo")? == Some("2"),
+            }),
+            (Some(_), None) => return Err("x-enc-seed is present without x-enc-len".into()),
+            (None, Some(_)) => return Err("x-enc-len is present without x-enc-seed".into()),
+        };
+
+        let tile_seed = match hint {
+            "lcg-tile-5x5-from-header" => integer("x-scramble-seed")?.filter(|s| *s != 0),
+            h => {
+                let raw = h
+                    .strip_prefix("lcg-tile-5x5:")
+                    .ok_or_else(|| format!("{h:?} needs an inline seed, as lcg-tile-5x5:<seed>"))?;
+                let seed = raw
+                    .trim()
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|s| *s != 0)
+                    .ok_or_else(|| format!("{h:?} has no usable inline seed"))?;
+                Some(seed)
+            }
+        };
+        let tile_layer = match tile_seed {
+            None => None,
+            Some(seed) => {
+                let grid = header("x-scramble-grid")?.unwrap_or("5x5");
+                if grid != "5x5" {
+                    return Err(format!(
+                        "x-scramble-grid {grid:?} is not supported, only 5x5"
+                    ));
+                }
+                Some(TileLayer {
+                    seed: seed as i32 ^ decode_scramble_hash(header("x-scramble-hash")?),
+                    xorshift: header("x-scramble-algo")? == Some("3"),
+                })
+            }
+        };
 
         if byte_layer.is_none() && tile_layer.is_none() {
-            return None;
+            return Ok(None);
         }
-        Some(Self {
+        Ok(Some(Self {
             byte_layer,
             tile_layer,
-        })
+        }))
     }
 
     fn apply(&self, data: &[u8]) -> Result<Vec<u8>> {
@@ -193,28 +241,6 @@ fn reencode_jpeg(data: &[u8]) -> Result<Vec<u8>> {
 const GRID: usize = 5;
 const TILES: usize = GRID * GRID;
 
-/// Resolve the LCG scramble seed for a page, given the per-page transform hint
-/// declared by the extension and the HTTP response headers from the upstream CDN.
-fn resolve_scramble_seed(hint: &str, headers: &rquest::header::HeaderMap) -> Option<i32> {
-    match hint {
-        "lcg-tile-5x5-from-header" => headers
-            .get("x-scramble-seed")
-            .and_then(|v| v.to_str().ok())
-            .and_then(parse_scramble_seed),
-        h if h.starts_with("lcg-tile-5x5:") => {
-            parse_scramble_seed(h.trim_start_matches("lcg-tile-5x5:"))
-        }
-        _ => None,
-    }
-}
-
-/// Parse the raw string value of an `x-scramble-seed` header.
-/// Returns `None` for a zero seed or any value that does not parse as a decimal integer.
-fn parse_scramble_seed(raw: &str) -> Option<i32> {
-    let seed = raw.trim().parse::<i64>().ok()? as i32;
-    if seed == 0 { None } else { Some(seed) }
-}
-
 /// Build the 25-element source→destination tile permutation for the given seed.
 ///
 /// Both variants are the same Fisher-Yates shuffle; they differ only in the
@@ -308,80 +334,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_scramble_seed_zero_returns_none() {
-        assert_eq!(parse_scramble_seed("0"), None);
-    }
-
-    #[test]
-    fn parse_scramble_seed_nonzero_returns_some() {
-        assert_eq!(parse_scramble_seed("12345"), Some(12345));
-        assert_eq!(parse_scramble_seed("-1"), Some(-1));
-    }
-
-    #[test]
-    fn parse_scramble_seed_whitespace_trimmed() {
-        assert_eq!(parse_scramble_seed("  42  "), Some(42));
-    }
-
-    #[test]
-    fn parse_scramble_seed_invalid_returns_none() {
-        assert_eq!(parse_scramble_seed("abc"), None);
-        assert_eq!(parse_scramble_seed(""), None);
-    }
-
-    fn header_map(name: &str, value: &str) -> rquest::header::HeaderMap {
-        let mut h = rquest::header::HeaderMap::new();
-        h.insert(
-            rquest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
-            rquest::header::HeaderValue::from_str(value).unwrap(),
-        );
-        h
-    }
-
-    #[test]
-    fn a_scramble_seed_header_drives_the_descramble() {
-        let headers = header_map("x-scramble-seed", "12345");
-        assert_eq!(
-            resolve_scramble_seed("lcg-tile-5x5-from-header", &headers),
-            Some(12345),
-            "the header value becomes the descramble seed"
-        );
-        assert_eq!(
-            resolve_scramble_seed("lcg-tile-5x5:777", &rquest::header::HeaderMap::new()),
-            Some(777)
-        );
-    }
-
-    #[test]
-    fn a_missing_or_malformed_scramble_seed_stores_the_raw_image() {
-        assert_eq!(
-            resolve_scramble_seed(
-                "lcg-tile-5x5-from-header",
-                &rquest::header::HeaderMap::new()
-            ),
-            None
-        );
-        assert_eq!(
-            resolve_scramble_seed(
-                "lcg-tile-5x5-from-header",
-                &header_map("x-scramble-seed", "abc")
-            ),
-            None
-        );
-        assert_eq!(
-            resolve_scramble_seed(
-                "lcg-tile-5x5-from-header",
-                &header_map("x-scramble-seed", "0")
-            ),
-            None
-        );
-        assert_eq!(
-            resolve_scramble_seed("none", &header_map("x-scramble-seed", "12345")),
-            None
-        );
-    }
-
-    #[test]
     fn transform_impl_exposes_image_kind_and_jpeg_output() {
         let t = LcgTileDescramble;
         assert_eq!(t.kind(), TransformKind::Image);
@@ -389,6 +341,7 @@ mod tests {
 
         let resolved = t
             .resolve("lcg-tile-5x5:12345", &rquest::header::HeaderMap::new())
+            .unwrap()
             .expect("inline seed resolves");
         assert_eq!(resolved.output().file_extension, "jpg");
         assert_eq!(resolved.output().content_type, "image/jpeg");
@@ -406,6 +359,7 @@ mod tests {
 
         let resolved = LcgTileDescramble
             .resolve("lcg-tile-5x5:777", &rquest::header::HeaderMap::new())
+            .unwrap()
             .unwrap();
         assert!(
             resolved.apply(&png).is_ok(),
@@ -443,11 +397,6 @@ mod tests {
             counts[v] += 1;
         }
         assert!(counts.iter().all(|&c| c == 1));
-    }
-
-    #[test]
-    fn parse_scramble_seed_accepts_u32_range() {
-        assert_eq!(parse_scramble_seed("3000000000"), Some(-1_294_967_296_i32));
     }
 
     #[test]
@@ -538,21 +487,88 @@ mod tests {
         h
     }
 
+    fn plan(
+        hint: &str,
+        pairs: &[(&str, &str)],
+    ) -> std::result::Result<Option<ScramblePlan>, String> {
+        ScramblePlan::from(hint, &headers_from(pairs))
+    }
+
     #[test]
-    fn an_unscrambled_response_resolves_to_no_plan() {
-        assert_eq!(
-            ScramblePlan::from("lcg-tile-5x5-from-header", &headers_from(&[])),
-            None
-        );
+    fn only_positive_evidence_resolves_to_no_plan() {
+        for pairs in [
+            &[][..],
+            &[("x-scramble-seed", "0")][..],
+            &[("x-enc-seed", "0"), ("x-enc-len", "64")][..],
+        ] {
+            assert_eq!(
+                plan("lcg-tile-5x5-from-header", pairs),
+                Ok(None),
+                "{pairs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_or_unusable_scramble_parameters_are_errors_not_passthrough() {
+        for (hint, pairs, needle) in [
+            (
+                "lcg-tile-5x5-from-header",
+                &[("x-enc-seed", "777")][..],
+                "x-enc-len",
+            ),
+            (
+                "lcg-tile-5x5-from-header",
+                &[("x-enc-len", "64")][..],
+                "x-enc-seed",
+            ),
+            (
+                "lcg-tile-5x5-from-header",
+                &[("x-enc-seed", "abc"), ("x-enc-len", "64")][..],
+                "x-enc-seed",
+            ),
+            (
+                "lcg-tile-5x5-from-header",
+                &[("x-scramble-seed", "12x")][..],
+                "x-scramble-seed",
+            ),
+            (
+                "lcg-tile-5x5-from-header",
+                &[("x-scramble-seed", "12345"), ("x-scramble-grid", "4x4")][..],
+                "grid",
+            ),
+            ("lcg-tile-5x5", &[][..], "seed"),
+            ("lcg-tile-5x5:", &[][..], "seed"),
+            ("lcg-tile-5x5:zero", &[][..], "seed"),
+        ] {
+            let err = plan(hint, pairs).unwrap_err();
+            assert!(err.contains(needle), "{hint} {pairs:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn scramble_seeds_accept_the_u32_range_and_surrounding_space() {
+        for (raw, seed) in [
+            ("3000000000", -1_294_967_296_i32),
+            ("  42  ", 42),
+            ("-1", -1),
+        ] {
+            let tile = plan("lcg-tile-5x5-from-header", &[("x-scramble-seed", raw)])
+                .unwrap()
+                .unwrap()
+                .tile_layer
+                .unwrap();
+            assert_eq!(tile.seed, seed, "{raw:?}");
+        }
+        let inline = plan("lcg-tile-5x5:777", &[]).unwrap().unwrap();
+        assert_eq!(inline.tile_layer.unwrap().seed, 777);
     }
 
     #[test]
     fn each_header_family_selects_its_own_layer() {
-        let tile_only = ScramblePlan::from(
-            "lcg-tile-5x5-from-header",
-            &headers_from(&[("x-scramble-seed", "12345")]),
-        )
-        .unwrap();
+        let tile_only = plan("lcg-tile-5x5-from-header", &[("x-scramble-seed", "12345")])
+            .unwrap()
+            .unwrap();
         assert_eq!(
             tile_only,
             ScramblePlan {
@@ -564,10 +580,11 @@ mod tests {
             }
         );
 
-        let byte_only = ScramblePlan::from(
+        let byte_only = plan(
             "lcg-tile-5x5-from-header",
-            &headers_from(&[("x-enc-seed", "777"), ("x-enc-len", "64")]),
+            &[("x-enc-seed", "777"), ("x-enc-len", "64")],
         )
+        .unwrap()
         .unwrap();
         assert_eq!(
             byte_only,
@@ -581,56 +598,37 @@ mod tests {
             }
         );
 
-        let both = ScramblePlan::from(
+        let both = plan(
             "lcg-tile-5x5-from-header",
-            &headers_from(&[
+            &[
                 ("x-scramble-seed", "12345"),
                 ("x-scramble-algo", "3"),
                 ("x-enc-seed", "777"),
                 ("x-enc-len", "64"),
                 ("x-enc-algo", "2"),
-            ]),
+            ],
         )
+        .unwrap()
         .unwrap();
         assert!(both.byte_layer.unwrap().xorshift);
         assert!(both.tile_layer.unwrap().xorshift);
     }
 
     #[test]
-    fn an_incomplete_byte_layer_is_no_layer() {
-        assert_eq!(
-            ScramblePlan::from(
-                "lcg-tile-5x5-from-header",
-                &headers_from(&[("x-enc-seed", "777")])
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn a_grid_this_code_cannot_lay_out_drops_the_tile_layer() {
-        assert_eq!(
-            ScramblePlan::from(
-                "lcg-tile-5x5-from-header",
-                &headers_from(&[("x-scramble-seed", "12345"), ("x-scramble-grid", "4x4")]),
-            ),
-            None
-        );
-    }
-
-    #[test]
     fn a_known_scramble_hash_is_folded_into_the_seed() {
-        let plan = ScramblePlan::from(
+        let known = plan(
             "lcg-tile-5x5-from-header",
-            &headers_from(&[("x-scramble-seed", "12345"), ("x-scramble-hash", "03632")]),
+            &[("x-scramble-seed", "12345"), ("x-scramble-hash", "03632")],
         )
+        .unwrap()
         .unwrap();
-        assert_eq!(plan.tile_layer.unwrap().seed, 12345 ^ 58414);
+        assert_eq!(known.tile_layer.unwrap().seed, 12345 ^ 58414);
 
-        let unknown = ScramblePlan::from(
+        let unknown = plan(
             "lcg-tile-5x5-from-header",
-            &headers_from(&[("x-scramble-seed", "12345"), ("x-scramble-hash", "99999")]),
+            &[("x-scramble-seed", "12345"), ("x-scramble-hash", "99999")],
         )
+        .unwrap()
         .unwrap();
         assert_eq!(unknown.tile_layer.unwrap().seed, 12345);
     }

@@ -195,6 +195,7 @@ async fn extract_json_with_doc(
                         });
                         row.insert(field.name.clone(), serde_json::Value::Null);
                     }
+                    Err(e) if crate::budget::is_budget_exceeded(&e) => return Err(e),
                     Err(e) => match on_failure {
                         kani_shared::ast::OnFailurePolicy::Skip => {
                             row.insert(field.name.clone(), serde_json::Value::Null);
@@ -248,6 +249,8 @@ async fn extract_json_with_doc(
 
         for (p, body_result) in pending.into_iter().zip(bodies) {
             state.last_io_at = Some(std::time::Instant::now());
+            let body_result =
+                body_result.and_then(|body| state.charge_response_bytes(body.len()).map(|()| body));
             let outcome: Result<Value, String> = match body_result {
                 Ok(body) => {
                     let parsed = match p.kind {
@@ -278,6 +281,7 @@ async fn extract_json_with_doc(
                     v,
                     state.eval_budget.limits.max_string_length,
                 )?,
+                (Err(e), _) if crate::budget::is_budget_exceeded(&e) => return Err(e),
                 (Err(_), OnFailurePolicy::Skip) => {
                     results[p.row_index].insert(p.field_name.clone(), serde_json::Value::Null);
                 }
@@ -379,6 +383,7 @@ async fn eval_json_field(
         .await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
+            (Err(e), _) if crate::budget::is_budget_exceeded(&e) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
@@ -430,7 +435,7 @@ pub async fn deduplicate_rows(result: &mut serde_json::Value, key: &Expr) -> Res
             Arc::clone(&budget),
         )
         .await?;
-        keep.push(seen.insert(key_of(&value)));
+        keep.push(matches!(value, Value::Null) || seen.insert(key_of(&value)));
     }
 
     let mut iter = keep.into_iter();
@@ -537,13 +542,6 @@ fn eval_json_expr<'a>(
                     .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null))
             }
 
-            Expr::ArrayLen { target } => {
-                eval_json_expr(target, doc, current, env, registry, budget)
-                    .await
-                    .and_then(|v| v.into_json("array_len"))
-                    .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0)))
-            }
-
             Expr::JsonKeys { target } => {
                 eval_json_expr(target, doc, current, env, registry, budget)
                     .await
@@ -612,47 +610,74 @@ fn eval_json_expr<'a>(
                     .unwrap_or(Value::Null))
             }
 
-            Expr::JsonArray(items) => {
-                let mut arr = Vec::with_capacity(items.len());
-                for item in items {
-                    let v = eval_json_expr(
-                        item,
-                        doc,
-                        current,
-                        env.clone(),
-                        registry,
-                        Arc::clone(&budget),
-                    )
-                    .await?;
-                    arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
-                }
-                Ok(Value::Json(serde_json::Value::Array(arr)))
-            }
-
-            Expr::JsonFold { target } => {
-                let items = eval_json_expr(target, doc, current, env, registry, budget)
-                    .await
-                    .and_then(|v| v.into_list("json_fold"))?;
-                let mut merged: Option<serde_json::Value> = None;
-                for item in items {
-                    let v = item.into_json("json_fold")?;
-                    if v.is_null() {
-                        continue;
-                    }
-                    merged = Some(match merged {
-                        None => v,
-                        Some(acc) => json_merge_two(acc, v)?,
-                    });
-                }
-                Ok(merged.map(Value::Json).unwrap_or(Value::Null))
-            }
-
             _ => Err(format!(
                 "Unhandled expression in JSON evaluator: {:?}",
                 expression
             )),
         }
     })
+}
+
+async fn extract_json_cursor_paginated(
+    state: &mut crate::wasm::HostState,
+    page: i32,
+    page_size: i32,
+    blueprint: &Blueprint,
+    offset_param: &str,
+    next_cursor_field: &str,
+) -> Result<serde_json::Value, String> {
+    let slice_start = ((page - 1).max(0) as usize) * (page_size.max(0) as usize);
+    let slice_end = slice_start + page_size.max(0) as usize;
+    let mut chunk_start = 0usize;
+    let mut cursor: Option<String> = None;
+    let mut followed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut rows_out: Vec<serde_json::Value> = Vec::new();
+    let mut last_scalars = serde_json::Map::new();
+
+    let has_next_page = loop {
+        let mut chunk_bp = blueprint.clone();
+        if let (Some(req), Some(c)) = (&mut chunk_bp.request, &cursor) {
+            req.queries.retain(|(k, _)| k != offset_param);
+            req.queries.push((offset_param.to_string(), c.clone()));
+        }
+        let chunk = extract_json(state, None, &chunk_bp).await?;
+        if let Some(map) = chunk["scalars"].as_object() {
+            last_scalars = map.clone();
+        }
+        let empty = Vec::new();
+        let rows = chunk["rows"].as_array().unwrap_or(&empty);
+        let chunk_end = chunk_start + rows.len();
+        let (from, to) = (slice_start.max(chunk_start), slice_end.min(chunk_end));
+        if from < to {
+            rows_out.extend_from_slice(&rows[from - chunk_start..to - chunk_start]);
+        }
+
+        let next = match &chunk["scalars"][next_cursor_field] {
+            serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        };
+        if let Some(c) = &cursor {
+            followed.insert(c.clone());
+        }
+        let upstream_has_more = !rows.is_empty()
+            && chunk["scalars"]["has_next_page"].as_bool() != Some(false)
+            && next.as_ref().is_some_and(|n| !followed.contains(n));
+
+        if chunk_end >= slice_end {
+            break chunk_end > slice_end || upstream_has_more;
+        }
+        if !upstream_has_more {
+            break false;
+        }
+        chunk_start = chunk_end;
+        cursor = next;
+    };
+
+    let mut scalars = last_scalars;
+    scalars.remove(next_cursor_field);
+    scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
+    Ok(serde_json::json!({ "rows": rows_out, "scalars": scalars }))
 }
 
 pub async fn extract_json_paginated(
@@ -666,6 +691,18 @@ pub async fn extract_json_paginated(
         .as_ref()
         .ok_or("paginated_extract_json called on blueprint without PaginationConfig")?;
 
+    if let OffsetType::CursorToken { next_cursor_field } = &pagination.offset_type {
+        return extract_json_cursor_paginated(
+            state,
+            page,
+            page_size,
+            blueprint,
+            &pagination.offset_param,
+            next_cursor_field,
+        )
+        .await;
+    }
+
     let native_size = pagination.native_page_size;
     let global_start = ((page - 1).max(0) as usize) * (page_size as usize);
     let first_chunk_offset = (global_start / native_size) * native_size;
@@ -675,7 +712,6 @@ pub async fn extract_json_paginated(
     let mut all_rows: Vec<serde_json::Value> = Vec::new();
     let has_next_page;
 
-    let mut cursor: Option<String> = None;
     let mut last_scalars = serde_json::Map::new();
 
     loop {
@@ -695,13 +731,7 @@ pub async fn extract_json_paginated(
                     req.queries
                         .push((pagination.offset_param.clone(), offset_value));
                 }
-                OffsetType::CursorToken { .. } => {
-                    if let Some(ref c) = cursor {
-                        req.queries.retain(|(k, _)| k != &pagination.offset_param);
-                        req.queries
-                            .push((pagination.offset_param.clone(), c.clone()));
-                    }
-                }
+                OffsetType::CursorToken { .. } => {}
             }
         }
 
@@ -714,9 +744,7 @@ pub async fn extract_json_paginated(
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
         let chunk_len = rows.len();
 
-        let skip = if matches!(pagination.offset_type, OffsetType::CursorToken { .. }) {
-            0
-        } else if current_chunk_offset == first_chunk_offset {
+        let skip = if current_chunk_offset == first_chunk_offset {
             offset_in_first_chunk
         } else {
             0
@@ -726,23 +754,6 @@ pub async fn extract_json_paginated(
 
         all_rows.extend_from_slice(&rows[skip..skip + to_take]);
         remaining -= to_take;
-
-        if let OffsetType::CursorToken { next_cursor_field } = &pagination.offset_type {
-            let next = chunk_result["scalars"][next_cursor_field.as_str()]
-                .as_str()
-                .map(str::to_owned);
-            let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
-            if remaining == 0 {
-                has_next_page = scalar_hnp.unwrap_or_else(|| next.is_some());
-                break;
-            }
-            if chunk_len == 0 || next.is_none() || scalar_hnp == Some(false) {
-                has_next_page = false;
-                break;
-            }
-            cursor = next;
-            continue;
-        }
 
         let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
         let chunk_full = chunk_len >= native_size;
@@ -815,36 +826,4 @@ async fn fetch_and_parse_json(
 ) -> Result<serde_json::Value, String> {
     let body = fetch_body(state, req).await?;
     serde_json::from_str(&body).map_err(|e| format!("JSON parse error: {}", e))
-}
-
-fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_json::Value, String> {
-    use serde_json::Value as J;
-    match (a, b) {
-        (J::Object(mut ma), J::Object(mb)) => {
-            for (k, v) in mb {
-                ma.insert(k, v);
-            }
-            Ok(J::Object(ma))
-        }
-        (J::Array(mut va), J::Array(vb)) => {
-            va.extend(vb);
-            Ok(J::Array(va))
-        }
-        (a, b) => Err(format!(
-            "json_merge: cannot merge {} with {}",
-            type_str(&a),
-            type_str(&b)
-        )),
-    }
-}
-
-fn type_str(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "bool",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
 }

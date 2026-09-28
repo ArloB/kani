@@ -32,6 +32,7 @@ fn attr_field(name: &str, attr: &str) -> ValidatedField {
 
 fn base_endpoint(container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/popular".into(),
         method: "GET".into(),
         headers: vec![],

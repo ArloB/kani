@@ -15,7 +15,7 @@ pub fn build_wasm_source(
     ext_cache_namespace: String,
     pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
     hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
-    max_hook_requests: u32,
+    limits: impl Into<kani_core::budget::SourceLimits>,
 ) -> SourceBackend {
     SourceBackend::Wasm(Box::new(WasmSource::new(
         engine,
@@ -30,7 +30,7 @@ pub fn build_wasm_source(
         ext_cache_namespace,
         pure_fn_registry,
         hook_registry,
-        max_hook_requests,
+        limits,
     )))
 }
 

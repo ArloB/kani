@@ -78,7 +78,7 @@ fn print_endpoint_fields(ep: &ValidatedEndpoint, indent: &str) {
     let hnp = match &ep.has_next_page {
         ValidatedHnp::Static(b) => format!("static({b})"),
         ValidatedHnp::Scalar(_) => "expr".to_string(),
-        ValidatedHnp::Default => "default(true)".to_string(),
+        ValidatedHnp::Default => "default(false)".to_string(),
     };
     let tp = match &ep.total_pages {
         ValidatedTotalPages::Static(n) => format!("static({n})"),

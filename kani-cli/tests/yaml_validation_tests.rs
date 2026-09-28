@@ -1888,3 +1888,150 @@ fn an_element_method_on_a_receiver_that_cannot_be_an_element_is_refused() {
         assert_valid(&yaml(ok));
     }
 }
+
+#[test]
+fn the_selected_chapter_sort_is_a_chapter_list_argument() {
+    let yaml = |endpoint: &str, fields: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/c/$manga_id$\"\n    \
+             queries:\n      order: $sort$\n    fields:\n{fields}"
+        )
+    };
+    assert_valid(&yaml(
+        "chapter_list",
+        "      id: 'self.attr(\"data-id\")'\n",
+    ));
+    assert_invalid_containing(
+        &yaml(
+            "manga_details",
+            "      id: '\"$manga_id$\"'\n      title: 'dom(\"h1\").text()'\n      status: '\"unknown\"'\n",
+        ),
+        "sort",
+    );
+}
+
+#[test]
+fn each_chaining_phase_may_only_use_the_context_it_has() {
+    let yaml = |then: &str, dedup: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  popular:\n    route: \"/p\"\n    container: \".item\"\n    \
+             fields:\n      id: 'self.attr(\"data-id\")'\n      title: 'self.first(\".t\").text()'\n    \
+             then:\n      - endpoint: manga_details\n{then}        merge_as: banner\n    \
+             for_each:\n      - endpoint: manga_details\n        url_expr: 'self.first(\"a\").attr(\"href\")'\n        \
+             merge_as: details\n{dedup}  manga_details:\n    route: \"/m/$manga_id$\"\n    container: \".m\"\n    \
+             fields:\n      id: '\"$manga_id$\"'\n      title: 'self.first(\"h1\").text()'\n      status: '\"unknown\"'\n"
+        )
+    };
+    let url = |e: &str| format!("        url_expr: '{e}'\n");
+    let then_ok = url(r#"dom(".banner").attr("href")"#);
+    assert_valid(&yaml(&then_ok, ""));
+    for (then, needle) in [
+        (
+            url(r#"self.first(".banner").attr("href")"#),
+            "then[0].url_expr: a then step runs once per document",
+        ),
+        (
+            format!("{then_ok}        on_failure: 'index()'\n"),
+            "then[0].on_failure: a then step runs once per document",
+        ),
+    ] {
+        assert_invalid_containing(&yaml(&then, ""), needle);
+    }
+    assert_invalid_containing(
+        &yaml(&then_ok, "        deduplicate_by: 'dom(\".id\").text()'\n"),
+        "deduplicate_by: runs on the finished JSON row",
+    );
+    assert_valid(&yaml(
+        &then_ok,
+        "        deduplicate_by: 'self.ptr(\"/details/title\").str()'\n",
+    ));
+}
+
+#[test]
+fn declared_operation_limits_must_stay_within_the_hard_caps() {
+    let yaml = |key: &str, value: u64| {
+        format!("{METADATA_BASE}metadata:\n  rate_limit:\n    {key}: {value}\n")
+    };
+    for (key, too_big) in [
+        ("max_requests", 1025),
+        ("max_response_bytes", 256 * 1024 * 1024 + 1),
+        ("max_operation_seconds", 601),
+    ] {
+        assert_invalid_containing(&yaml(key, too_big), &format!("metadata.rate_limit.{key}"));
+        assert_invalid_containing(&yaml(key, 0), &format!("metadata.rate_limit.{key}"));
+        assert_valid(&yaml(key, 60));
+    }
+}
+
+#[test]
+fn cursor_pagination_needs_a_cursor_field_on_a_json_endpoint() {
+    let yaml = |kind: &str, pagination: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    type: {kind}\n    \
+             container: \"{c}\"\n    pagination:\n      native_page_size: 32\n      \
+             offset_param: after\n{pagination}    fields:\n      id: 'self.attr(\"i\")'\n      \
+             title: 'self.attr(\"t\")'\n",
+            c = if kind == "json" { "/items" } else { ".item" }
+        )
+    };
+    let cursor = "      offset_type: cursor\n      cursor_field: /next\n";
+    assert_invalid_containing(
+        &yaml("json", "      offset_type: cursor\n"),
+        "pagination.cursor_field: required for offset_type: cursor",
+    );
+    assert_invalid_containing(
+        &yaml(
+            "json",
+            "      offset_type: cursor\n      cursor_field: next\n",
+        ),
+        "must be a JSON pointer",
+    );
+    assert_invalid_containing(
+        &yaml("html", cursor),
+        "cursor pagination reads a JSON response",
+    );
+    assert_invalid_containing(
+        &yaml(
+            "json",
+            "      offset_type: item\n      cursor_field: /next\n",
+        ),
+        "cursor_field only applies to offset_type: cursor",
+    );
+}
+
+#[test]
+fn a_request_body_must_be_well_formed_and_sendable() {
+    let yaml = |method: &str, body: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    method: {method}\n    \
+             body:\n{body}    fields:\n      id: 'self.attr(\"i\")'\n      title: 'self.attr(\"t\")'\n"
+        )
+    };
+    let json = "      type: json\n      content:\n        q: \"$query$\"\n";
+    assert_valid(&yaml("POST", json));
+    for (method, body, needle) in [
+        ("GET", json, "a GET request has no body"),
+        (
+            "POST",
+            "      type: raw\n      content: \"$query$\"\n",
+            "a raw body needs content_type",
+        ),
+        (
+            "POST",
+            "      type: json\n      content_type: text/plain\n      content:\n        q: 1\n",
+            "content_type is set by json and form bodies",
+        ),
+        (
+            "POST",
+            "      type: form\n      content: \"q=1\"\n",
+            "form content must be a map",
+        ),
+        (
+            "POST",
+            "      type: json\n      content:\n        q: \"$nope$\"\n",
+            "nope",
+        ),
+    ] {
+        assert_invalid_containing(&yaml(method, body), needle);
+    }
+}

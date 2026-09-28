@@ -24,7 +24,7 @@ use kani_shared::ast::OnFailurePolicy;
 const POPULAR_ARGS: &[&str] = &["page", "page_size", "filters"];
 const SEARCH_ARGS: &[&str] = &["query", "page", "page_size", "filters"];
 const DETAILS_ARGS: &[&str] = &["manga_id"];
-const CHAPTER_LIST_ARGS: &[&str] = &["manga_id", "page", "page_size"];
+const CHAPTER_LIST_ARGS: &[&str] = &["manga_id", "page", "page_size", "sort"];
 const PAGES_ARGS: &[&str] = &["chapter_id", "manga_id"];
 
 const MANGA_LIST_REQUIRED: &[&str] = &["id", "title"];
@@ -243,8 +243,30 @@ pub fn validate(
         ("chapter_list", chapter_list.as_ref()),
         ("pages", pages.as_ref()),
     ];
+    let has_body = |target: &str| {
+        chained_endpoints
+            .iter()
+            .any(|(n, ep)| *n == target && ep.is_some_and(|ep| ep.body.is_some()))
+    };
     for (ep_name, ep_opt) in &chained_endpoints {
         let Some(ep) = ep_opt else { continue };
+        let targets = ep
+            .then_steps
+            .iter()
+            .map(|s| ("then", s.endpoint_name.as_str()))
+            .chain(
+                ep.for_each_steps
+                    .iter()
+                    .map(|s| ("for_each", s.endpoint_name.as_str())),
+            );
+        for (kind, target) in targets {
+            if has_body(target) {
+                errors.push(YamlError::Validation(format!(
+                    "endpoints.{ep_name}.{kind}: endpoint '{target}' declares a body, which a \
+                     sub-fetch does not send; chain to an endpoint without one"
+                )));
+            }
+        }
         for step in &ep.then_steps {
             if !known_endpoint_names.contains(step.endpoint_name.as_str()) {
                 errors.push(YamlError::Validation(format!(
@@ -483,11 +505,42 @@ fn validate_metadata(
                 "metadata.rate_limit.rps: must be greater than 0".to_string(),
             ));
         }
+        use kani_shared::extension::{
+            MAX_OPERATION_REQUESTS, MAX_OPERATION_RESPONSE_BYTES, MAX_OPERATION_SECONDS,
+        };
+        for (key, value, cap) in [
+            (
+                "max_requests",
+                cfg.max_requests.map(u64::from),
+                u64::from(MAX_OPERATION_REQUESTS),
+            ),
+            (
+                "max_response_bytes",
+                cfg.max_response_bytes,
+                MAX_OPERATION_RESPONSE_BYTES,
+            ),
+            (
+                "max_operation_seconds",
+                cfg.max_operation_seconds,
+                MAX_OPERATION_SECONDS,
+            ),
+        ] {
+            if let Some(v) = value
+                && !(1..=cap).contains(&v)
+            {
+                errors.push(YamlError::Validation(format!(
+                    "metadata.rate_limit.{key}: {v} must be between 1 and {cap}"
+                )));
+            }
+        }
         ValidatedRateLimit {
             requests_per_second: cfg.rps,
             burst: cfg.burst,
             max_concurrent: cfg.max_concurrent,
             max_hook_requests: cfg.max_hook_requests,
+            max_requests: cfg.max_requests,
+            max_response_bytes: cfg.max_response_bytes,
+            max_operation_seconds: cfg.max_operation_seconds,
         }
     });
 
@@ -712,6 +765,8 @@ fn validate_dollar_var(
 fn collect_composite_id_decodes(
     route: &str,
     queries: &BTreeMap<String, String>,
+    headers: &BTreeMap<String, String>,
+    body_strings: &[String],
     id_encoding: Option<&IdEncodingBlock>,
 ) -> Vec<CompositeIdDecode> {
     let Some(id_encoding) = id_encoding else {
@@ -719,7 +774,7 @@ fn collect_composite_id_decodes(
     };
 
     let mut vars = extract_dollar_vars(route);
-    for v in queries.values() {
+    for v in queries.values().chain(headers.values()).chain(body_strings) {
         vars.extend(extract_dollar_vars(v));
     }
 
@@ -946,12 +1001,17 @@ fn validate_endpoint(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     for (key, value) in &headers {
-        errors.extend(arithmetic_template_error(
-            value,
-            name,
-            &format!("headers.{key}"),
-            "+-*/",
-        ));
+        let location = format!("headers.{key}");
+        errors.extend(arithmetic_template_error(value, name, &location, "+-*/"));
+        for var in kani_shared::request::template_parts(value).1 {
+            errors.extend(validate_dollar_var(
+                &var,
+                name,
+                &location,
+                fn_args,
+                id_encoding,
+            ));
+        }
     }
 
     let queries = match build_query_entries(&body.queries, name, fn_args, id_encoding) {
@@ -962,7 +1022,18 @@ fn validate_endpoint(
         }
     };
 
-    let composite_id_decodes = collect_composite_id_decodes(&route, &body.queries, id_encoding);
+    let body_strings = body
+        .body
+        .as_ref()
+        .map(|b| yaml_strings(&b.content))
+        .unwrap_or_default();
+    let composite_id_decodes = collect_composite_id_decodes(
+        &route,
+        &body.queries,
+        &body.headers,
+        &body_strings,
+        id_encoding,
+    );
 
     let filter_mapping: Vec<(String, FilterMappingEntry)> = body
         .filter_mapping
@@ -1096,6 +1167,30 @@ fn validate_endpoint(
         }
     }
 
+    if let Some(pag) = &body.pagination {
+        let cursor = matches!(pag.offset_type, super::schema::YamlOffsetType::Cursor);
+        let path = format!("endpoints.{name}.pagination");
+        match (&pag.cursor_field, cursor) {
+            (None, true) => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: required for offset_type: cursor"
+            ))),
+            (Some(f), true) if !f.starts_with('/') => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: {f:?} must be a JSON pointer, such as /next"
+            ))),
+            (Some(_), false) => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: cursor_field only applies to offset_type: cursor"
+            ))),
+            _ => {}
+        }
+        if cursor && (body.response_type != super::schema::ResponseType::Json || body.via.is_some())
+        {
+            errors.push(YamlError::Validation(format!(
+                "{path}: cursor pagination reads a JSON response, so it needs type: json and \
+                 a direct (not browser) endpoint"
+            )));
+        }
+    }
+
     let has_next_page = match &body.has_next_page {
         None => ValidatedHnp::Default,
         Some(HasNextPage::Static(b)) => ValidatedHnp::Static(*b),
@@ -1144,8 +1239,18 @@ fn validate_endpoint(
         }
     }
 
+    let request_body = match &body.body {
+        Some(cfg) => {
+            let (template, mut errs) = validate_body(cfg, &body.method, name, fn_args, id_encoding);
+            errors.append(&mut errs);
+            template
+        }
+        None => None,
+    };
+
     if errors.is_empty() {
         Ok(ValidatedEndpoint {
+            body: request_body,
             route,
             method: body.method.clone(),
             headers,
@@ -1190,8 +1295,44 @@ fn compile_on_failure(
     }
 }
 
+fn dsl_uses_leaf(dsl: &str, wanted: fn(&kani_shared::ast::ExprLeaf) -> bool) -> bool {
+    let Ok(Expr::Arena { arena, .. }) = parse_dsl_expression(dsl.trim_end())
+        .map_err(|_| ())
+        .and_then(|parsed| parsed.to_arena().map_err(|_| ()))
+    else {
+        return false;
+    };
+    arena
+        .nodes
+        .iter()
+        .any(|node| matches!(node, kani_shared::ast::ExprNode::Leaf(leaf) if wanted(leaf)))
+}
+
+fn uses_element(leaf: &kani_shared::ast::ExprLeaf) -> bool {
+    matches!(
+        leaf,
+        kani_shared::ast::ExprLeaf::SelfRef | kani_shared::ast::ExprLeaf::Index
+    )
+}
+
 fn validate_then_step(step: &ThenStep, path: &str) -> Result<ValidatedThenStep, Vec<YamlError>> {
     let mut errors = Vec::new();
+
+    let fallback = match &step.on_failure {
+        Some(OnFailure::Use(dsl)) => Some(dsl.as_str()),
+        _ => None,
+    };
+    for (part, dsl) in [
+        ("url_expr", Some(step.url_expr.as_str())),
+        ("on_failure", fallback),
+    ] {
+        if dsl.is_some_and(|d| dsl_uses_leaf(d, uses_element)) {
+            errors.push(YamlError::Validation(format!(
+                "{path}.{part}: a then step runs once per document, so it has no `self` or \
+                 `index()`; use dom() or json()"
+            )));
+        }
+    }
 
     if step.merge_as.is_empty() {
         errors.push(YamlError::Validation(format!(
@@ -1247,6 +1388,16 @@ fn validate_for_each_step(
         }
     };
 
+    if step
+        .deduplicate_by
+        .as_deref()
+        .is_some_and(|d| dsl_uses_leaf(d, |l| matches!(l, kani_shared::ast::ExprLeaf::Dom(_))))
+    {
+        errors.push(YamlError::Validation(format!(
+            "{path}.deduplicate_by: runs on the finished JSON row, which has no HTML document; \
+             address it with self or json()"
+        )));
+    }
     let deduplicate_by = if let Some(dsl) = &step.deduplicate_by {
         match parse_dsl(dsl, &format!("{path}.deduplicate_by")) {
             Ok(e) => Some(e),
@@ -1373,6 +1524,84 @@ fn arithmetic_template_error(
              do not evaluate; use `pagination` for offsets"
         ))
     })
+}
+
+fn validate_body(
+    cfg: &super::schema::BodyCfg,
+    method: &str,
+    endpoint: &str,
+    fn_args: &[&str],
+    id_encoding: Option<&IdEncodingBlock>,
+) -> (Option<kani_shared::request::BodyTemplate>, Vec<YamlError>) {
+    use super::schema::BodyKind;
+    use kani_shared::request::BodyTemplate;
+
+    let path = format!("endpoints.{endpoint}.body");
+    let mut errors = Vec::new();
+    let mut error = |msg: String| errors.push(YamlError::Validation(format!("{path}: {msg}")));
+    if method.eq_ignore_ascii_case("GET") {
+        error("a GET request has no body; set method: POST (or PUT, DELETE)".into());
+    }
+    match (cfg.kind, &cfg.content_type) {
+        (BodyKind::Raw, None) => error("a raw body needs content_type".into()),
+        (BodyKind::Json | BodyKind::Form, Some(_)) => {
+            error("content_type is set by json and form bodies; use type: raw to choose it".into())
+        }
+        _ => {}
+    }
+    let template = match cfg.kind {
+        BodyKind::Json => kani_shared::serde_json::to_value(&cfg.content)
+            .map(BodyTemplate::Json)
+            .map_err(|e| format!("content is not JSON-representable: {e}")),
+        BodyKind::Form => match &cfg.content {
+            serde_yaml::Value::Mapping(map) => map
+                .iter()
+                .map(|(k, v)| match (k, v) {
+                    (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) => {
+                        Ok((k.clone(), v.clone()))
+                    }
+                    (serde_yaml::Value::String(k), serde_yaml::Value::Number(n)) => {
+                        Ok((k.clone(), n.to_string()))
+                    }
+                    (serde_yaml::Value::String(k), serde_yaml::Value::Bool(b)) => {
+                        Ok((k.clone(), b.to_string()))
+                    }
+                    _ => Err("form content maps names to text, numbers or booleans".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(BodyTemplate::Form),
+            _ => Err("form content must be a map of field names to values".to_string()),
+        },
+        BodyKind::Raw => match &cfg.content {
+            serde_yaml::Value::String(text) => Ok(BodyTemplate::Raw {
+                content: text.clone(),
+                content_type: cfg.content_type.clone().unwrap_or_default(),
+            }),
+            _ => Err("raw content must be text".to_string()),
+        },
+    };
+    let template = match template {
+        Ok(t) => Some(t),
+        Err(e) => {
+            error(e);
+            None
+        }
+    };
+    for var in template.iter().flat_map(|t| t.placeholders()) {
+        if let Some(e) = validate_dollar_var(&var, endpoint, "body", fn_args, id_encoding) {
+            errors.push(e);
+        }
+    }
+    (template, errors)
+}
+
+fn yaml_strings(value: &serde_yaml::Value) -> Vec<String> {
+    match value {
+        serde_yaml::Value::String(s) => vec![s.clone()],
+        serde_yaml::Value::Sequence(items) => items.iter().flat_map(yaml_strings).collect(),
+        serde_yaml::Value::Mapping(map) => map.values().flat_map(yaml_strings).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn build_query_entries(

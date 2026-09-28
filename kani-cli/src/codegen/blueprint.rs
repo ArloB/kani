@@ -2,7 +2,6 @@
 
 use super::expr::emit_expr;
 use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp};
-use crate::yaml::schema::YamlOffsetType;
 use kani_yaml::{build_blueprint_core, make_fetch_expr};
 
 pub(crate) fn emit_blueprint_chain(
@@ -28,8 +27,8 @@ pub(crate) fn emit_blueprint_chain(
             let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
             let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             lines.push(format!(
-                "    .bind(\"{}\", {})",
-                step.merge_as,
+                "    .bind({:?}, {})",
+                kani_yaml::then_binding_name(&step.merge_as),
                 emit_expr(&fetch)
             ));
         }
@@ -83,14 +82,27 @@ pub(crate) fn emit_blueprint_chain(
     }
 
     if let Some(pag) = &ep.pagination {
-        let offset_type = match pag.offset_type {
-            YamlOffsetType::Item => "OffsetType::ItemOffset".into(),
-            YamlOffsetType::Page => {
-                format!("OffsetType::PageNumber {{ start: {} }}", pag.page_start)
+        let (offset, cursor_scalar) = kani_yaml::pagination_lowering(pag);
+        if let Some(expr) = cursor_scalar {
+            lines.push(format!(
+                "    .scalar_opt({:?}, {})",
+                kani_yaml::CURSOR_SCALAR,
+                emit_expr(&expr)
+            ));
+        }
+        let offset_type = match offset {
+            kani_shared::ast::OffsetType::ItemOffset => "OffsetType::ItemOffset".into(),
+            kani_shared::ast::OffsetType::PageNumber { start } => {
+                format!("OffsetType::PageNumber {{ start: {start} }}")
+            }
+            kani_shared::ast::OffsetType::CursorToken { next_cursor_field } => {
+                format!(
+                    "OffsetType::CursorToken {{ next_cursor_field: {next_cursor_field:?}.into() }}"
+                )
             }
         };
         lines.push(format!(
-            "    .paginated({}, \"{}\", {})",
+            "    .paginated({}, {:?}, {})",
             pag.native_page_size, pag.offset_param, offset_type
         ));
     }

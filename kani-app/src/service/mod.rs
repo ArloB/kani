@@ -764,11 +764,9 @@ impl AppService {
                             base_url.clone_from(&m.base_url);
                             unrestricted_http = m.unrestricted_http;
                         }
-                        let max_hk = meta
-                            .as_ref()
-                            .and_then(|m| m.rate_limit.as_ref())
-                            .map(|rl| rl.max_hook_requests)
-                            .unwrap_or(3);
+                        let max_hk = kani_core::budget::SourceLimits::from_rate_limit(
+                            meta.as_ref().and_then(|m| m.rate_limit.as_ref()),
+                        );
                         let pure_reg = meta.as_ref().and_then(|m| {
                             if m.scripts.is_empty() {
                                 return None;
@@ -787,7 +785,7 @@ impl AppService {
                         let hook_reg = meta.as_ref().and_then(sources::compile_hook_registry);
                         (pure_reg, hook_reg, max_hk)
                     } else {
-                        (None, None, 3u32)
+                        (None, None, kani_core::budget::SourceLimits::from(3))
                     }
                 };
 

@@ -248,7 +248,10 @@ impl YamlSource {
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn make_host_state(&self) -> Result<kani_core::wasm::HostState> {
+    fn make_host_state(
+        &self,
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
+    ) -> Result<kani_core::wasm::HostState> {
         let allowed_host = if self.config.unrestricted_http {
             AllowedHost::Unrestricted
         } else {
@@ -267,7 +270,18 @@ impl YamlSource {
         state.browser_scripts = Some(Arc::clone(&self.browser_scripts));
         state.max_hook_requests = self.max_hook_requests;
         state.set_eval_limits(self.eval_limits);
+        state.operation_limits = budget.limits();
+        state.operation_budget = std::sync::Arc::clone(budget);
         Ok(state)
+    }
+
+    fn operation_limits(&self) -> kani_core::budget::OperationLimits {
+        let rl = self.config.metadata.rate_limit.as_ref();
+        kani_core::budget::OperationLimits::declared(
+            rl.and_then(|r| r.max_requests),
+            rl.and_then(|r| r.max_response_bytes),
+            rl.and_then(|r| r.max_operation_seconds),
+        )
     }
 
     async fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
@@ -301,10 +315,28 @@ impl YamlSource {
             ep.filter_format.as_ref(),
             filters,
         ));
+        let body = ep
+            .body
+            .as_ref()
+            .map(|template| kani_shared::request::render_body(template, &resolved))
+            .transpose()?
+            .map(|(content_type, bytes)| kani_shared::ast::RequestBody {
+                content_type,
+                bytes,
+            });
         Ok(kani_shared::ast::RequestDef {
+            body,
             url,
             method: ep.method.clone(),
-            headers: ep.headers.clone(),
+            headers: ep
+                .headers
+                .iter()
+                .map(|(k, v)| {
+                    kani_shared::request::interpolate(v, &resolved)
+                        .map(|value| (k.clone(), value))
+                        .ok_or_else(|| format!("header {k}: unresolved placeholder in {v:?}"))
+                })
+                .collect::<std::result::Result<_, _>>()?,
             queries,
             endpoint_id: Some(endpoint_name.to_string()),
         })
@@ -316,13 +348,14 @@ impl YamlSource {
         endpoint_name: &str,
         args: &HashMap<String, String>,
         filters: &[kani_shared::types::ActiveFilter],
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::{html_eval, json_eval};
         use kani_yaml::yaml::schema::ResponseType;
 
         let req = Self::make_request(ep, &self.config, args, endpoint_name, filters)?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
-        let mut state = self.make_host_state()?;
+        let mut state = self.make_host_state(budget)?;
 
         if ep.pagination.is_some() {
             let page = args.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
@@ -352,6 +385,7 @@ impl YamlSource {
         endpoint_name: &str,
         args: &HashMap<String, String>,
         filters: &[kani_shared::types::ActiveFilter],
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
     ) -> Result<serde_json::Value> {
         use kani_core::evaluator::json_eval;
 
@@ -424,12 +458,17 @@ impl YamlSource {
                     kani_yaml::yaml::schema::YamlOffsetType::Item => {
                         (native_index * p.native_page_size.max(1)).to_string()
                     }
+                    kani_yaml::yaml::schema::YamlOffsetType::Cursor => {
+                        return Err(invalid(
+                            "cursor pagination is not supported on browser endpoints".to_string(),
+                        ));
+                    }
                 };
                 params.push((p.offset_param.clone(), offset));
             }
             let page_url = append_query_params(&page_url, &params);
 
-            let mut state = self.make_host_state()?;
+            let mut state = self.make_host_state(budget)?;
             let profile_key = state.browser_profile_key.clone();
 
             // Enforce the source's AllowedHost policy on the browser target before any
@@ -444,6 +483,7 @@ impl YamlSource {
                     invalid(format!("browser_payload page_url has no host: {page_url}"))
                 })?;
             state.allowed_host.allows_host(&host).map_err(invalid)?;
+            budget.charge_request().map_err(invalid)?;
 
             let payload = kani_core::v8_process::capture_page_payload_resilient(
                 &self.v8_process,
@@ -463,6 +503,7 @@ impl YamlSource {
                 }
                 other => invalid(other.to_string()),
             })?;
+            budget.charge_bytes(payload.len()).map_err(invalid)?;
 
             let value = json_eval::extract_json_str(&mut state, &payload, &bp)
                 .await
@@ -487,48 +528,83 @@ impl YamlSource {
     ) -> Result<serde_json::Value> {
         use kani_yaml::yaml::schema::EndpointVia;
 
+        let budget = kani_core::budget::OperationBudget::new(self.operation_limits());
         if ep.via == Some(EndpointVia::BrowserPayload) {
             let mut v = self
-                .eval_browser_payload_endpoint(ep, endpoint_name, args, filters)
+                .eval_browser_payload_endpoint(ep, endpoint_name, args, filters, &budget)
                 .await?;
             inject_fn_arg_fields(&mut v, ep, args);
             deduplicate_for_each_rows(&mut v, ep).await?;
             return Ok(v);
         }
 
-        let mut retries_left = self.max_hook_requests;
-        loop {
-            match self
-                .eval_endpoint_once(ep, endpoint_name, args, filters)
-                .await
-            {
-                Ok(mut v) => {
-                    inject_fn_arg_fields(&mut v, ep, args);
-                    deduplicate_for_each_rows(&mut v, ep).await?;
-                    return Ok(v);
+        let mut v = self
+            .eval_endpoint_refreshing(ep, endpoint_name, args, filters, &[], &budget)
+            .await?;
+        inject_fn_arg_fields(&mut v, ep, args);
+        deduplicate_for_each_rows(&mut v, ep).await?;
+        Ok(v)
+    }
+
+    /// Runs an endpoint, honouring `refresh_auth` from its hooks. `active` holds the endpoints
+    /// this operation is already evaluating, so a refresh that leads back into one of them is
+    /// reported as a cycle before any retry is spent.
+    fn eval_endpoint_refreshing<'a>(
+        &'a self,
+        ep: &'a kani_yaml::ValidatedEndpoint,
+        endpoint_name: &'a str,
+        args: &'a HashMap<String, String>,
+        filters: &'a [kani_shared::types::ActiveFilter],
+        active: &'a [String],
+        budget: &'a std::sync::Arc<kani_core::budget::OperationBudget>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let auth = |message: String| {
+                Error::Extension(kani_shared::extension::ExtensionError::auth(message))
+            };
+            let mut retries_left = self.max_hook_requests;
+            loop {
+                let e = match self
+                    .eval_endpoint_once(ep, endpoint_name, args, filters, budget)
+                    .await
+                {
+                    Ok(v) => return Ok(v),
+                    Err(e) => e,
+                };
+                if kani_core::budget::is_budget_exceeded(&e) {
+                    return Err(Error::BudgetExceeded(e));
                 }
-                Err(ref e) if e.starts_with("__refresh_auth__:") => {
-                    if retries_left == 0 {
-                        return Err(Error::Extension(
-                            kani_shared::extension::ExtensionError::parse(
-                                "RefreshAuth: max retries exceeded".to_string(),
-                            ),
-                        ));
-                    }
-                    retries_left -= 1;
-                    let auth_endpoint_name = e.strip_prefix("__refresh_auth__:").unwrap_or("login");
-                    if let Some(auth_ep) = self.config.endpoint_by_name(auth_endpoint_name) {
-                        let auth_args = HashMap::new();
-                        let _ = self
-                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args, &[])
-                            .await;
-                    }
-                }
-                Err(e) => {
+                let Some(target) = e.strip_prefix("__refresh_auth__:") else {
                     return Err(Error::Extension(classify_eval_error(e)));
+                };
+                if target == endpoint_name || active.iter().any(|a| a == target) {
+                    let chain: Vec<&str> = active
+                        .iter()
+                        .map(String::as_str)
+                        .chain([endpoint_name, target])
+                        .collect();
+                    return Err(auth(format!("auth refresh cycle: {}", chain.join(" -> "))));
+                }
+                if retries_left == 0 {
+                    return Err(auth("refresh_auth: max retries exceeded".to_string()));
+                }
+                retries_left -= 1;
+                let auth_ep = self
+                    .config
+                    .endpoint_by_name(target)
+                    .ok_or_else(|| auth(format!("refresh_auth: no endpoint named {target:?}")))?;
+                let mut chain = active.to_vec();
+                chain.push(endpoint_name.to_string());
+                if let Err(e) = self
+                    .eval_endpoint_refreshing(auth_ep, target, &HashMap::new(), &[], &chain, budget)
+                    .await
+                {
+                    tracing::warn!("refresh_auth via {target} for {endpoint_name} failed: {e}");
+                    return Err(e);
                 }
             }
-        }
+        })
     }
 
     pub async fn get_metadata(&self) -> Result<String> {
@@ -538,6 +614,9 @@ impl YamlSource {
                 burst: r.burst,
                 max_concurrent: r.max_concurrent,
                 max_hook_requests: r.max_hook_requests,
+                max_requests: r.max_requests,
+                max_response_bytes: r.max_response_bytes,
+                max_operation_seconds: r.max_operation_seconds,
             }
         });
         let meta = kani_shared::extension::ExtensionMetadata {

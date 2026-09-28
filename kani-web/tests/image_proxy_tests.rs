@@ -183,6 +183,79 @@ async fn an_image_served_as_octet_stream_is_proxied() {
 }
 
 #[tokio::test]
+async fn an_image_whose_transform_cannot_be_applied_is_not_proxied() {
+    let origin = TestOrigin::start().await;
+    let jpeg = kani_shared_test::origin::jpeg_page(32, 48, false, 80);
+    origin.set(
+        "/partial",
+        Response::ok(jpeg.clone())
+            .header("Content-Type", "image/jpeg")
+            .header("x-enc-seed", "777"),
+    );
+    origin.set(
+        "/plain",
+        Response::ok(jpeg).header("Content-Type", "image/jpeg"),
+    );
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+    let transformed = |url: &str, transform: &str| {
+        let signed = make_proxy_url(
+            url,
+            "http://ref.test/",
+            None,
+            &state.proxy_secret,
+            Some(transform),
+        );
+        authed_get(&signed, &cookie)
+    };
+
+    for (path, transform) in [
+        ("/partial", "lcg-tile-5x5-from-header"),
+        ("/plain", "no-such-transform"),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(transformed(&origin.url(path), transform))
+            .await
+            .unwrap();
+        assert!(
+            !res.status().is_success(),
+            "{path} with {transform} must not be served untransformed, got {}",
+            res.status()
+        );
+    }
+
+    let res = app
+        .oneshot(transformed(
+            &origin.url("/plain"),
+            "lcg-tile-5x5-from-header",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "an image with no scramble headers is served as-is"
+    );
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg")
+    );
+    let served = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        served.as_ref(),
+        kani_shared_test::origin::jpeg_page(32, 48, false, 80).as_slice(),
+        "the original bytes, untransformed"
+    );
+}
+
+#[tokio::test]
 async fn a_page_labelled_as_an_image_is_not_proxied() {
     let origin = TestOrigin::start().await;
     origin.set(

@@ -50,6 +50,7 @@ fn codegen_bytes_and_interpreter_blueprint_agree_for_each_step() {
     let codegen_bp = decode_blueprint(&decode_bytes_const(&codegen_src));
 
     let req = RequestDef {
+        body: None,
         url: "https://example.com/search".into(),
         method: "GET".into(),
         headers: vec![],
@@ -76,6 +77,7 @@ fn codegen_bytes_and_interpreter_blueprint_agree_no_sub_fetches() {
     let codegen_bp = decode_blueprint(&decode_bytes_const(&codegen_src));
 
     let req = RequestDef {
+        body: None,
         url: "https://example.com/manga/123/chapters".into(),
         method: "GET".into(),
         headers: vec![],

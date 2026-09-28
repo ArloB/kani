@@ -31,11 +31,7 @@ fn decode_blueprint(bytes: &[u8]) -> Result<kani_shared::ast::Blueprint, String>
         ));
     }
     let decoded = || postcard::from_bytes(rest).map_err(|e| format!("Invalid blueprint: {e}"));
-    let blueprint: kani_shared::ast::Blueprint = if version == 5 {
-        stacker::maybe_grow(32 * 1024, MAX_BLUEPRINT_BYTES, decoded)
-    } else {
-        decoded()
-    }?;
+    let blueprint: kani_shared::ast::Blueprint = decoded()?;
     validate_blueprint_arenas(&blueprint)?;
     Ok(blueprint)
 }
@@ -228,9 +224,11 @@ impl http::Host for HostState {
                     .source_redirect_policy(self.allowed_host.clone()),
             );
         for (k, v) in req.headers {
+            kani_shared::request::check_header_value(&k, &v)?;
             builder = builder.header(k, v);
         }
         if let Some(body) = req.body {
+            kani_shared::request::check_body_size(body.len())?;
             builder = builder.body(body);
         }
         let request = builder.build().map_err(|e| e.to_string())?;
@@ -264,6 +262,7 @@ impl http::Host for HostState {
             .await
             .map_err(|e| e.to_string())?
             .to_vec();
+        self.charge_response_bytes(body.len())?;
         Ok(http::Response {
             status,
             headers,
@@ -693,6 +692,7 @@ impl extraction::Host for HostState {
     ) -> wasmtime::Result<i32, String> {
         let mut bp = decode_blueprint(&blueprint)?;
         bp.request = Some(kani_shared::ast::RequestDef {
+            body: None,
             url,
             method,
             headers,
@@ -734,6 +734,7 @@ impl extraction::Host for HostState {
     ) -> wasmtime::Result<i32, String> {
         let mut bp = decode_blueprint(&blueprint)?;
         bp.request = Some(kani_shared::ast::RequestDef {
+            body: None,
             url,
             method,
             headers,
@@ -790,7 +791,9 @@ impl scripting::Host for HostState {
         .await
         .map_err(|error| error.to_string());
         self.last_io_at = Some(std::time::Instant::now());
-        result
+        let payload = result?;
+        self.charge_response_bytes(payload.len())?;
+        Ok(payload)
     }
 }
 
@@ -836,14 +839,19 @@ mod blueprint_decode_tests {
     use std::sync::Arc;
 
     #[test]
-    fn version_five_blueprints_remain_readable() {
+    fn blueprints_before_the_request_body_are_refused_with_a_recompile_hint() {
         let blueprint = BlueprintBuilder::new("")
             .field("title", Expr::Literal("legacy".into()))
             .build();
-        let mut bytes = postcard::to_allocvec(&5u32).unwrap();
-        bytes.extend(postcard::to_allocvec(&blueprint).unwrap());
-        let decoded = decode_blueprint(&bytes).expect("version 5 blueprint");
-        assert_eq!(decoded, blueprint);
+        for version in [5u32, 6] {
+            let mut bytes = postcard::to_allocvec(&version).unwrap();
+            bytes.extend(postcard::to_allocvec(&blueprint).unwrap());
+            let err = decode_blueprint(&bytes).unwrap_err();
+            assert!(
+                err.contains(&format!("version {version}")) && err.contains("recompile"),
+                "{err}"
+            );
+        }
     }
 
     #[test]

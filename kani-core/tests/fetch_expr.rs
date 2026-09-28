@@ -50,6 +50,7 @@ async fn json_fetch_list_then_detail() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -112,6 +113,7 @@ async fn html_fetch_sub_blueprint() {
 
     let list_bp = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -161,6 +163,7 @@ async fn fetch_disallowed_host_is_rejected() {
     let detail_bp = BlueprintBuilder::new("").build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -205,6 +208,7 @@ async fn nested_fetch_is_rejected() {
 
     let outer_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -226,7 +230,7 @@ async fn nested_fetch_is_rejected() {
 }
 
 #[tokio::test]
-async fn fetch_budget_exceeded_after_32_requests() {
+async fn a_json_fetch_past_the_operation_request_limit_is_a_budget_error() {
     let server = MockServer::start().await;
 
     let list_items: String = (0..32)
@@ -249,6 +253,7 @@ async fn fetch_budget_exceeded_after_32_requests() {
     let detail_bp = BlueprintBuilder::new("").build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -271,10 +276,15 @@ async fn fetch_budget_exceeded_after_32_requests() {
         .build();
 
     let mut state = make_state(AllowedHost::Unrestricted);
+    state.operation_budget =
+        kani_core::budget::OperationBudget::new(kani_core::budget::OperationLimits {
+            max_requests: 32,
+            ..Default::default()
+        });
     let err = extract_json(&mut state, None, &list_bp).await.unwrap_err();
     assert!(
-        err.contains("maximum") || err.contains("exceeded"),
-        "expected budget exceeded error, got: {err}"
+        kani_core::budget::is_budget_exceeded(&err) && err.contains("requests"),
+        "expected a request budget error, got: {err}"
     );
 }
 
@@ -296,6 +306,7 @@ async fn on_failure_skip_produces_null() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -348,6 +359,7 @@ async fn on_failure_fail_propagates_error() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -382,6 +394,7 @@ async fn on_failure_use_evaluates_fallback() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -442,6 +455,7 @@ async fn html_sub_fetches_run_concurrently_not_sequentially() {
 
     let list_bp = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -529,6 +543,7 @@ async fn json_sub_fetches_run_concurrently_not_sequentially() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -607,6 +622,7 @@ async fn redirecting_to(target: &str) -> MockServer {
 
 fn start_request(server: &MockServer) -> RequestDef {
     RequestDef {
+        body: None,
         url: format!("{}/start", server.uri()),
         method: "GET".into(),
         headers: vec![],
@@ -653,6 +669,7 @@ async fn a_sub_fetch_redirect_is_held_to_the_sources_host() {
         .build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -673,4 +690,354 @@ async fn a_sub_fetch_redirect_is_held_to_the_sources_host() {
         err.contains("redirect"),
         "refused at the redirect, got: {err}"
     );
+}
+
+/// Each phase of a chained endpoint reads its own context: row fields and `for_each.url_expr`
+/// the container element, the sub-endpoint's fields the sub-page, an `on_failure` fallback the
+/// container element again, and a `then` step the main document. The pages disagree on every
+/// value, so a phase reading the wrong context produces a visibly wrong row.
+#[tokio::test]
+async fn each_chaining_phase_reads_its_own_context() {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    let page = |body: String| ResponseTemplate::new(200).set_body_raw(body, "text/html");
+    let mount = |p: &str, body: String| {
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path(p.to_string()))
+            .respond_with(page(body))
+    };
+    mount(
+        "/popular",
+        format!(
+            r#"<a class="banner" href="{base}/banner"></a>
+            <div class="item" data-id="row-1"><span class="t">One</span><a class="link" href="{base}/sub/A"></a></div>
+            <div class="item" data-id="row-2"><span class="t">Two</span><a class="link" href="{base}/sub/missing"></a></div>"#
+        ),
+    )
+    .mount(&server)
+    .await;
+    mount(
+        "/sub/A",
+        format!(
+            r#"<div class="manga"><h1>Sub A</h1><a class="link" href="{base}/sub/WRONG"></a></div>"#
+        ),
+    )
+    .mount(&server)
+    .await;
+    mount(
+        "/banner",
+        r#"<div class="manga"><h1>Banner</h1><a class="link" href="/b"></a></div>"#.to_string(),
+    )
+    .mount(&server)
+    .await;
+
+    let yaml = format!(
+        r#"id: phases
+name: phases
+version: "1.0.0"
+base_url: "{base}"
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+      link_seen: 'self.first(".link").attr("href")'
+    scalars:
+      banner: '$banner'
+    then:
+      - endpoint: manga_details
+        url_expr: 'dom(".banner").attr("href")'
+        merge_as: banner
+    for_each:
+      - endpoint: manga_details
+        url_expr: 'self.first(".link").attr("href")'
+        merge_as: details
+        on_failure: 'self.attr("data-id")'
+  manga_details:
+    route: "/m/$manga_id$"
+    container: ".manga"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.first("h1").text()'
+      status: '"unknown"'
+      link: 'self.first(".link").attr("href")'
+"#
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("phases.yaml")).unwrap();
+    let ep = ext.endpoint_by_name("popular").unwrap();
+    let bp = kani_yaml::build_blueprint(
+        ep,
+        &ext,
+        "popular",
+        RequestDef {
+            body: None,
+            url: format!("{base}/popular"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        },
+    );
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let result = extract_html(&mut state, None, &bp).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+
+    assert_eq!(
+        rows[0]["link_seen"],
+        format!("{base}/sub/A"),
+        "row fields read the container"
+    );
+    assert_eq!(
+        rows[0]["details"]["title"], "Sub A",
+        "url_expr read the container link"
+    );
+    assert_eq!(
+        rows[0]["details"]["link"],
+        format!("{base}/sub/WRONG"),
+        "sub-endpoint fields read the sub-page"
+    );
+    assert_eq!(
+        rows[1]["details"], "row-2",
+        "on_failure reads the container element"
+    );
+    assert_eq!(
+        result["scalars"]["banner"]["title"], "Banner",
+        "then reads the main document"
+    );
+    let requested: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(
+        !requested.contains(&"/sub/WRONG".to_string()),
+        "{requested:?}"
+    );
+}
+
+async fn fifty_row_listing() -> (MockServer, kani_shared::ast::Blueprint) {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    let items: String = (0..50)
+        .map(|i| format!(r#"<li><a href="{base}/d/{i}">{i}</a></li>"#))
+        .collect();
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!("<ul>{items}</ul>")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(r"^/d/\d+$"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<h1>Detail page body</h1>"))
+        .mount(&server)
+        .await;
+    let detail = BlueprintBuilder::new(":root")
+        .field("heading", Expr::dom("h1").text())
+        .build();
+    let list = BlueprintBuilder::new("li")
+        .with_request(RequestDef {
+            body: None,
+            url: format!("{base}/list"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .field(
+            "detail",
+            Expr::fetch_html(Expr::self_ref().first("a").attr("href"), detail)
+                .with_on_failure(kani_shared::ast::OnFailurePolicy::Skip),
+        )
+        .build();
+    (server, list)
+}
+
+#[tokio::test]
+async fn a_fifty_row_for_each_fits_the_default_budget() {
+    let (_server, list) = fifty_row_listing().await;
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let result = extract_html(&mut state, None, &list).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 50);
+    let missing = rows.iter().filter(|r| r["detail"].is_null()).count();
+    assert_eq!(missing, 0, "every sub-fetch ran; none was silently nulled");
+}
+
+#[tokio::test]
+async fn an_exhausted_budget_is_an_error_even_under_on_failure_skip() {
+    use kani_core::budget::{OperationBudget, OperationLimits};
+    let generous = OperationLimits::default();
+    for (limits, needle) in [
+        (
+            OperationLimits {
+                max_requests: 10,
+                ..generous
+            },
+            "requests",
+        ),
+        (
+            OperationLimits {
+                max_response_bytes: 400,
+                ..generous
+            },
+            "response bytes",
+        ),
+        (
+            OperationLimits {
+                max_elapsed: std::time::Duration::ZERO,
+                ..generous
+            },
+            "time",
+        ),
+    ] {
+        let (_server, list) = fifty_row_listing().await;
+        let mut state = make_state(AllowedHost::Unrestricted);
+        state.operation_budget = OperationBudget::new(limits);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let err = extract_html(&mut state, None, &list).await.unwrap_err();
+        assert!(
+            kani_core::budget::is_budget_exceeded(&err) && err.contains(needle),
+            "{needle}: {err}"
+        );
+    }
+}
+
+/// A cursor source serving `total` items in native chunks of 32: the cursor is the index of
+/// the chunk's first item, and the last chunk has no cursor.
+async fn cursor_source(total: usize, repeat_at: Option<usize>) -> MockServer {
+    let server = MockServer::start().await;
+    for start in (0..total).step_by(32) {
+        let end = (start + 32).min(total);
+        let items: Vec<serde_json::Value> = (start..end)
+            .map(|i| serde_json::json!({ "id": i + 1 }))
+            .collect();
+        let next = match repeat_at {
+            Some(r) if start >= r => serde_json::json!(r.to_string()),
+            _ if end < total => serde_json::json!(end.to_string()),
+            _ => serde_json::Value::Null,
+        };
+        let body = serde_json::json!({ "items": items, "next": next }).to_string();
+        let matcher = wiremock::matchers::path("/list");
+        let mock = if start == 0 {
+            Mock::given(method("GET"))
+                .and(matcher)
+                .and(wiremock::matchers::query_param_is_missing("after"))
+        } else {
+            Mock::given(method("GET"))
+                .and(matcher)
+                .and(wiremock::matchers::query_param("after", start.to_string()))
+        };
+        mock.respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
+fn cursor_blueprint(base: &str) -> kani_shared::ast::Blueprint {
+    let yaml = format!(
+        r#"id: cursors
+name: cursors
+version: "1.0.0"
+base_url: "{base}"
+endpoints:
+  search:
+    route: /list
+    type: json
+    container: /items
+    pagination:
+      native_page_size: 32
+      offset_param: after
+      offset_type: cursor
+      cursor_field: /next
+    fields:
+      id: 'self.ptr("/id").int().to_string()'
+      title: 'self.ptr("/id").int().to_string()'
+"#
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("c.yaml")).unwrap();
+    let ep = ext.endpoint_by_name("search").unwrap();
+    kani_yaml::build_blueprint(
+        ep,
+        &ext,
+        "search",
+        RequestDef {
+            body: None,
+            url: format!("{base}/list"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        },
+    )
+}
+
+fn ids(result: &serde_json::Value) -> Vec<u64> {
+    result["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().parse().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn cursor_pagination_walks_from_the_start_to_the_requested_slice() {
+    let server = cursor_source(150, None).await;
+    let bp = cursor_blueprint(&server.uri());
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page5 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 5, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(ids(&page5), (81..=100).collect::<Vec<_>>(), "a cold page 5");
+    assert_eq!(page5["scalars"]["has_next_page"], true);
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page2 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 2, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(&page2),
+        (21..=40).collect::<Vec<_>>(),
+        "straddles chunks 1 and 2"
+    );
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let last = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 8, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(ids(&last), (141..=150).collect::<Vec<_>>());
+    assert_eq!(
+        last["scalars"]["has_next_page"], false,
+        "the null cursor ends paging"
+    );
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let beyond = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 9, 20, &bp)
+        .await
+        .unwrap();
+    assert!(ids(&beyond).is_empty());
+    assert_eq!(beyond["scalars"]["has_next_page"], false);
+}
+
+#[tokio::test]
+async fn a_repeated_cursor_ends_the_walk() {
+    let server = cursor_source(150, Some(64)).await;
+    let bp = cursor_blueprint(&server.uri());
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page5 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 5, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(&page5),
+        (81..=96).collect::<Vec<_>>(),
+        "the chunk the repeated cursor points back to is read once; nothing past it"
+    );
+    assert_eq!(page5["scalars"]["has_next_page"], false);
+    assert_eq!(state.io_count, 3, "the walk stopped at the repeat");
 }

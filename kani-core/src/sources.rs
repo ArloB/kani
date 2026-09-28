@@ -3,7 +3,6 @@
 use crate::error::{Error, Result};
 use crate::wasm::{AllowedHost, HostState};
 use std::sync::Arc;
-use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
 
@@ -14,9 +13,7 @@ macro_rules! execute_wasm {
     ($self:expr, $method:ident $(, $args:expr)*) => {{
         {
             let data = $self.store.data_mut();
-            data.call_started_at = std::time::Instant::now();
-            data.io_count = 0;
-            data.last_io_at = None;
+            data.begin_operation();
         }
 
         $self.store.set_epoch_deadline($crate::sources::EPOCH_DEADLINE_TICKS);
@@ -30,7 +27,7 @@ macro_rules! execute_wasm {
 
         $self.store.data_mut().clear_all();
         let inner = raw_result?;
-        let result = inner.map_err(|e| $crate::error::Error::Extension($crate::wasm::ext_error_from_wit(e)))?;
+        let result = inner.map_err($crate::wasm::guest_error)?;
         Ok(result)
     }};
 }
@@ -129,9 +126,7 @@ impl SourceInstance {
 
         {
             let data = store.data_mut();
-            data.call_started_at = Instant::now();
-            data.io_count = 0;
-            data.last_io_at = None;
+            data.begin_operation();
         }
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
@@ -146,7 +141,7 @@ impl SourceInstance {
 
         store.data_mut().clear_all();
         let inner = raw_result?;
-        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
+        inner.map_err(crate::wasm::guest_error)
     }
 
     /// Calls the `get_metadata` function in the WASM module. Returns the
@@ -163,9 +158,7 @@ impl SourceInstance {
 
         {
             let data = store.data_mut();
-            data.call_started_at = Instant::now();
-            data.io_count = 0;
-            data.last_io_at = None;
+            data.begin_operation();
         }
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
@@ -177,7 +170,7 @@ impl SourceInstance {
 
         store.data_mut().clear_all();
         let inner = raw_result?;
-        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
+        inner.map_err(crate::wasm::guest_error)
     }
 
     /// Calls the `get_preferences` function in the WASM module.
@@ -195,9 +188,7 @@ impl SourceInstance {
 
         {
             let data = store.data_mut();
-            data.call_started_at = Instant::now();
-            data.io_count = 0;
-            data.last_io_at = None;
+            data.begin_operation();
         }
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
@@ -212,6 +203,6 @@ impl SourceInstance {
 
         store.data_mut().clear_all();
         let inner = raw_result?;
-        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
+        inner.map_err(crate::wasm::guest_error)
     }
 }

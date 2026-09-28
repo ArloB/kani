@@ -366,16 +366,14 @@ impl AppService {
                             &kani_core::scripting::HookScripts::from_metadata(m),
                         )?;
                     }
-                    let max_hk = meta
-                        .as_ref()
-                        .and_then(|m| m.rate_limit.as_ref())
-                        .map(|rl| rl.max_hook_requests)
-                        .unwrap_or(3);
+                    let max_hk = kani_core::budget::SourceLimits::from_rate_limit(
+                        meta.as_ref().and_then(|m| m.rate_limit.as_ref()),
+                    );
                     let pure_reg = meta.as_ref().and_then(compile_pure_registry);
                     let hook_reg = meta.as_ref().and_then(compile_hook_registry);
                     (pure_reg, hook_reg, max_hk)
                 } else {
-                    (None, None, 3u32)
+                    (None, None, kani_core::budget::SourceLimits::from(3))
                 }
             };
 
@@ -1063,6 +1061,9 @@ impl AppService {
                             burst: rl.burst,
                             max_concurrent: rl.max_concurrent,
                             max_hook_requests: rl.max_hook_requests,
+                            max_requests: rl.max_requests,
+                            max_response_bytes: rl.max_response_bytes,
+                            max_operation_seconds: rl.max_operation_seconds,
                         },
                     );
                 }
@@ -1380,11 +1381,8 @@ impl AppService {
 
         let pure_registry = compile_pure_registry(&metadata);
         let hook_registry = compile_hook_registry(&metadata);
-        let max_hook_requests = metadata
-            .rate_limit
-            .as_ref()
-            .map(|rl| rl.max_hook_requests)
-            .unwrap_or(3);
+        let max_hook_requests =
+            kani_core::budget::SourceLimits::from_rate_limit(metadata.rate_limit.as_ref());
         let backend = loader::build_wasm_source(
             self.wasm_runtime.engine().clone(),
             self.wasm_runtime

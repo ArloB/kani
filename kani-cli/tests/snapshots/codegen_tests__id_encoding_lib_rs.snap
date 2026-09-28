@@ -95,8 +95,12 @@ impl MangaExtension for TestIdEncoding {
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
-        let req = HttpRequest::get(format!("{}/manga/{}", self.base_url, manga_id))
-            .endpoint_id("manga_details");
+        let req = HttpRequest::get(format!(
+            "{}/manga/{}",
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id)
+        ))
+        .endpoint_id("manga_details");
         let bp = BlueprintBuilder::new(":root")
             .request(req)
             .field(
@@ -123,10 +127,11 @@ impl MangaExtension for TestIdEncoding {
     fn get_chapter_list(
         &self,
         manga_id: &str,
-        _page: i32,
-        _page_size: Option<i32>,
-        _sort: Option<String>,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
+        let _ = (page, page_size, &sort);
         let __manga_decoded = kani_shared::encoding::decode_composite(
             manga_id,
             "|",
@@ -143,7 +148,9 @@ impl MangaExtension for TestIdEncoding {
         let manga_slug = __manga_decoded[1].1.as_str();
         let req = HttpRequest::get(format!(
             "{}/manga/{}/{}/chapters",
-            self.base_url, manga_hid, manga_slug
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_hid),
+            kani_shared::request::encode_path_value(&manga_slug)
         ))
         .endpoint_id("chapter_list");
         let bp = BlueprintBuilder::new(".chapter-list .chapter")

@@ -51,9 +51,8 @@ pub fn build_blueprint_core(
     ext: &yaml::model::ValidatedExtension,
     endpoint_name: &str,
 ) -> kani_shared::ast::BlueprintBuilder {
-    use kani_shared::ast::{BlueprintBuilder, OffsetType};
+    use kani_shared::ast::BlueprintBuilder;
     use yaml::model::{FieldSource, ValidatedHnp};
-    use yaml::schema::YamlOffsetType;
 
     let mut builder = BlueprintBuilder::new(&ep.container);
 
@@ -65,7 +64,7 @@ pub fn build_blueprint_core(
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
             let endpoint_id = Some(format!("{endpoint_name}/{}", step.merge_as));
             let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
-            builder = builder.bind(&step.merge_as, fetch);
+            builder = builder.bind(&then_binding_name(&step.merge_as), fetch);
         }
     }
 
@@ -102,16 +101,52 @@ pub fn build_blueprint_core(
     }
 
     if let Some(pag) = &ep.pagination {
-        let offset_type = match pag.offset_type {
-            YamlOffsetType::Item => OffsetType::ItemOffset,
-            YamlOffsetType::Page => OffsetType::PageNumber {
-                start: pag.page_start,
-            },
-        };
+        let (offset_type, cursor_scalar) = pagination_lowering(pag);
+        if let Some(expr) = cursor_scalar {
+            builder = builder.scalar_opt(CURSOR_SCALAR, expr);
+        }
         builder = builder.paginated(pag.native_page_size, &pag.offset_param, offset_type);
     }
 
     builder
+}
+
+/// The variable a `then` step's result is bound to: `$merge_as`, the name DSL expressions use
+/// to reference it.
+pub fn then_binding_name(merge_as: &str) -> String {
+    if merge_as.starts_with('$') {
+        merge_as.to_string()
+    } else {
+        format!("${merge_as}")
+    }
+}
+
+/// The scalar a cursor-paginated blueprint reads the next cursor from.
+pub const CURSOR_SCALAR: &str = "__next_cursor";
+
+/// Lowers an endpoint's `pagination` block to the blueprint's offset type, plus, for cursor
+/// pagination, the scalar expression that reads the next cursor from each response. Shared by
+/// the interpreted tier and codegen.
+pub fn pagination_lowering(
+    pag: &yaml::schema::PaginationCfg,
+) -> (kani_shared::ast::OffsetType, Option<kani_shared::ast::Expr>) {
+    use kani_shared::ast::{Expr, OffsetType};
+    use yaml::schema::YamlOffsetType;
+    match pag.offset_type {
+        YamlOffsetType::Item => (OffsetType::ItemOffset, None),
+        YamlOffsetType::Page => (
+            OffsetType::PageNumber {
+                start: pag.page_start,
+            },
+            None,
+        ),
+        YamlOffsetType::Cursor => (
+            OffsetType::CursorToken {
+                next_cursor_field: CURSOR_SCALAR.to_string(),
+            },
+            Some(Expr::Json(pag.cursor_field.clone().unwrap_or_default())),
+        ),
+    }
 }
 
 /// Build a request-free, non-chaining sub-blueprint for `then` and `for_each` fetch expressions.

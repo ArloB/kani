@@ -132,6 +132,10 @@ pub struct HostState {
     pub call_started_at: std::time::Instant,
     pub io_count: u32,
     pub last_io_at: Option<std::time::Instant>,
+    /// Limits for each top-level operation, from the extension's `metadata.rate_limit`.
+    pub operation_limits: crate::budget::OperationLimits,
+    /// The budget shared by all work of the current top-level operation.
+    pub operation_budget: std::sync::Arc<crate::budget::OperationBudget>,
     /// Cache backend shared across all calls for this source. The namespace prefix
     /// (`{extension_id}:{version}:{scope}:`) is resolved at construction time.
     pub ext_cache: std::sync::Arc<dyn crate::cache::CacheBackend>,
@@ -241,6 +245,10 @@ impl HostState {
             call_started_at: std::time::Instant::now(),
             io_count: 0,
             last_io_at: None,
+            operation_limits: crate::budget::OperationLimits::default(),
+            operation_budget: crate::budget::OperationBudget::new(
+                crate::budget::OperationLimits::default(),
+            ),
             ext_cache,
             ext_cache_namespace,
             browser_profile_key,
@@ -271,13 +279,19 @@ impl HostState {
 
     pub(crate) fn charge_io(&mut self) -> std::result::Result<(), String> {
         self.io_count += 1;
-        if self.io_count > 32 {
-            return Err("Extension exceeded maximum HTTP request count".into());
-        }
-        if self.call_started_at.elapsed().as_secs() > 120 {
-            return Err("Extension exceeded maximum wall time".into());
-        }
-        Ok(())
+        self.operation_budget.charge_request()
+    }
+
+    pub(crate) fn charge_response_bytes(&self, len: usize) -> std::result::Result<(), String> {
+        self.operation_budget.charge_bytes(len)
+    }
+
+    /// Starts a new top-level operation: a fresh budget under this source's limits.
+    pub fn begin_operation(&mut self) {
+        self.call_started_at = std::time::Instant::now();
+        self.io_count = 0;
+        self.last_io_at = None;
+        self.operation_budget = crate::budget::OperationBudget::new(self.operation_limits);
     }
 
     /// Returns an error string if the total live handle count is at or above
@@ -612,6 +626,18 @@ pub mod result_conversions {
 
 /// Reached from other crates only through the `$crate::` path inside
 /// `sources.rs`'s macros, so it must stay `pub` despite no direct caller naming it.
+/// Converts a guest's error for the host: an exhausted operation budget becomes
+/// [`crate::error::Error::BudgetExceeded`] whichever path raised it, anything else stays an
+/// extension error.
+pub fn guest_error(e: kani::extension::types::ExtensionError) -> crate::error::Error {
+    let ext = ext_error_from_wit(e);
+    if crate::budget::is_budget_exceeded(&ext.message) {
+        crate::error::Error::BudgetExceeded(ext.message)
+    } else {
+        crate::error::Error::Extension(ext)
+    }
+}
+
 pub fn ext_error_from_wit(
     e: kani::extension::types::ExtensionError,
 ) -> kani_shared::extension::ExtensionError {

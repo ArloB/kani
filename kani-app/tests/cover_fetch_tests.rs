@@ -34,6 +34,7 @@ fn lit_field(name: &str, value: Expr) -> ValidatedField {
 /// fresh and runs the cover download.
 fn wire_cover_source(svc: &AppService, source_id: i64, origin: &TestOrigin) {
     let details = ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$".into(),
         method: "GET".into(),
         headers: vec![],

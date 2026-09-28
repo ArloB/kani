@@ -30,6 +30,7 @@ const PAGES_HTML: &str = r#"<html><body>
 
 fn pages_endpoint() -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/chapter/$chapter_id$".into(),
         method: "GET".into(),
         headers: vec![],
