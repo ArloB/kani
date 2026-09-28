@@ -24,7 +24,7 @@ pub struct WasmSource {
     ext_cache_namespace: String,
     pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
     hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
-    max_hook_requests: u32,
+    limits: kani_core::budget::SourceLimits,
     lease: Arc<kani_lease::LeaseCoordinator>,
 }
 
@@ -43,7 +43,7 @@ impl WasmSource {
         ext_cache_namespace: String,
         pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
         hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
-        max_hook_requests: u32,
+        limits: impl Into<kani_core::budget::SourceLimits>,
     ) -> Self {
         Self {
             engine,
@@ -59,7 +59,7 @@ impl WasmSource {
             ext_cache_namespace,
             pure_fn_registry,
             hook_registry,
-            max_hook_requests,
+            limits: limits.into(),
             lease: Arc::new(kani_lease::LeaseCoordinator::new()),
         }
     }
@@ -142,7 +142,8 @@ impl WasmSource {
         )?;
         host_state.pure_fn_registry = self.pure_fn_registry.clone();
         host_state.hook_registry = self.hook_registry.clone();
-        host_state.max_hook_requests = self.max_hook_requests;
+        host_state.max_hook_requests = self.limits.max_hook_requests;
+        host_state.operation_limits = self.limits.operation;
         host_state.browser_enabled = self.browser_enabled.load(Ordering::Relaxed);
         let mut store = Store::new(&self.engine, host_state);
 

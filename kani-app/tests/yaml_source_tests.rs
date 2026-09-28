@@ -2184,3 +2184,23 @@ async fn a_refresh_through_another_endpoint_retries_the_original_request() {
     assert_eq!(list.manga.len(), 1);
     assert_eq!((origin.hits("/popular"), origin.hits("/search")), (2, 1));
 }
+
+#[tokio::test]
+async fn refreshes_and_retries_share_one_operation_budget() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let origin = TestOrigin::start().await;
+    let page = r#"<div class="item" data-id="m1"><span class="t">One</span></div>"#;
+    origin.set("/popular", Response::status(401));
+    origin.set("/search", Response::html(page));
+    let hooks = "metadata:\n  rate_limit:\n    max_hook_requests: 50\n    max_requests: 4\n\
+                 on_status:\n  \"401\": |\n    refresh_auth(\"search\")";
+    let err = refresh_cycle_source(&origin, hooks)
+        .get_popular_manga(1, 20, &[])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, kani_core::error::Error::BudgetExceeded(m) if m.contains("requests")),
+        "{err:?}"
+    );
+    assert!(origin.total_hits() <= 4, "{} requests", origin.total_hits());
+}

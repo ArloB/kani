@@ -5,6 +5,7 @@
 //! not own persistence or HTTP routing; those boundaries live in `kani-app` and `kani-web`.
 
 pub mod archive;
+pub mod budget;
 pub mod cache;
 pub mod cbz;
 pub mod comic_info;

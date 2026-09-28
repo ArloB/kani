@@ -304,6 +304,7 @@ mod tests {
             browser_scripts: None,
             browser_profile_key: None,
             allowed_host: crate::wasm::AllowedHost::MetadataOnly,
+            operation_budget: None,
             cache_namespaces: std::sync::Arc::default(),
         }
     }

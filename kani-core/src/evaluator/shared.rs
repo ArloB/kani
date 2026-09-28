@@ -1147,6 +1147,7 @@ async fn fetch_body_with(
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
                 allowed_host: state.allowed_host.clone(),
+                operation_budget: Some(std::sync::Arc::clone(&state.operation_budget)),
                 cache_namespaces: std::sync::Arc::default(),
             };
             let action = registry
@@ -1233,6 +1234,7 @@ async fn fetch_body_with(
             .await
             .map_err(|e| e.to_string())?
             .to_vec();
+        state.charge_response_bytes(raw_body.len())?;
 
         // Only a source with hooks sees a lossily-decoded body; without them the
         // strict conversion below still rejects a non-UTF-8 payload.
@@ -1253,6 +1255,7 @@ async fn fetch_body_with(
                 browser_scripts: state.browser_scripts.clone(),
                 browser_profile_key: Some(state.browser_profile_key.clone()),
                 allowed_host: state.allowed_host.clone(),
+                operation_budget: Some(std::sync::Arc::clone(&state.operation_budget)),
                 cache_namespaces: std::sync::Arc::default(),
             };
             let action = registry

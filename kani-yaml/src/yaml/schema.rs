@@ -154,6 +154,15 @@ pub struct RateLimitCfg {
     pub max_concurrent: u32,
     #[serde(default = "default_max_hook_requests")]
     pub max_hook_requests: u32,
+    /// Requests one top-level operation may make.
+    #[serde(default)]
+    pub max_requests: Option<u32>,
+    /// Response bytes one top-level operation may read.
+    #[serde(default)]
+    pub max_response_bytes: Option<u64>,
+    /// Seconds one top-level operation may run.
+    #[serde(default)]
+    pub max_operation_seconds: Option<u64>,
 }
 
 fn default_rps() -> f64 {

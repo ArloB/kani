@@ -563,7 +563,7 @@ async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
 #[tokio::test]
 async fn the_io_budget_is_charged_identically_on_both_backends() {
     let origin = TestOrigin::start().await;
-    for i in 0..64 {
+    for i in 0..140 {
         origin.set(
             &format!("/fanout/{i}"),
             Response::html(r#"<div class="item" data-id="x"></div>"#),
@@ -575,10 +575,11 @@ async fn the_io_budget_is_charged_identically_on_both_backends() {
         .await
         .expect("10 sub-fetches are within the per-call budget");
 
-    let over = wasm.search_manga("__fanout__:40", 1, 20, &[]).await;
+    let over = wasm.search_manga("__fanout__:130", 1, 20, &[]).await;
     assert!(
-        over.is_err(),
-        "40 sub-fetches in one call must exceed the budget on the compiled path too"
+        matches!(over, Err(kani_core::error::Error::BudgetExceeded(_))),
+        "130 sub-fetches in one call must exceed the 128-request budget on the compiled path \
+         too: {over:?}"
     );
 
     wasm.search_manga("__fanout__:10", 1, 20, &[])

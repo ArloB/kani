@@ -778,11 +778,7 @@ impl AppService {
         let ns = format!("{}:", metadata.id);
         let pure_reg = super::sources::compile_pure_registry(&metadata);
         let hook_reg = super::sources::compile_hook_registry(&metadata);
-        let max_hk = metadata
-            .rate_limit
-            .as_ref()
-            .map(|rl| rl.max_hook_requests)
-            .unwrap_or(3);
+        let max_hk = kani_core::budget::SourceLimits::from_rate_limit(metadata.rate_limit.as_ref());
         let backend = loader::build_wasm_source(
             self.wasm_runtime.engine().clone(),
             instance_pre,

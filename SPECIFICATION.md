@@ -1387,7 +1387,8 @@ key cannot be evaluated; `kani-cli generate` and factory `kani-cli build` reject
 sets it rather than emitting a crate that ignores it (§5).
 
 Sub-fetch parallelism is not configurable per step. Every request a source makes,
-including sub-fetches, is bounded by `metadata.rate_limit.max_concurrent` (default 4).
+including sub-fetches, is bounded by `metadata.rate_limit.max_concurrent` (default 4), and
+the total counts against the operation budget (§5.2).
 A `concurrency:` key on a `for_each` step is accepted and ignored: it was
 documented and range-checked before 1.0 but never read, so honouring it now would
 change behaviour for anyone who set it. Remove it from your source; use
@@ -1791,6 +1792,9 @@ metadata:
     burst: integer              # Optional. Default: 8.
     max_concurrent: integer     # Optional. Default: 4.
     max_hook_requests: integer  # Optional. Default: 3. Max hook-driven retries per request (§3.10).
+    max_requests: integer       # Optional. Default: 128, at most 1024. Requests per operation (§5.2).
+    max_response_bytes: integer # Optional. Default: 64 MiB, at most 256 MiB, per operation.
+    max_operation_seconds: integer # Optional. Default: 120, at most 600, per operation.
   languages: [string]           # Optional.
   description: string           # Optional.
   sections:
@@ -2406,6 +2410,24 @@ backend. Both backends share `build_blueprint` and `build_blueprint_core` in `ka
 ### 5.2 Evaluator resource limits
 
 The evaluator (`kani-core/src/evaluator/shared.rs`) enforces host-side caps (not author-overridable): `MAX_EVAL_ITERATIONS` (100 000), `MAX_EVAL_DEPTH` (50), `MAX_LIST_SIZE` (10 000), `MAX_STRING_LENGTH` (1 000 000). Exceeding a cap aborts evaluation with a limit error.
+
+**Operation budget.** Every top-level operation (one popular, search, details, chapter-list or pages
+call, or one WASM guest call) has one budget, shared by everything that operation causes: the main
+request, every pagination chunk, `then` and `for_each` sub-fetches, hook `retry()`/`retry_after()`
+and `refresh_auth` re-runs, and browser captures from `page_url`, hooks or WASM.
+
+| Dimension | Default | Hard cap | Declared as |
+|---|---|---|---|
+| Requests | 128 | 1024 | `metadata.rate_limit.max_requests` |
+| Response bytes read | 64 MiB | 256 MiB | `metadata.rate_limit.max_response_bytes` |
+| Elapsed time | 120 s | 600 s | `metadata.rate_limit.max_operation_seconds` |
+
+Validation refuses a declared value of 0 or above the cap. When any dimension runs out, the whole
+operation fails with a "budget exceeded" error naming the dimension, which the host reports as
+`BudgetExceeded`. No partial result is returned, and no `on_failure` policy (`skip` or a fallback)
+can absorb it, so a large listing never turns into rows with silently missing sub-fetches.
+`max_concurrent` limits how many of those requests run at once; the budget limits how many there
+are.
 
 ### 5.3 Selection and supersession
 

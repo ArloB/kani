@@ -20,7 +20,7 @@ pub(crate) struct SourceManager {
     ext_cache_namespace: String,
     pure_fn_registry: Option<Arc<crate::scripting::PureFunctionRegistry>>,
     hook_registry: Option<Arc<crate::scripting::HookRegistry>>,
-    max_hook_requests: u32,
+    limits: crate::budget::SourceLimits,
 }
 
 impl SourceManager {
@@ -37,7 +37,7 @@ impl SourceManager {
         ext_cache_namespace: String,
         pure_fn_registry: Option<Arc<crate::scripting::PureFunctionRegistry>>,
         hook_registry: Option<Arc<crate::scripting::HookRegistry>>,
-        max_hook_requests: u32,
+        limits: impl Into<crate::budget::SourceLimits>,
     ) -> Self {
         Self {
             engine,
@@ -52,7 +52,7 @@ impl SourceManager {
             ext_cache_namespace,
             pure_fn_registry,
             hook_registry,
-            max_hook_requests,
+            limits: limits.into(),
         }
     }
 
@@ -85,7 +85,8 @@ impl SourceManager {
         )?;
         host_state.pure_fn_registry = self.pure_fn_registry.clone();
         host_state.hook_registry = self.hook_registry.clone();
-        host_state.max_hook_requests = self.max_hook_requests;
+        host_state.max_hook_requests = self.limits.max_hook_requests;
+        host_state.operation_limits = self.limits.operation;
         let mut store = Store::try_new(&self.engine, host_state)?;
 
         store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);

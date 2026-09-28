@@ -212,6 +212,7 @@ pub fn apply_pre_request(
         browser_scripts: state.browser_scripts.clone(),
         browser_profile_key: Some(state.browser_profile_key.clone()),
         allowed_host: state.allowed_host.clone(),
+        operation_budget: None,
         cache_namespaces: std::sync::Arc::default(),
     };
 

@@ -265,6 +265,7 @@ impl http::Host for HostState {
             .await
             .map_err(|e| e.to_string())?
             .to_vec();
+        self.charge_response_bytes(body.len())?;
         Ok(http::Response {
             status,
             headers,
@@ -791,7 +792,9 @@ impl scripting::Host for HostState {
         .await
         .map_err(|error| error.to_string());
         self.last_io_at = Some(std::time::Instant::now());
-        result
+        let payload = result?;
+        self.charge_response_bytes(payload.len())?;
+        Ok(payload)
     }
 }
 

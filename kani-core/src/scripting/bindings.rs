@@ -33,6 +33,8 @@ pub struct ScriptableCtx {
     /// Declared cache namespaces; the hook registry fills this before running a hook.
     pub cache_namespaces:
         Arc<std::collections::BTreeMap<String, kani_shared::CacheNamespaceLimits>>,
+    /// The budget of the operation this hook runs within; a capture charges it.
+    pub operation_budget: Option<Arc<crate::budget::OperationBudget>>,
 }
 
 impl std::fmt::Debug for dyn crate::cache::CacheBackend {
@@ -280,6 +282,11 @@ fn ctx_capture_page_payload_scrolled(
         .http
         .as_ref()
         .ok_or_else(|| Box::<rhai::EvalAltResult>::from("solver unavailable in this context"))?;
+    if let Some(budget) = &ctx.operation_budget {
+        budget
+            .charge_request()
+            .map_err(Box::<rhai::EvalAltResult>::from)?;
+    }
     let profile_key = ctx.browser_profile_key.clone();
     let timeout = timeout_ms.max(0) as u32;
     let result = tokio::task::block_in_place(|| {
@@ -295,9 +302,13 @@ fn ctx_capture_page_payload_scrolled(
             ),
         )
     });
-    result
-        .map(Dynamic::from)
-        .map_err(|error| Box::<rhai::EvalAltResult>::from(error.to_string()))
+    let payload = result.map_err(|error| Box::<rhai::EvalAltResult>::from(error.to_string()))?;
+    if let Some(budget) = &ctx.operation_budget {
+        budget
+            .charge_bytes(payload.len())
+            .map_err(Box::<rhai::EvalAltResult>::from)?;
+    }
+    Ok(Dynamic::from(payload))
 }
 
 pub(crate) fn register_hook_bindings(engine: &mut Engine) {
@@ -394,6 +405,7 @@ mod tests {
             ))),
             browser_profile_key: Some("test-source".to_string()),
             allowed_host: crate::wasm::AllowedHost::Restricted("example.com".into()),
+            operation_budget: None,
             cache_namespaces: Arc::default(),
         }
     }
@@ -408,6 +420,7 @@ mod tests {
             browser_scripts: None,
             browser_profile_key: None,
             allowed_host: crate::wasm::AllowedHost::MetadataOnly,
+            operation_budget: None,
             cache_namespaces: Arc::new(
                 ["ns", "shared"]
                     .into_iter()

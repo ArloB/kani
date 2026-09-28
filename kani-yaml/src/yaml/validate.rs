@@ -483,11 +483,42 @@ fn validate_metadata(
                 "metadata.rate_limit.rps: must be greater than 0".to_string(),
             ));
         }
+        use kani_shared::extension::{
+            MAX_OPERATION_REQUESTS, MAX_OPERATION_RESPONSE_BYTES, MAX_OPERATION_SECONDS,
+        };
+        for (key, value, cap) in [
+            (
+                "max_requests",
+                cfg.max_requests.map(u64::from),
+                u64::from(MAX_OPERATION_REQUESTS),
+            ),
+            (
+                "max_response_bytes",
+                cfg.max_response_bytes,
+                MAX_OPERATION_RESPONSE_BYTES,
+            ),
+            (
+                "max_operation_seconds",
+                cfg.max_operation_seconds,
+                MAX_OPERATION_SECONDS,
+            ),
+        ] {
+            if let Some(v) = value
+                && !(1..=cap).contains(&v)
+            {
+                errors.push(YamlError::Validation(format!(
+                    "metadata.rate_limit.{key}: {v} must be between 1 and {cap}"
+                )));
+            }
+        }
         ValidatedRateLimit {
             requests_per_second: cfg.rps,
             burst: cfg.burst,
             max_concurrent: cfg.max_concurrent,
             max_hook_requests: cfg.max_hook_requests,
+            max_requests: cfg.max_requests,
+            max_response_bytes: cfg.max_response_bytes,
+            max_operation_seconds: cfg.max_operation_seconds,
         }
     });
 

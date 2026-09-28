@@ -3604,6 +3604,7 @@ mod tests {
             burst: 5,
             max_concurrent: 3,
             max_hook_requests: 3,
+            ..Default::default()
         };
         client.register_rate_limit("example.com", &cfg);
         assert!(client.rate_states.contains_key("example.com"));
@@ -3619,6 +3620,7 @@ mod tests {
             burst: 3,
             max_concurrent: 10,
             max_hook_requests: 3,
+            ..Default::default()
         };
         client.register_rate_limit("test.local", &cfg);
         let state = client
@@ -3826,6 +3828,7 @@ mod tests {
             burst: 100,
             max_concurrent: 2,
             max_hook_requests: 3,
+            ..Default::default()
         };
         client.register_rate_limit("sem.local", &cfg);
         let state = client

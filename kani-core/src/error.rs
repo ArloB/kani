@@ -19,6 +19,10 @@ pub enum Error {
     #[error("{0}")]
     Transform(String),
 
+    /// One operation used up its request, response-byte or time budget.
+    #[error("{0}")]
+    BudgetExceeded(String),
+
     #[error("Not found: {0}")]
     NotFound(String),
 

@@ -226,7 +226,7 @@ async fn nested_fetch_is_rejected() {
 }
 
 #[tokio::test]
-async fn fetch_budget_exceeded_after_32_requests() {
+async fn a_json_fetch_past_the_operation_request_limit_is_a_budget_error() {
     let server = MockServer::start().await;
 
     let list_items: String = (0..32)
@@ -271,10 +271,15 @@ async fn fetch_budget_exceeded_after_32_requests() {
         .build();
 
     let mut state = make_state(AllowedHost::Unrestricted);
+    state.operation_budget =
+        kani_core::budget::OperationBudget::new(kani_core::budget::OperationLimits {
+            max_requests: 32,
+            ..Default::default()
+        });
     let err = extract_json(&mut state, None, &list_bp).await.unwrap_err();
     assert!(
-        err.contains("maximum") || err.contains("exceeded"),
-        "expected budget exceeded error, got: {err}"
+        kani_core::budget::is_budget_exceeded(&err) && err.contains("requests"),
+        "expected a request budget error, got: {err}"
     );
 }
 
@@ -799,4 +804,90 @@ endpoints:
         !requested.contains(&"/sub/WRONG".to_string()),
         "{requested:?}"
     );
+}
+
+async fn fifty_row_listing() -> (MockServer, kani_shared::ast::Blueprint) {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    let items: String = (0..50)
+        .map(|i| format!(r#"<li><a href="{base}/d/{i}">{i}</a></li>"#))
+        .collect();
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!("<ul>{items}</ul>")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(r"^/d/\d+$"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<h1>Detail page body</h1>"))
+        .mount(&server)
+        .await;
+    let detail = BlueprintBuilder::new(":root")
+        .field("heading", Expr::dom("h1").text())
+        .build();
+    let list = BlueprintBuilder::new("li")
+        .with_request(RequestDef {
+            url: format!("{base}/list"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .field(
+            "detail",
+            Expr::fetch_html(Expr::self_ref().first("a").attr("href"), detail)
+                .with_on_failure(kani_shared::ast::OnFailurePolicy::Skip),
+        )
+        .build();
+    (server, list)
+}
+
+#[tokio::test]
+async fn a_fifty_row_for_each_fits_the_default_budget() {
+    let (_server, list) = fifty_row_listing().await;
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let result = extract_html(&mut state, None, &list).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 50);
+    let missing = rows.iter().filter(|r| r["detail"].is_null()).count();
+    assert_eq!(missing, 0, "every sub-fetch ran; none was silently nulled");
+}
+
+#[tokio::test]
+async fn an_exhausted_budget_is_an_error_even_under_on_failure_skip() {
+    use kani_core::budget::{OperationBudget, OperationLimits};
+    let generous = OperationLimits::default();
+    for (limits, needle) in [
+        (
+            OperationLimits {
+                max_requests: 10,
+                ..generous
+            },
+            "requests",
+        ),
+        (
+            OperationLimits {
+                max_response_bytes: 400,
+                ..generous
+            },
+            "response bytes",
+        ),
+        (
+            OperationLimits {
+                max_elapsed: std::time::Duration::ZERO,
+                ..generous
+            },
+            "time",
+        ),
+    ] {
+        let (_server, list) = fifty_row_listing().await;
+        let mut state = make_state(AllowedHost::Unrestricted);
+        state.operation_budget = OperationBudget::new(limits);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let err = extract_html(&mut state, None, &list).await.unwrap_err();
+        assert!(
+            kani_core::budget::is_budget_exceeded(&err) && err.contains(needle),
+            "{needle}: {err}"
+        );
+    }
 }

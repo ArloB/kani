@@ -1946,3 +1946,19 @@ fn each_chaining_phase_may_only_use_the_context_it_has() {
         "        deduplicate_by: 'self.ptr(\"/details/title\").str()'\n",
     ));
 }
+
+#[test]
+fn declared_operation_limits_must_stay_within_the_hard_caps() {
+    let yaml = |key: &str, value: u64| {
+        format!("{METADATA_BASE}metadata:\n  rate_limit:\n    {key}: {value}\n")
+    };
+    for (key, too_big) in [
+        ("max_requests", 1025),
+        ("max_response_bytes", 256 * 1024 * 1024 + 1),
+        ("max_operation_seconds", 601),
+    ] {
+        assert_invalid_containing(&yaml(key, too_big), &format!("metadata.rate_limit.{key}"));
+        assert_invalid_containing(&yaml(key, 0), &format!("metadata.rate_limit.{key}"));
+        assert_valid(&yaml(key, 60));
+    }
+}

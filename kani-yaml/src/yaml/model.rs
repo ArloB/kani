@@ -117,6 +117,9 @@ pub struct ValidatedRateLimit {
     pub burst: u32,
     pub max_concurrent: u32,
     pub max_hook_requests: u32,
+    pub max_requests: Option<u32>,
+    pub max_response_bytes: Option<u64>,
+    pub max_operation_seconds: Option<u64>,
 }
 
 pub struct ValidatedSection {

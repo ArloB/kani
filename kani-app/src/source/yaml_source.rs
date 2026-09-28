@@ -248,7 +248,10 @@ impl YamlSource {
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn make_host_state(&self) -> Result<kani_core::wasm::HostState> {
+    fn make_host_state(
+        &self,
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
+    ) -> Result<kani_core::wasm::HostState> {
         let allowed_host = if self.config.unrestricted_http {
             AllowedHost::Unrestricted
         } else {
@@ -267,7 +270,18 @@ impl YamlSource {
         state.browser_scripts = Some(Arc::clone(&self.browser_scripts));
         state.max_hook_requests = self.max_hook_requests;
         state.set_eval_limits(self.eval_limits);
+        state.operation_limits = budget.limits();
+        state.operation_budget = std::sync::Arc::clone(budget);
         Ok(state)
+    }
+
+    fn operation_limits(&self) -> kani_core::budget::OperationLimits {
+        let rl = self.config.metadata.rate_limit.as_ref();
+        kani_core::budget::OperationLimits::declared(
+            rl.and_then(|r| r.max_requests),
+            rl.and_then(|r| r.max_response_bytes),
+            rl.and_then(|r| r.max_operation_seconds),
+        )
     }
 
     async fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
@@ -324,13 +338,14 @@ impl YamlSource {
         endpoint_name: &str,
         args: &HashMap<String, String>,
         filters: &[kani_shared::types::ActiveFilter],
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::{html_eval, json_eval};
         use kani_yaml::yaml::schema::ResponseType;
 
         let req = Self::make_request(ep, &self.config, args, endpoint_name, filters)?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
-        let mut state = self.make_host_state()?;
+        let mut state = self.make_host_state(budget)?;
 
         if ep.pagination.is_some() {
             let page = args.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
@@ -360,6 +375,7 @@ impl YamlSource {
         endpoint_name: &str,
         args: &HashMap<String, String>,
         filters: &[kani_shared::types::ActiveFilter],
+        budget: &std::sync::Arc<kani_core::budget::OperationBudget>,
     ) -> Result<serde_json::Value> {
         use kani_core::evaluator::json_eval;
 
@@ -437,7 +453,7 @@ impl YamlSource {
             }
             let page_url = append_query_params(&page_url, &params);
 
-            let mut state = self.make_host_state()?;
+            let mut state = self.make_host_state(budget)?;
             let profile_key = state.browser_profile_key.clone();
 
             // Enforce the source's AllowedHost policy on the browser target before any
@@ -452,6 +468,7 @@ impl YamlSource {
                     invalid(format!("browser_payload page_url has no host: {page_url}"))
                 })?;
             state.allowed_host.allows_host(&host).map_err(invalid)?;
+            budget.charge_request().map_err(invalid)?;
 
             let payload = kani_core::v8_process::capture_page_payload_resilient(
                 &self.v8_process,
@@ -471,6 +488,7 @@ impl YamlSource {
                 }
                 other => invalid(other.to_string()),
             })?;
+            budget.charge_bytes(payload.len()).map_err(invalid)?;
 
             let value = json_eval::extract_json_str(&mut state, &payload, &bp)
                 .await
@@ -495,9 +513,10 @@ impl YamlSource {
     ) -> Result<serde_json::Value> {
         use kani_yaml::yaml::schema::EndpointVia;
 
+        let budget = kani_core::budget::OperationBudget::new(self.operation_limits());
         if ep.via == Some(EndpointVia::BrowserPayload) {
             let mut v = self
-                .eval_browser_payload_endpoint(ep, endpoint_name, args, filters)
+                .eval_browser_payload_endpoint(ep, endpoint_name, args, filters, &budget)
                 .await?;
             inject_fn_arg_fields(&mut v, ep, args);
             deduplicate_for_each_rows(&mut v, ep).await?;
@@ -505,7 +524,7 @@ impl YamlSource {
         }
 
         let mut v = self
-            .eval_endpoint_refreshing(ep, endpoint_name, args, filters, &[])
+            .eval_endpoint_refreshing(ep, endpoint_name, args, filters, &[], &budget)
             .await?;
         inject_fn_arg_fields(&mut v, ep, args);
         deduplicate_for_each_rows(&mut v, ep).await?;
@@ -522,6 +541,7 @@ impl YamlSource {
         args: &'a HashMap<String, String>,
         filters: &'a [kani_shared::types::ActiveFilter],
         active: &'a [String],
+        budget: &'a std::sync::Arc<kani_core::budget::OperationBudget>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send + 'a>>
     {
         Box::pin(async move {
@@ -531,12 +551,15 @@ impl YamlSource {
             let mut retries_left = self.max_hook_requests;
             loop {
                 let e = match self
-                    .eval_endpoint_once(ep, endpoint_name, args, filters)
+                    .eval_endpoint_once(ep, endpoint_name, args, filters, budget)
                     .await
                 {
                     Ok(v) => return Ok(v),
                     Err(e) => e,
                 };
+                if kani_core::budget::is_budget_exceeded(&e) {
+                    return Err(Error::BudgetExceeded(e));
+                }
                 let Some(target) = e.strip_prefix("__refresh_auth__:") else {
                     return Err(Error::Extension(classify_eval_error(e)));
                 };
@@ -559,7 +582,7 @@ impl YamlSource {
                 let mut chain = active.to_vec();
                 chain.push(endpoint_name.to_string());
                 if let Err(e) = self
-                    .eval_endpoint_refreshing(auth_ep, target, &HashMap::new(), &[], &chain)
+                    .eval_endpoint_refreshing(auth_ep, target, &HashMap::new(), &[], &chain, budget)
                     .await
                 {
                     tracing::warn!("refresh_auth via {target} for {endpoint_name} failed: {e}");
@@ -576,6 +599,9 @@ impl YamlSource {
                 burst: r.burst,
                 max_concurrent: r.max_concurrent,
                 max_hook_requests: r.max_hook_requests,
+                max_requests: r.max_requests,
+                max_response_bytes: r.max_response_bytes,
+                max_operation_seconds: r.max_operation_seconds,
             }
         });
         let meta = kani_shared::extension::ExtensionMetadata {
