@@ -173,15 +173,12 @@ async fn concurrent_installs_of_the_same_extension_serialise() {
         }],
     })
     .to_string();
-    let repo_id: i64 = sqlx::query_scalar(
-        "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
-         VALUES (?, 'R', 'KEY', ?) RETURNING id",
+    let repo_id = common::seed_signed_repo(
+        &svc.db,
+        &origin.base(),
+        serde_json::from_str(&index).unwrap(),
     )
-    .bind(origin.base())
-    .bind(index)
-    .fetch_one(&svc.db)
-    .await
-    .unwrap();
+    .await;
 
     let (a, b) = {
         let s1 = svc.clone();
