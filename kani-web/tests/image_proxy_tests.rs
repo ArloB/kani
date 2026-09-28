@@ -239,6 +239,20 @@ async fn an_image_whose_transform_cannot_be_applied_is_not_proxied() {
         StatusCode::OK,
         "an image with no scramble headers is served as-is"
     );
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg")
+    );
+    let served = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        served.as_ref(),
+        kani_shared_test::origin::jpeg_page(32, 48, false, 80).as_slice(),
+        "the original bytes, untransformed"
+    );
 }
 
 #[tokio::test]
