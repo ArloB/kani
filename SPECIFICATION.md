@@ -2173,7 +2173,7 @@ The body must return a `HookAction` value:
 | `retry()` | Re-send the request immediately (counts against `max_hook_requests`). |
 | `retry_after(seconds)` | Re-send after a delay (counts against `max_hook_requests`). |
 | `fail(kind, reason)` | Abort with an `ExtensionError` of the named kind. |
-| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). |
+| `refresh_auth(endpoint_id)` | Re-run the named endpoint's auth flow, then retry (counts against `max_hook_requests`). A refresh that names the endpoint being run, or any endpoint already refreshing in the same operation (`A → B → A`), fails at once with an `Auth` error, "auth refresh cycle", instead of looping. A failed refresh is surfaced as that endpoint's error, and an unknown endpoint name is an `Auth` error. |
 
 #### Cache in hook scripts
 

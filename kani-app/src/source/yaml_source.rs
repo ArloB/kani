@@ -504,39 +504,69 @@ impl YamlSource {
             return Ok(v);
         }
 
-        let mut retries_left = self.max_hook_requests;
-        loop {
-            match self
-                .eval_endpoint_once(ep, endpoint_name, args, filters)
-                .await
-            {
-                Ok(mut v) => {
-                    inject_fn_arg_fields(&mut v, ep, args);
-                    deduplicate_for_each_rows(&mut v, ep).await?;
-                    return Ok(v);
-                }
-                Err(ref e) if e.starts_with("__refresh_auth__:") => {
-                    if retries_left == 0 {
-                        return Err(Error::Extension(
-                            kani_shared::extension::ExtensionError::parse(
-                                "RefreshAuth: max retries exceeded".to_string(),
-                            ),
-                        ));
-                    }
-                    retries_left -= 1;
-                    let auth_endpoint_name = e.strip_prefix("__refresh_auth__:").unwrap_or("login");
-                    if let Some(auth_ep) = self.config.endpoint_by_name(auth_endpoint_name) {
-                        let auth_args = HashMap::new();
-                        let _ = self
-                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args, &[])
-                            .await;
-                    }
-                }
-                Err(e) => {
+        let mut v = self
+            .eval_endpoint_refreshing(ep, endpoint_name, args, filters, &[])
+            .await?;
+        inject_fn_arg_fields(&mut v, ep, args);
+        deduplicate_for_each_rows(&mut v, ep).await?;
+        Ok(v)
+    }
+
+    /// Runs an endpoint, honouring `refresh_auth` from its hooks. `active` holds the endpoints
+    /// this operation is already evaluating, so a refresh that leads back into one of them is
+    /// reported as a cycle before any retry is spent.
+    fn eval_endpoint_refreshing<'a>(
+        &'a self,
+        ep: &'a kani_yaml::ValidatedEndpoint,
+        endpoint_name: &'a str,
+        args: &'a HashMap<String, String>,
+        filters: &'a [kani_shared::types::ActiveFilter],
+        active: &'a [String],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let auth = |message: String| {
+                Error::Extension(kani_shared::extension::ExtensionError::auth(message))
+            };
+            let mut retries_left = self.max_hook_requests;
+            loop {
+                let e = match self
+                    .eval_endpoint_once(ep, endpoint_name, args, filters)
+                    .await
+                {
+                    Ok(v) => return Ok(v),
+                    Err(e) => e,
+                };
+                let Some(target) = e.strip_prefix("__refresh_auth__:") else {
                     return Err(Error::Extension(classify_eval_error(e)));
+                };
+                if target == endpoint_name || active.iter().any(|a| a == target) {
+                    let chain: Vec<&str> = active
+                        .iter()
+                        .map(String::as_str)
+                        .chain([endpoint_name, target])
+                        .collect();
+                    return Err(auth(format!("auth refresh cycle: {}", chain.join(" -> "))));
+                }
+                if retries_left == 0 {
+                    return Err(auth("refresh_auth: max retries exceeded".to_string()));
+                }
+                retries_left -= 1;
+                let auth_ep = self
+                    .config
+                    .endpoint_by_name(target)
+                    .ok_or_else(|| auth(format!("refresh_auth: no endpoint named {target:?}")))?;
+                let mut chain = active.to_vec();
+                chain.push(endpoint_name.to_string());
+                if let Err(e) = self
+                    .eval_endpoint_refreshing(auth_ep, target, &HashMap::new(), &[], &chain)
+                    .await
+                {
+                    tracing::warn!("refresh_auth via {target} for {endpoint_name} failed: {e}");
+                    return Err(e);
                 }
             }
-        }
+        })
     }
 
     pub async fn get_metadata(&self) -> Result<String> {

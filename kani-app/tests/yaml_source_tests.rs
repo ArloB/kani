@@ -2112,3 +2112,75 @@ endpoints:
         assert!(err.contains("only http and https"), "{id}: {err}");
     }
 }
+
+fn refresh_cycle_source(origin: &kani_shared_test::origin::TestOrigin, hooks: &str) -> YamlSource {
+    let yaml = format!(
+        r#"id: refresh-cycle
+name: refresh-cycle
+version: "1.0.0"
+base_url: "{base}"
+{hooks}
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+  search:
+    route: /search
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+"#,
+        base = origin.base()
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("refresh-cycle.yaml"))
+        .expect("fixture validates");
+    yaml_source(&origin.base(), ext)
+}
+
+#[tokio::test]
+async fn a_refresh_auth_cycle_is_reported_as_a_cycle_after_bounded_requests() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let self_refresh = "on_status:\n  \"401\": |\n    refresh_auth(\"popular\")";
+    let two_endpoint = "on_status:\n  \"401\": |\n    if req.endpoint_id == \"popular\" { refresh_auth(\"search\") } else { refresh_auth(\"popular\") }";
+    for (case, hooks, max_hits) in [("self", self_refresh, 1), ("two-endpoint", two_endpoint, 2)] {
+        let origin = TestOrigin::start().await;
+        origin.set("/popular", Response::status(401));
+        origin.set("/search", Response::status(401));
+        let source = refresh_cycle_source(&origin, hooks);
+        let err = source.get_popular_manga(1, 20, &[]).await.unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("auth refresh cycle"), "{case}: {text}");
+        assert!(
+            matches!(&err, kani_core::error::Error::Extension(e) if e.kind == kani_shared::extension::ExtensionErrorKind::Auth),
+            "{case}: an auth error, got {err:?}"
+        );
+        assert!(
+            origin.total_hits() <= max_hits,
+            "{case}: {} requests",
+            origin.total_hits()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_refresh_through_another_endpoint_retries_the_original_request() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+    let origin = TestOrigin::start().await;
+    let page = r#"<div class="item" data-id="m1"><span class="t">One</span></div>"#;
+    origin.script(
+        "/popular",
+        vec![Response::status(401), Response::html(page)],
+    );
+    origin.set("/search", Response::html(page));
+    let hooks = "on_status:\n  \"401\": |\n    refresh_auth(\"search\")";
+    let list = refresh_cycle_source(&origin, hooks)
+        .get_popular_manga(1, 20, &[])
+        .await
+        .unwrap();
+    assert_eq!(list.manga.len(), 1);
+    assert_eq!((origin.hits("/popular"), origin.hits("/search")), (2, 1));
+}
