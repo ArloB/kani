@@ -228,6 +228,7 @@ impl http::Host for HostState {
                     .source_redirect_policy(self.allowed_host.clone()),
             );
         for (k, v) in req.headers {
+            kani_shared::request::check_header_value(&k, &v)?;
             builder = builder.header(k, v);
         }
         if let Some(body) = req.body {

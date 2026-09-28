@@ -1147,6 +1147,16 @@ sent as `2+1`. Compute offsets with `pagination` (§3.3) instead. A join such as
 number, parenthesis or `*`, is an ordinary template. In a route, `/` is a path separator, not an
 operator.
 
+Encoding is the same in both backends:
+
+- **Route:** each placeholder value is percent-encoded as one path segment (everything except
+  letters, digits, `-`, `_`, `.` and `~`), so an id containing `/`, `?`, `#`, `%` or a space fills
+  exactly one slot. `a b/%2F` becomes `a%20b%2F%252F`; an already-encoded value is encoded again.
+- **Queries:** the interpolated value is form-encoded once when the URL is built (`a b` becomes
+  `a+b`).
+- **Headers:** placeholders are interpolated as text, with no encoding. A resulting value containing
+  CR, LF or NUL fails the request instead of being sent.
+
 | Variable | Available In | Description |
 |----------|-------------|-------------|
 | `$query$` | search | The search query string |

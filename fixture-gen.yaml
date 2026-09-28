@@ -74,6 +74,8 @@ endpoints:
 
   pages:
     route: "/manga/$manga_id$/chapter/$chapter_id$"
+    headers:
+      X-Ref: "m-$manga_id$"
     container: ".page"
     fields:
       index: "index()"

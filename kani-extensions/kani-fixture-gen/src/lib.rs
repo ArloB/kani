@@ -129,9 +129,13 @@ impl MangaExtension for FixtureGen {
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
-        let req = HttpRequest::get(format!("{}/manga/{}", self.base_url, manga_id))
-            .endpoint_id("manga_details")
-            .query("ref", format!("id-{}", manga_id));
+        let req = HttpRequest::get(format!(
+            "{}/manga/{}",
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id)
+        ))
+        .endpoint_id("manga_details")
+        .query("ref", format!("id-{}", manga_id));
         let bp = BlueprintBuilder::new(".manga")
             .request(req)
             .field("artists", Expr::list(vec![]))
@@ -153,9 +157,13 @@ impl MangaExtension for FixtureGen {
     ) -> ExtensionResult<ChapterList> {
         let _ = (page, page_size, &sort);
         let sort = sort.unwrap_or_default();
-        let req = HttpRequest::get(format!("{}/manga/{}/chapters", self.base_url, manga_id))
-            .endpoint_id("chapter_list")
-            .query("order", sort);
+        let req = HttpRequest::get(format!(
+            "{}/manga/{}/chapters",
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id)
+        ))
+        .endpoint_id("chapter_list")
+        .query("order", sort);
         let bp = BlueprintBuilder::new(".ch")
             .request(req)
             .field("id", Expr::self_ref().attr("data-id"))
@@ -176,9 +184,12 @@ impl MangaExtension for FixtureGen {
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {
         let req = HttpRequest::get(format!(
             "{}/manga/{}/chapter/{}",
-            self.base_url, manga_id, chapter_id
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id),
+            kani_shared::request::encode_path_value(&chapter_id)
         ))
-        .endpoint_id("pages");
+        .endpoint_id("pages")
+        .header("X-Ref", format!("m-{}", manga_id));
         let bp = BlueprintBuilder::new(".page")
             .request(req)
             .field("index", Expr::index())

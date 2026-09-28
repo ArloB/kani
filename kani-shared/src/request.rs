@@ -39,6 +39,22 @@ pub fn require_http_url(url: &str) -> Result<(), String> {
     }
 }
 
+/// Percent-encodes a value for one route slot, so `/`, `?`, `#` or `%` in an id can never change
+/// the path's structure. Both backends encode route values with this.
+pub fn encode_path_value(value: impl std::fmt::Display) -> String {
+    urlencoding::encode(&value.to_string()).into_owned()
+}
+
+/// Refuses a header value that would split the header or the request: CR, LF or NUL.
+pub fn check_header_value(name: &str, value: &str) -> Result<(), String> {
+    if value.contains(['\r', '\n', '\0']) {
+        return Err(format!(
+            "header {name}: a value may not contain CR or LF or NUL"
+        ));
+    }
+    Ok(())
+}
+
 /// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
 /// names, starting and ending with text. A `$` that opens no placeholder stays literal.
 pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {
@@ -191,7 +207,7 @@ pub fn build_url(
                 let placeholder = &route[start..end];
                 let key = placeholder.replace('.', "_");
                 match args.get(&key) {
-                    Some(val) => result.push_str(&urlencoding::encode(val)),
+                    Some(val) => result.push_str(&encode_path_value(val)),
                     None => {
                         return Err(format!(
                             "unresolved route placeholder `${placeholder}$` (no argument supplied)"

@@ -304,7 +304,15 @@ impl YamlSource {
         Ok(kani_shared::ast::RequestDef {
             url,
             method: ep.method.clone(),
-            headers: ep.headers.clone(),
+            headers: ep
+                .headers
+                .iter()
+                .map(|(k, v)| {
+                    kani_shared::request::interpolate(v, &resolved)
+                        .map(|value| (k.clone(), value))
+                        .ok_or_else(|| format!("header {k}: unresolved placeholder in {v:?}"))
+                })
+                .collect::<std::result::Result<_, _>>()?,
             queries,
             endpoint_id: Some(endpoint_name.to_string()),
         })

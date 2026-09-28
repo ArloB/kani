@@ -712,6 +712,7 @@ fn validate_dollar_var(
 fn collect_composite_id_decodes(
     route: &str,
     queries: &BTreeMap<String, String>,
+    headers: &BTreeMap<String, String>,
     id_encoding: Option<&IdEncodingBlock>,
 ) -> Vec<CompositeIdDecode> {
     let Some(id_encoding) = id_encoding else {
@@ -719,7 +720,7 @@ fn collect_composite_id_decodes(
     };
 
     let mut vars = extract_dollar_vars(route);
-    for v in queries.values() {
+    for v in queries.values().chain(headers.values()) {
         vars.extend(extract_dollar_vars(v));
     }
 
@@ -946,12 +947,17 @@ fn validate_endpoint(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     for (key, value) in &headers {
-        errors.extend(arithmetic_template_error(
-            value,
-            name,
-            &format!("headers.{key}"),
-            "+-*/",
-        ));
+        let location = format!("headers.{key}");
+        errors.extend(arithmetic_template_error(value, name, &location, "+-*/"));
+        for var in kani_shared::request::template_parts(value).1 {
+            errors.extend(validate_dollar_var(
+                &var,
+                name,
+                &location,
+                fn_args,
+                id_encoding,
+            ));
+        }
     }
 
     let queries = match build_query_entries(&body.queries, name, fn_args, id_encoding) {
@@ -962,7 +968,8 @@ fn validate_endpoint(
         }
     };
 
-    let composite_id_decodes = collect_composite_id_decodes(&route, &body.queries, id_encoding);
+    let composite_id_decodes =
+        collect_composite_id_decodes(&route, &body.queries, &body.headers, id_encoding);
 
     let filter_mapping: Vec<(String, FilterMappingEntry)> = body
         .filter_mapping

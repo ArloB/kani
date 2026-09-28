@@ -119,7 +119,8 @@ impl MangaExtension for ForEachSource {
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
         let req = HttpRequest::get(format!(
             "{}https://example.com/manga/{}",
-            self.base_url, manga_id
+            self.base_url,
+            kani_shared::request::encode_path_value(&manga_id)
         ))
         .endpoint_id("manga_details");
         let bp = BlueprintBuilder::new(":root")

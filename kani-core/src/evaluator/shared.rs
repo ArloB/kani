@@ -1168,6 +1168,7 @@ pub async fn fetch_body(
                     .source_redirect_policy(state.allowed_host.clone()),
             );
         for (k, v) in &working.headers {
+            kani_shared::request::check_header_value(k, v)?;
             builder = builder.header(k, v);
         }
         let request = builder.build().map_err(|e| e.to_string())?;
@@ -1403,6 +1404,7 @@ pub(super) async fn send_prepared_request(
         .request(method, url.to_string())
         .redirect(client.source_redirect_policy(allowed_host));
     for (k, v) in &req.headers {
+        kani_shared::request::check_header_value(k, v)?;
         builder = builder.header(k, v);
     }
     let request = builder.build().map_err(|e| e.to_string())?;

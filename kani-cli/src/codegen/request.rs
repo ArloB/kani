@@ -36,7 +36,12 @@ pub(crate) fn emit_request_block(
     }
 
     for (k, v) in headers {
-        lines.push(format!("    .header(\"{}\", \"{}\")", k, v));
+        let value = if kani_shared::request::template_parts(v).1.is_empty() {
+            format!("{v:?}")
+        } else {
+            emit_text_format(v)
+        };
+        lines.push(format!("    .header({k:?}, {value})"));
     }
 
     for entry in queries {
@@ -192,6 +197,9 @@ pub(crate) fn emit_route_format(route: &str, base_url_expr: &str) -> String {
     }
 
     let mut args = vec![base_url_expr.to_string()];
-    args.extend(vars);
+    args.extend(
+        vars.into_iter()
+            .map(|v| format!("kani_shared::request::encode_path_value(&{v})")),
+    );
     format!("format!(\"{{}}{fmt}\", {})", args.join(", "))
 }

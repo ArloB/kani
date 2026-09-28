@@ -263,3 +263,55 @@ async fn details_request_path_parity() {
     assert_eq!(y_req.query_param("ref").as_deref(), Some("id-manga-1"));
     assert_eq!(w_req.query_param("ref"), y_req.query_param("ref"));
 }
+
+#[tokio::test]
+async fn awkward_ids_are_encoded_identically_on_the_wire() {
+    let origin = TestOrigin::start().await;
+    seed(&origin);
+    let w = compiled_or_skip!(origin);
+    let y = interpreted(&origin.base());
+    let id = "a b/&?#%é%2F";
+    let path = "/manga/a%20b%2F%26%3F%23%25%C3%A9%252F";
+
+    let _ = y.get_manga_details(id).await;
+    let y_req = origin
+        .last_request(path)
+        .expect("interpreted sent the encoded path");
+    let _ = w.get_manga_details(id).await;
+    assert_eq!(origin.hits(path), 2, "compiled sent the same encoded path");
+    let w_req = origin.last_request(path).unwrap();
+    assert_eq!(
+        y_req.query_param("ref").as_deref(),
+        Some("id-a+b%2F%26%3F%23%25%C3%A9%252F")
+    );
+    assert_eq!(w_req.query_param("ref"), y_req.query_param("ref"));
+
+    let header_id = "m 1/&?#%2F";
+    let pages_path = "/manga/m%201%2F%26%3F%23%252F/chapter/ch-1";
+    let _ = y.get_pages(header_id, "ch-1").await;
+    let y_req = origin
+        .last_request(pages_path)
+        .expect("interpreted pages request");
+    let _ = w.get_pages(header_id, "ch-1").await;
+    assert_eq!(
+        origin.hits(pages_path),
+        2,
+        "compiled sent the same encoded path"
+    );
+    let w_req = origin.last_request(pages_path).unwrap();
+    assert_eq!(
+        y_req.header("x-ref"),
+        Some("m-m 1/&?#%2F"),
+        "headers are interpolated as text"
+    );
+    assert_eq!(w_req.header("x-ref"), y_req.header("x-ref"));
+
+    for backend in [&y, &w] {
+        let err = backend
+            .get_pages("x\r\nX-Evil: 1", "ch-1")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("CR or LF"), "{err}");
+    }
+}
