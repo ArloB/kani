@@ -1134,6 +1134,30 @@ fn validate_endpoint(
         }
     }
 
+    if let Some(pag) = &body.pagination {
+        let cursor = matches!(pag.offset_type, super::schema::YamlOffsetType::Cursor);
+        let path = format!("endpoints.{name}.pagination");
+        match (&pag.cursor_field, cursor) {
+            (None, true) => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: required for offset_type: cursor"
+            ))),
+            (Some(f), true) if !f.starts_with('/') => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: {f:?} must be a JSON pointer, such as /next"
+            ))),
+            (Some(_), false) => errors.push(YamlError::Validation(format!(
+                "{path}.cursor_field: cursor_field only applies to offset_type: cursor"
+            ))),
+            _ => {}
+        }
+        if cursor && (body.response_type != super::schema::ResponseType::Json || body.via.is_some())
+        {
+            errors.push(YamlError::Validation(format!(
+                "{path}: cursor pagination reads a JSON response, so it needs type: json and \
+                 a direct (not browser) endpoint"
+            )));
+        }
+    }
+
     let has_next_page = match &body.has_next_page {
         None => ValidatedHnp::Default,
         Some(HasNextPage::Static(b)) => ValidatedHnp::Static(*b),

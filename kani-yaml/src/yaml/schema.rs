@@ -442,6 +442,9 @@ pub struct PaginationCfg {
     pub offset_type: YamlOffsetType,
     #[serde(default = "default_page_start")]
     pub page_start: u32,
+    /// JSON pointer to the next-page cursor in each response, for `offset_type: cursor`.
+    #[serde(default)]
+    pub cursor_field: Option<String>,
 }
 
 fn default_page_start() -> u32 {
@@ -453,6 +456,7 @@ fn default_page_start() -> u32 {
 pub enum YamlOffsetType {
     Item,
     Page,
+    Cursor,
 }
 
 #[derive(Debug, Deserialize, Clone)]

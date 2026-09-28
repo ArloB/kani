@@ -992,11 +992,11 @@ A complete blueprint is a JSON object with the following fields:
 |-------|------|-------------|
 | `native_page_size` | integer | How many items the source returns per chunk (its real page size). |
 | `offset_param` | string | Query parameter name the source uses for the offset/page (e.g. `"offset"`, `"page"`). |
-| `offset_type` | string/object | `"ItemOffset"` (param = absolute item count: 0, 32, 64, …), `{"PageNumber": {"start": 1}}` (param = page number starting at `start`), or `{"CursorToken": {"next_cursor_field": "/next"}}` (JSON Pointer to the cursor field in each chunk's response). |
+| `offset_type` | string/object | `"ItemOffset"` (param = absolute item count: 0, 32, 64, …), `{"PageNumber": {"start": 1}}` (param = page number starting at `start`), or `{"CursorToken": {"next_cursor_field": "__next_cursor"}}` (the name of a blueprint scalar that yields each chunk's next cursor). |
 
 When `pagination` is set, the blueprint must be submitted via `paginated-extract-html` / `paginated-extract-json` rather than `extract-html` / `extract-json`. The host handles chunk-fetching, stitching, and `has_next_page` detection automatically.
 
-**`CursorToken` mode:** The host reads the cursor value from `next_cursor_field` (a JSON Pointer into the chunk response) after each fetch, injects it as the `offset_param` query value on the next request, and stops when the field is absent or `null`. Use this for APIs that return a next-page token rather than a numeric offset (an API exposing `offset`+`total` can also be expressed this way, but opaque-token APIs require it).
+**`CursorToken` mode:** After each fetch the host reads the next cursor from the scalar named `next_cursor_field` (a string, or a number used as its decimal text), injects it as the `offset_param` query value on the next request, and walks from the first chunk to the requested slice as described in §3.3. YAML's `cursor_field: /next` lowers to a scalar `__next_cursor` evaluating `json("/next")`. Use this for APIs that return a next-page token rather than a numeric offset (an API exposing `offset`+`total` can also be expressed this way, but opaque-token APIs require it).
 
 ### 2.4 Binary Encoding
 
@@ -1576,7 +1576,24 @@ When `pagination` is set on an endpoint, the framework calls `paginated-extract-
 |-------|-------------|
 | `item` | Offset param = absolute item count: 0, 32, 64, … |
 | `page` | Offset param = page number. Defaults to 1-based. Use `page_start: 0` for 0-based. |
-| `cursor` | Cursor-token pagination. Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request and stops when the field is absent or null. |
+| `cursor` | Cursor-token pagination, JSON endpoints only (not browser endpoints). Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request. See below. |
+
+**Cursor pagination walks from the start.** A cursor can only be obtained from the response
+before it, so a request for page `p` of size `n` fetches from the first chunk (no cursor) onwards,
+tracking each chunk's absolute position, and returns exactly items `[(p-1)·n, p·n)`. A client page
+may straddle chunks: with `native_page_size: 32` and size 20, page 2 is items 21–40, taken from the
+first and second chunks. The walk stops at the first of these:
+
+- the requested slice is complete;
+- the cursor is null, missing or empty;
+- a chunk has no rows;
+- the response's `has_next_page` is false;
+- the next cursor is one already followed in this walk.
+
+Rows beyond the stop are unreachable, so a page past it is empty. `has_next_page` is true when the
+last chunk held rows past the slice, or when the walk could have continued. No cursor is cached
+between requests, so an earlier page changing upstream cannot make a stored token return a
+different slice. Every chunk counts against the operation budget (§5.2), which bounds a deep page.
 
 **`has_next_page` detection:** If the blueprint includes a `scalars` entry named `has_next_page`, its value from the last fetched chunk is used. Otherwise the framework falls back to: last chunk was full (≥ `native_page_size` items) → more pages available.
 
@@ -1942,7 +1959,7 @@ pagination:
   offset_param: string               # Query param name for offset/page/cursor
   offset_type: "item" | "page" | "cursor"
   page_start: integer                # For "page" type: starting page number (default: 1)
-  cursor_field: string               # For "cursor" type: JSON Pointer to next-page token in response
+  cursor_field: string               # Required for "cursor" type (and only allowed there): JSON Pointer to the next-page token
 
 # Scripting (top-level, optional; see §3.10)
 scripts:

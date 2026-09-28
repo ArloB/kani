@@ -618,6 +618,68 @@ fn eval_json_expr<'a>(
     })
 }
 
+async fn extract_json_cursor_paginated(
+    state: &mut crate::wasm::HostState,
+    page: i32,
+    page_size: i32,
+    blueprint: &Blueprint,
+    offset_param: &str,
+    next_cursor_field: &str,
+) -> Result<serde_json::Value, String> {
+    let slice_start = ((page - 1).max(0) as usize) * (page_size.max(0) as usize);
+    let slice_end = slice_start + page_size.max(0) as usize;
+    let mut chunk_start = 0usize;
+    let mut cursor: Option<String> = None;
+    let mut followed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut rows_out: Vec<serde_json::Value> = Vec::new();
+    let mut last_scalars = serde_json::Map::new();
+
+    let has_next_page = loop {
+        let mut chunk_bp = blueprint.clone();
+        if let (Some(req), Some(c)) = (&mut chunk_bp.request, &cursor) {
+            req.queries.retain(|(k, _)| k != offset_param);
+            req.queries.push((offset_param.to_string(), c.clone()));
+        }
+        let chunk = extract_json(state, None, &chunk_bp).await?;
+        if let Some(map) = chunk["scalars"].as_object() {
+            last_scalars = map.clone();
+        }
+        let empty = Vec::new();
+        let rows = chunk["rows"].as_array().unwrap_or(&empty);
+        let chunk_end = chunk_start + rows.len();
+        let (from, to) = (slice_start.max(chunk_start), slice_end.min(chunk_end));
+        if from < to {
+            rows_out.extend_from_slice(&rows[from - chunk_start..to - chunk_start]);
+        }
+
+        let next = match &chunk["scalars"][next_cursor_field] {
+            serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        };
+        if let Some(c) = &cursor {
+            followed.insert(c.clone());
+        }
+        let upstream_has_more = !rows.is_empty()
+            && chunk["scalars"]["has_next_page"].as_bool() != Some(false)
+            && next.as_ref().is_some_and(|n| !followed.contains(n));
+
+        if chunk_end >= slice_end {
+            break chunk_end > slice_end || upstream_has_more;
+        }
+        if !upstream_has_more {
+            break false;
+        }
+        chunk_start = chunk_end;
+        cursor = next;
+    };
+
+    let mut scalars = last_scalars;
+    scalars.remove(next_cursor_field);
+    scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
+    Ok(serde_json::json!({ "rows": rows_out, "scalars": scalars }))
+}
+
 pub async fn extract_json_paginated(
     state: &mut crate::wasm::HostState,
     page: i32,
@@ -629,6 +691,18 @@ pub async fn extract_json_paginated(
         .as_ref()
         .ok_or("paginated_extract_json called on blueprint without PaginationConfig")?;
 
+    if let OffsetType::CursorToken { next_cursor_field } = &pagination.offset_type {
+        return extract_json_cursor_paginated(
+            state,
+            page,
+            page_size,
+            blueprint,
+            &pagination.offset_param,
+            next_cursor_field,
+        )
+        .await;
+    }
+
     let native_size = pagination.native_page_size;
     let global_start = ((page - 1).max(0) as usize) * (page_size as usize);
     let first_chunk_offset = (global_start / native_size) * native_size;
@@ -638,7 +712,6 @@ pub async fn extract_json_paginated(
     let mut all_rows: Vec<serde_json::Value> = Vec::new();
     let has_next_page;
 
-    let mut cursor: Option<String> = None;
     let mut last_scalars = serde_json::Map::new();
 
     loop {
@@ -658,13 +731,7 @@ pub async fn extract_json_paginated(
                     req.queries
                         .push((pagination.offset_param.clone(), offset_value));
                 }
-                OffsetType::CursorToken { .. } => {
-                    if let Some(ref c) = cursor {
-                        req.queries.retain(|(k, _)| k != &pagination.offset_param);
-                        req.queries
-                            .push((pagination.offset_param.clone(), c.clone()));
-                    }
-                }
+                OffsetType::CursorToken { .. } => {}
             }
         }
 
@@ -677,9 +744,7 @@ pub async fn extract_json_paginated(
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
         let chunk_len = rows.len();
 
-        let skip = if matches!(pagination.offset_type, OffsetType::CursorToken { .. }) {
-            0
-        } else if current_chunk_offset == first_chunk_offset {
+        let skip = if current_chunk_offset == first_chunk_offset {
             offset_in_first_chunk
         } else {
             0
@@ -689,23 +754,6 @@ pub async fn extract_json_paginated(
 
         all_rows.extend_from_slice(&rows[skip..skip + to_take]);
         remaining -= to_take;
-
-        if let OffsetType::CursorToken { next_cursor_field } = &pagination.offset_type {
-            let next = chunk_result["scalars"][next_cursor_field.as_str()]
-                .as_str()
-                .map(str::to_owned);
-            let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
-            if remaining == 0 {
-                has_next_page = scalar_hnp.unwrap_or_else(|| next.is_some());
-                break;
-            }
-            if chunk_len == 0 || next.is_none() || scalar_hnp == Some(false) {
-                has_next_page = false;
-                break;
-            }
-            cursor = next;
-            continue;
-        }
 
         let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
         let chunk_full = chunk_len >= native_size;

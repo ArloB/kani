@@ -141,13 +141,18 @@ pub fn resolve(
     if let Some(p) = &ep.pagination {
         let page: usize = arg_value(args, "page").parse().unwrap_or(1);
         let offset = match p.offset_type {
-            crate::yaml::schema::YamlOffsetType::Page => page.max(1) + p.page_start as usize - 1,
-            crate::yaml::schema::YamlOffsetType::Item => {
-                page.saturating_sub(1) * p.native_page_size.max(1)
+            crate::yaml::schema::YamlOffsetType::Page => {
+                Some(page.max(1) + p.page_start as usize - 1)
             }
+            crate::yaml::schema::YamlOffsetType::Item => {
+                Some(page.saturating_sub(1) * p.native_page_size.max(1))
+            }
+            crate::yaml::schema::YamlOffsetType::Cursor => None,
         };
-        queries.retain(|(k, _)| k != &p.offset_param);
-        queries.push((p.offset_param.clone(), offset.to_string()));
+        if let Some(offset) = offset {
+            queries.retain(|(k, _)| k != &p.offset_param);
+            queries.push((p.offset_param.clone(), offset.to_string()));
+        }
     }
 
     Ok(ResolvedRequest {

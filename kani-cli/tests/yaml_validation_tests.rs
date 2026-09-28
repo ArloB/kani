@@ -1962,3 +1962,39 @@ fn declared_operation_limits_must_stay_within_the_hard_caps() {
         assert_valid(&yaml(key, 60));
     }
 }
+
+#[test]
+fn cursor_pagination_needs_a_cursor_field_on_a_json_endpoint() {
+    let yaml = |kind: &str, pagination: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    type: {kind}\n    \
+             container: \"{c}\"\n    pagination:\n      native_page_size: 32\n      \
+             offset_param: after\n{pagination}    fields:\n      id: 'self.attr(\"i\")'\n      \
+             title: 'self.attr(\"t\")'\n",
+            c = if kind == "json" { "/items" } else { ".item" }
+        )
+    };
+    let cursor = "      offset_type: cursor\n      cursor_field: /next\n";
+    assert_invalid_containing(
+        &yaml("json", "      offset_type: cursor\n"),
+        "pagination.cursor_field: required for offset_type: cursor",
+    );
+    assert_invalid_containing(
+        &yaml(
+            "json",
+            "      offset_type: cursor\n      cursor_field: next\n",
+        ),
+        "must be a JSON pointer",
+    );
+    assert_invalid_containing(
+        &yaml("html", cursor),
+        "cursor pagination reads a JSON response",
+    );
+    assert_invalid_containing(
+        &yaml(
+            "json",
+            "      offset_type: item\n      cursor_field: /next\n",
+        ),
+        "cursor_field only applies to offset_type: cursor",
+    );
+}

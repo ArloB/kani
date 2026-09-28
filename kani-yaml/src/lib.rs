@@ -51,9 +51,8 @@ pub fn build_blueprint_core(
     ext: &yaml::model::ValidatedExtension,
     endpoint_name: &str,
 ) -> kani_shared::ast::BlueprintBuilder {
-    use kani_shared::ast::{BlueprintBuilder, OffsetType};
+    use kani_shared::ast::BlueprintBuilder;
     use yaml::model::{FieldSource, ValidatedHnp};
-    use yaml::schema::YamlOffsetType;
 
     let mut builder = BlueprintBuilder::new(&ep.container);
 
@@ -102,12 +101,10 @@ pub fn build_blueprint_core(
     }
 
     if let Some(pag) = &ep.pagination {
-        let offset_type = match pag.offset_type {
-            YamlOffsetType::Item => OffsetType::ItemOffset,
-            YamlOffsetType::Page => OffsetType::PageNumber {
-                start: pag.page_start,
-            },
-        };
+        let (offset_type, cursor_scalar) = pagination_lowering(pag);
+        if let Some(expr) = cursor_scalar {
+            builder = builder.scalar_opt(CURSOR_SCALAR, expr);
+        }
         builder = builder.paginated(pag.native_page_size, &pag.offset_param, offset_type);
     }
 
@@ -121,6 +118,34 @@ pub fn then_binding_name(merge_as: &str) -> String {
         merge_as.to_string()
     } else {
         format!("${merge_as}")
+    }
+}
+
+/// The scalar a cursor-paginated blueprint reads the next cursor from.
+pub const CURSOR_SCALAR: &str = "__next_cursor";
+
+/// Lowers an endpoint's `pagination` block to the blueprint's offset type, plus, for cursor
+/// pagination, the scalar expression that reads the next cursor from each response. Shared by
+/// the interpreted tier and codegen.
+pub fn pagination_lowering(
+    pag: &yaml::schema::PaginationCfg,
+) -> (kani_shared::ast::OffsetType, Option<kani_shared::ast::Expr>) {
+    use kani_shared::ast::{Expr, OffsetType};
+    use yaml::schema::YamlOffsetType;
+    match pag.offset_type {
+        YamlOffsetType::Item => (OffsetType::ItemOffset, None),
+        YamlOffsetType::Page => (
+            OffsetType::PageNumber {
+                start: pag.page_start,
+            },
+            None,
+        ),
+        YamlOffsetType::Cursor => (
+            OffsetType::CursorToken {
+                next_cursor_field: CURSOR_SCALAR.to_string(),
+            },
+            Some(Expr::Json(pag.cursor_field.clone().unwrap_or_default())),
+        ),
     }
 }
 

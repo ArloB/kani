@@ -891,3 +891,138 @@ async fn an_exhausted_budget_is_an_error_even_under_on_failure_skip() {
         );
     }
 }
+
+/// A cursor source serving `total` items in native chunks of 32: the cursor is the index of
+/// the chunk's first item, and the last chunk has no cursor.
+async fn cursor_source(total: usize, repeat_at: Option<usize>) -> MockServer {
+    let server = MockServer::start().await;
+    for start in (0..total).step_by(32) {
+        let end = (start + 32).min(total);
+        let items: Vec<serde_json::Value> = (start..end)
+            .map(|i| serde_json::json!({ "id": i + 1 }))
+            .collect();
+        let next = match repeat_at {
+            Some(r) if start >= r => serde_json::json!(r.to_string()),
+            _ if end < total => serde_json::json!(end.to_string()),
+            _ => serde_json::Value::Null,
+        };
+        let body = serde_json::json!({ "items": items, "next": next }).to_string();
+        let matcher = wiremock::matchers::path("/list");
+        let mock = if start == 0 {
+            Mock::given(method("GET"))
+                .and(matcher)
+                .and(wiremock::matchers::query_param_is_missing("after"))
+        } else {
+            Mock::given(method("GET"))
+                .and(matcher)
+                .and(wiremock::matchers::query_param("after", start.to_string()))
+        };
+        mock.respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
+fn cursor_blueprint(base: &str) -> kani_shared::ast::Blueprint {
+    let yaml = format!(
+        r#"id: cursors
+name: cursors
+version: "1.0.0"
+base_url: "{base}"
+endpoints:
+  search:
+    route: /list
+    type: json
+    container: /items
+    pagination:
+      native_page_size: 32
+      offset_param: after
+      offset_type: cursor
+      cursor_field: /next
+    fields:
+      id: 'self.ptr("/id").int().to_string()'
+      title: 'self.ptr("/id").int().to_string()'
+"#
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("c.yaml")).unwrap();
+    let ep = ext.endpoint_by_name("search").unwrap();
+    kani_yaml::build_blueprint(
+        ep,
+        &ext,
+        "search",
+        RequestDef {
+            url: format!("{base}/list"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        },
+    )
+}
+
+fn ids(result: &serde_json::Value) -> Vec<u64> {
+    result["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().parse().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn cursor_pagination_walks_from_the_start_to_the_requested_slice() {
+    let server = cursor_source(150, None).await;
+    let bp = cursor_blueprint(&server.uri());
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page5 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 5, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(ids(&page5), (81..=100).collect::<Vec<_>>(), "a cold page 5");
+    assert_eq!(page5["scalars"]["has_next_page"], true);
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page2 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 2, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(&page2),
+        (21..=40).collect::<Vec<_>>(),
+        "straddles chunks 1 and 2"
+    );
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let last = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 8, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(ids(&last), (141..=150).collect::<Vec<_>>());
+    assert_eq!(
+        last["scalars"]["has_next_page"], false,
+        "the null cursor ends paging"
+    );
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let beyond = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 9, 20, &bp)
+        .await
+        .unwrap();
+    assert!(ids(&beyond).is_empty());
+    assert_eq!(beyond["scalars"]["has_next_page"], false);
+}
+
+#[tokio::test]
+async fn a_repeated_cursor_ends_the_walk() {
+    let server = cursor_source(150, Some(64)).await;
+    let bp = cursor_blueprint(&server.uri());
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let page5 = kani_core::evaluator::json_eval::extract_json_paginated(&mut state, 5, 20, &bp)
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(&page5),
+        (81..=96).collect::<Vec<_>>(),
+        "the chunk the repeated cursor points back to is read once; nothing past it"
+    );
+    assert_eq!(page5["scalars"]["has_next_page"], false);
+    assert_eq!(state.io_count, 3, "the walk stopped at the repeat");
+}

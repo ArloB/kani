@@ -303,3 +303,21 @@ fn a_then_result_is_bound_under_the_name_expressions_use() {
         );
     }
 }
+
+#[test]
+fn cursor_pagination_generates_the_same_blueprint_the_interpreter_builds() {
+    let validated = load_and_validate("cursor.yaml");
+    let lib = codegen::generate(&validated, false).lib_rs;
+    assert!(
+        lib.contains("\"__next_cursor\""),
+        "the cursor scalar is emitted:\n{lib}"
+    );
+    assert!(
+        lib.contains("Expr::json_root(\"/next\")"),
+        "read from cursor_field:\n{lib}"
+    );
+    assert!(
+        lib.contains("OffsetType::CursorToken"),
+        "paginated with a cursor:\n{lib}"
+    );
+}

@@ -448,6 +448,11 @@ impl YamlSource {
                     kani_yaml::yaml::schema::YamlOffsetType::Item => {
                         (native_index * p.native_page_size.max(1)).to_string()
                     }
+                    kani_yaml::yaml::schema::YamlOffsetType::Cursor => {
+                        return Err(invalid(
+                            "cursor pagination is not supported on browser endpoints".to_string(),
+                        ));
+                    }
                 };
                 params.push((p.offset_param.clone(), offset));
             }
