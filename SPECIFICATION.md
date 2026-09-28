@@ -2499,6 +2499,22 @@ updating a source in one format deletes its artifact in the other, and overwrite
 version in place: **no earlier version is kept**, so there is no automatic rollback. To go back,
 reinstall the older version from its repository.
 
+**Installs are journaled, so a crash never leaves two artifacts.** An install or update writes
+the new artifact as `<name>.<fmt>.staged` and flushes it to disk. It then writes the journal
+`<name>.install`, recording the target format, version and SHA-256, and flushes that. Only then
+does it rename the staged file into place, delete the other format's artifact, update the
+`sources` row, and delete the journal. At startup, before sources are scanned, each journal is
+resolved:
+
+- **Finish:** a staged file matching the journal's digest is moved into place and the other format
+  is deleted. An artifact already in place with that digest means only cleanup was left. The scan
+  then updates the row from the artifact on disk.
+- **Roll back:** a staged file that is missing or does not match, before the rename, is discarded
+  along with the journal, and the previous artifact stays. So does a staged file with no journal.
+
+Updating `x.yaml` v1 to `x.wasm` v2 therefore resolves to v2 whenever the journal and a matching
+artifact were written, and to v1 otherwise, in either direction.
+
 Both `<name>.yaml` and `<name>.wasm` exist only when an operator has placed them by hand. Then
 **YAML wins**, the choice is logged, and the WASM file is left unused; deleting the YAML file and
 restarting switches the source back to it.
@@ -2568,7 +2584,7 @@ index the same way:
 
 ### 6.3 Install pipeline
 
-`install_or_update_from_repo` (serialized per extension id by an install lock): re-verify the cached signed index against the pinned key (§6.2) → locate the manifest entry → check `min_kani_version` → download the artifact through the SSRF-protected client with size caps (`MAX_INDEX_BYTES` 1 MiB, `MAX_ARTIFACT_BYTES` 10 MiB) → verify `sha256` → verify the author Ed25519 signature → check that the artifact's own `id` equals the index entry's `id` (and, on update, the updated source's name) → **only then** write the file (`save_yaml`/`save_wasm`, both path-traversal guarded) → upsert the `sources` row (`name` is UNIQUE) → `registry.insert` (new) or `registry.hot_swap` (update). A verification failure writes no file and makes no DB change.
+`install_or_update_from_repo` (serialized per extension id by an install lock): re-verify the cached signed index against the pinned key (§6.2) → locate the manifest entry → check `min_kani_version` → download the artifact through the SSRF-protected client with size caps (`MAX_INDEX_BYTES` 1 MiB, `MAX_ARTIFACT_BYTES` 10 MiB) → verify `sha256` → verify the author Ed25519 signature → check that the artifact's own `id` equals the index entry's `id` (and, on update, the updated source's name) → **only then** stage the file and its journal, move it into place and delete the other format (§5.3; path-traversal guarded) → upsert the `sources` row (`name` is UNIQUE) → delete the journal → `registry.insert` (new) or `registry.hot_swap` (update). A verification failure writes no file and makes no DB change.
 
 Every fallible step that has no side effects (verification, YAML validation, WASM compilation and
 instantiation, capability checks) runs before anything is written. Artifacts are written to a

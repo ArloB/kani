@@ -654,13 +654,17 @@ impl AppService {
         let previous = kani_core::file_storage::snapshot_artifacts(storage_path, &validated.id)
             .await
             .map_err(ServiceError::Core)?;
+        let staged = kani_core::file_storage::stage_install(
+            storage_path,
+            &validated.id,
+            kani_core::file_storage::ArtifactFormat::Yaml,
+            &validated.version,
+            text.as_bytes(),
+        )
+        .await
+        .map_err(ServiceError::Core)?;
         let written = async {
-            kani_core::file_storage::save_yaml(storage_path, &validated.id, text)
-                .await
-                .map_err(ServiceError::Core)?;
-            kani_core::file_storage::delete_wasm_file(storage_path, &validated.id)
-                .await
-                .map_err(ServiceError::Core)?;
+            staged.commit_files().await.map_err(ServiceError::Core)?;
             self.upsert_yaml_source_row(&validated, existing_id).await
         }
         .await;
@@ -668,9 +672,13 @@ impl AppService {
             Ok(sid) => sid,
             Err(e) => {
                 restore_after_failed_install(storage_path, &validated.id, previous).await;
+                if let Err(cleanup) = staged.abandon().await {
+                    tracing::warn!("{}: staged install cleanup failed: {cleanup}", validated.id);
+                }
                 return Err(e);
             }
         };
+        staged.finish().await.map_err(ServiceError::Core)?;
         if previous_version.is_some_and(|v| v != validated.version) {
             crate::cache::invalidate_extension_cache(self.ext_cache.as_ref(), &validated.id, sid)
                 .await;
@@ -754,13 +762,17 @@ impl AppService {
         let previous = kani_core::file_storage::snapshot_artifacts(storage_path, &metadata.id)
             .await
             .map_err(ServiceError::Core)?;
+        let staged = kani_core::file_storage::stage_install(
+            storage_path,
+            &metadata.id,
+            kani_core::file_storage::ArtifactFormat::Wasm,
+            &metadata.version,
+            bytes,
+        )
+        .await
+        .map_err(ServiceError::Core)?;
         let written = async {
-            kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
-                .await
-                .map_err(ServiceError::Core)?;
-            kani_core::file_storage::delete_yaml_file(storage_path, &metadata.id)
-                .await
-                .map_err(ServiceError::Core)?;
+            staged.commit_files().await.map_err(ServiceError::Core)?;
             self.upsert_wasm_source_row(&metadata, existing_id).await
         }
         .await;
@@ -768,9 +780,13 @@ impl AppService {
             Ok(sid) => sid,
             Err(e) => {
                 restore_after_failed_install(storage_path, &metadata.id, previous).await;
+                if let Err(cleanup) = staged.abandon().await {
+                    tracing::warn!("{}: staged install cleanup failed: {cleanup}", metadata.id);
+                }
                 return Err(e);
             }
         };
+        staged.finish().await.map_err(ServiceError::Core)?;
         if previous_version.is_some_and(|v| v != metadata.version) {
             crate::cache::invalidate_extension_cache(self.ext_cache.as_ref(), &metadata.id, sid)
                 .await;

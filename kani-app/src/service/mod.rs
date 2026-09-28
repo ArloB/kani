@@ -584,6 +584,19 @@ impl AppService {
         let ext_cache: std::sync::Arc<dyn kani_core::cache::CacheBackend> =
             std::sync::Arc::new(crate::cache::SqliteCache::new(pool.clone()));
 
+        match kani_core::file_storage::recover_interrupted_installs(
+            &settings.wasm_storage_path.to_string_lossy(),
+        )
+        .await
+        {
+            Ok(actions) => {
+                for action in actions {
+                    tracing::warn!("Install recovery: {action}");
+                }
+            }
+            Err(e) => tracing::error!("Install recovery failed: {e}"),
+        }
+
         if let Err(e) = Self::scan_and_register_sources(
             &pool,
             &settings.wasm_storage_path,

@@ -189,3 +189,177 @@ async fn a_file_declaring_another_sources_id_is_not_loaded_under_its_row() {
         "the source it claims to be still loads"
     );
 }
+
+#[derive(Clone, Copy, Debug)]
+enum Crash {
+    BeforeJournal,
+    AfterJournal,
+    AfterRename,
+    AfterOtherDeleted,
+    AfterRowUpdated,
+    CorruptStaged,
+}
+
+fn fixture_yaml(version: &str) -> String {
+    format!(
+        "id: fixture\nname: Fixture\nversion: \"{version}\"\nbase_url: \"https://fixture.example\"\n"
+    )
+}
+
+async fn crash_during_install(
+    svc: &AppService,
+    storage: &Path,
+    crash: Crash,
+    new: (kani_core::file_storage::ArtifactFormat, &str, &[u8]),
+) {
+    use kani_core::file_storage::{ArtifactFormat, stage_install};
+    let (format, version, bytes) = new;
+    let ext = if format == ArtifactFormat::Yaml {
+        "yaml"
+    } else {
+        "wasm"
+    };
+    let dir = storage.to_string_lossy().to_string();
+    if matches!(crash, Crash::BeforeJournal) {
+        std::fs::write(storage.join(format!("fixture.{ext}.staged")), bytes).unwrap();
+        return;
+    }
+    let staged = stage_install(&dir, "fixture", format, version, bytes)
+        .await
+        .unwrap();
+    match crash {
+        Crash::AfterJournal => {}
+        Crash::CorruptStaged => {
+            std::fs::write(storage.join(format!("fixture.{ext}.staged")), b"torn write").unwrap();
+        }
+        Crash::AfterRename => std::fs::rename(
+            storage.join(format!("fixture.{ext}.staged")),
+            storage.join(format!("fixture.{ext}")),
+        )
+        .unwrap(),
+        Crash::AfterOtherDeleted => staged.commit_files().await.unwrap(),
+        Crash::AfterRowUpdated => {
+            staged.commit_files().await.unwrap();
+            sqlx::query("UPDATE sources SET version = ? WHERE name = 'fixture'")
+                .bind(version)
+                .execute(&svc.db)
+                .await
+                .unwrap();
+        }
+        Crash::BeforeJournal => unreachable!(),
+    }
+}
+
+async fn interrupted_install(yaml_to_wasm: bool, crash: Crash) {
+    use kani_core::file_storage::ArtifactFormat;
+    let wasm = fixture_wasm();
+    let yaml_v1 = fixture_yaml("0.0.1");
+    let yaml_v2 = fixture_yaml("0.2.0");
+    let (new, old_version): ((ArtifactFormat, &str, &[u8]), &str) = if yaml_to_wasm {
+        ((ArtifactFormat::Wasm, "0.1.0", &wasm), "0.0.1")
+    } else {
+        ((ArtifactFormat::Yaml, "0.2.0", yaml_v2.as_bytes()), "0.1.0")
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let svc = start(dir.path()).await;
+    if yaml_to_wasm {
+        svc.install_yaml_source(yaml_v1.as_bytes()).await.unwrap();
+    } else {
+        svc.install_wasm_source(&wasm).await.unwrap();
+    }
+    let storage = dir.path().join("wasm");
+    crash_during_install(&svc, &storage, crash, new).await;
+    drop(svc);
+
+    let svc = start(dir.path()).await;
+    let (version,): (String,) =
+        sqlx::query_as("SELECT version FROM sources WHERE name = 'fixture'")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    let rolled_back = matches!(crash, Crash::BeforeJournal | Crash::CorruptStaged);
+    let (expected_version, expected_yaml) = if rolled_back {
+        (old_version, yaml_to_wasm)
+    } else {
+        (new.1, !yaml_to_wasm)
+    };
+    let case = format!("yaml_to_wasm={yaml_to_wasm}, crash {crash:?}");
+    assert_eq!(version, expected_version, "{case}");
+    assert_eq!(
+        storage.join("fixture.yaml").exists(),
+        expected_yaml,
+        "{case}"
+    );
+    assert_eq!(
+        storage.join("fixture.wasm").exists(),
+        !expected_yaml,
+        "{case}"
+    );
+    let leftovers: Vec<String> = std::fs::read_dir(&storage)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".staged") || n.contains(".install"))
+        .collect();
+    assert!(leftovers.is_empty(), "{case}: {leftovers:?}");
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_before_the_journal() {
+    interrupted_install(true, Crash::BeforeJournal).await;
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_after_the_journal() {
+    interrupted_install(true, Crash::AfterJournal).await;
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_after_the_rename() {
+    interrupted_install(true, Crash::AfterRename).await;
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_after_the_other_format_is_deleted() {
+    interrupted_install(true, Crash::AfterOtherDeleted).await;
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_after_the_row_is_updated() {
+    interrupted_install(true, Crash::AfterRowUpdated).await;
+}
+
+#[tokio::test]
+async fn yaml_to_wasm_interrupted_with_a_torn_staged_file() {
+    interrupted_install(true, Crash::CorruptStaged).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_before_the_journal() {
+    interrupted_install(false, Crash::BeforeJournal).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_after_the_journal() {
+    interrupted_install(false, Crash::AfterJournal).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_after_the_rename() {
+    interrupted_install(false, Crash::AfterRename).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_after_the_other_format_is_deleted() {
+    interrupted_install(false, Crash::AfterOtherDeleted).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_after_the_row_is_updated() {
+    interrupted_install(false, Crash::AfterRowUpdated).await;
+}
+
+#[tokio::test]
+async fn wasm_to_yaml_interrupted_with_a_torn_staged_file() {
+    interrupted_install(false, Crash::CorruptStaged).await;
+}
