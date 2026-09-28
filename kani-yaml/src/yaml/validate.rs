@@ -1208,6 +1208,11 @@ fn validate_endpoint(
 
     let total_pages = match &body.total_pages {
         None => ValidatedTotalPages::None,
+        Some(TotalPages::Static(n)) if body.pagination.is_some() => {
+            ValidatedTotalPages::Scalar(Expr::ParseInt {
+                target: Box::new(Expr::lit(n.to_string())),
+            })
+        }
         Some(TotalPages::Static(n)) => ValidatedTotalPages::Static(*n),
         Some(TotalPages::Expr(dsl)) => {
             let field_path = format!("{filename}:endpoints.{name}.total_pages");
@@ -1518,12 +1523,16 @@ fn arithmetic_template_error(
     let reads_as_arithmetic = rest
         .chars()
         .any(|c| c.is_ascii_digit() || "()*".contains(c));
-    (!vars.is_empty() && only_arithmetic && has_operator && reads_as_arithmetic).then(|| {
-        YamlError::Validation(format!(
-            "endpoints.{endpoint}.{location}: {value:?} is arithmetic, which request templates \
+    let all_numeric = vars
+        .iter()
+        .all(|v| kani_shared::request::NUMERIC_ARGS.contains(&v.as_str()));
+    (!vars.is_empty() && all_numeric && only_arithmetic && has_operator && reads_as_arithmetic)
+        .then(|| {
+            YamlError::Validation(format!(
+                "endpoints.{endpoint}.{location}: {value:?} is arithmetic, which request templates \
              do not evaluate; use `pagination` for offsets"
-        ))
-    })
+            ))
+        })
 }
 
 fn validate_body(

@@ -938,7 +938,7 @@ A complete blueprint is a JSON object with the following fields:
 | `fields` | array | Field definitions extracted per container element. Each has `name`, `expr`, `optional`. |
 | `bindings` | array | Document-level variable bindings evaluated once before iteration. Each has `name` and `expr`. |
 | `scalars` | array | Document-level output values evaluated once (not per-element). Same shape as `fields` — each entry has `name`, `expr`, and `optional`. When `optional: true`, a `Null` result is included in the output as JSON `null` rather than causing an error. Returned in the `scalars` map of the output alongside `rows`. |
-| `pagination` | object/null | When set, enables `paginated-extract-html` mode. See Pagination Config below. |
+| `pagination` | object/null | When set, the blueprint is submitted through `paginated-extract-html` or `paginated-extract-json`. See Pagination Config below. |
 
 **Output format**: `{ "rows": [{...}, ...], "scalars": {"key": value, ...} }`
 
@@ -1064,7 +1064,7 @@ nsfw: bool              # Whether the source contains NSFW content (default: fal
 unrestricted_http: bool # Whether the extension needs to contact external hosts (default: false)
 
 # === Schema/compatibility versioning ===
-schema_version: integer            # YAML schema version this file targets (default: 1, always; error if newer than this kani-cli supports)
+schema_version: integer            # YAML schema version this file targets. An omitted version always means 1. Newer than this kani-cli supports: error.
 min_kani_version: string           # Optional semver floor on the host version required to install this extension
 requires_capabilities: [string]    # Optional list of host capability flags this extension requires
 
@@ -1081,12 +1081,13 @@ endpoints:
 
 # === Canonical manga URL (optional) ===
 get_url: string         # URL template for a manga's page on the source site: a path joined to
-                        # base_url, or an absolute http(s) URL used as-is. Takes $manga_id$ and,
-                        # with id_encoding.manga, the decoded $manga.<field>$ parts, each
-                        # percent-encoded as a route value. Both backends resolve it with
-                        # kani_shared::request::source_url; an id that does not decode is an error.
-                        # Use `$manga_id$` as the placeholder. Without it the
-                        # host cannot produce an "open on source site" link.
+                        # base_url, or an absolute http(s) URL used as-is. It may use $manga_id$,
+                        # the decoded $manga.<field>$ parts of an id_encoding.manga id, or both;
+                        # a URL built only from the parts (/series/$manga.hid$/$manga.slug$) is
+                        # valid. Each value is percent-encoded as a route value. Both backends
+                        # resolve it with kani_shared::request::source_url; an id that does not
+                        # decode is an error. Without get_url the host has no "open on source
+                        # site" link.
 
 # === Optional sections ===
 filters: FilterList
@@ -1169,11 +1170,13 @@ that declares a body, because sub-fetches do not send one.
 
 Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function
 arguments. Replacement is textual: `id-$manga_id$` sends `id-abc`, and text around a placeholder is
-kept as written. Nothing is evaluated, so a value built only from placeholders, numbers, operators and
-parentheses, such as `$page$+1` or `$page_size$ * ($page$ - 1)`, is refused at validation rather than
-sent as `2+1`. Compute offsets with `pagination` (§3.3) instead. A join such as `$hid$-$slug$`, with no
-number, parenthesis or `*`, is an ordinary template. In a route, `/` is a path separator, not an
-operator.
+kept as written. Nothing is evaluated, so arithmetic on the numeric arguments `$page$` and
+`$page_size$` is refused at validation rather than sent as `2+1`: a value whose placeholders are all
+numeric arguments and whose other text is only numbers, operators and parentheses, with a number, a
+parenthesis or `*` among them, such as `$page$+1` or `$page_size$ * ($page$ - 1)`. Compute offsets
+with `pagination` (§3.3) instead. Any other placeholder is text, so the same characters after it are a
+literal suffix: `$chapter_id$-1` sends `abc-1`, and `$hid$-$slug$` is an ordinary join. In a route, `/`
+is a path separator, not an operator.
 
 Encoding is the same in both backends:
 
@@ -1315,7 +1318,7 @@ anything, runs the checks in `kani_core::install_gating::check_artifact` (§6.3)
 - **`min_kani_version`** — parsed as semver and compared against the running host's version. Install is rejected if the host is older than the declared floor.
 - **`requires_capabilities`** — each entry must be in `HOST_CAPABILITIES` (`unrestricted_http`, `rhai_scripting`, `scoped_cache`) or be `browser_payload` with a capable solver. Install is rejected if any requested capability is unrecognized.
 
-A failure is a validation error naming the offending version or capability. Installation that passes gating persists `icon`, `description`, `languages` (JSON-encoded `Vec<String>`), and `schema_version` onto the `sources` table row, alongside the existing `name`/`version`/`base_url`/`unrestricted_http` columns (`migrations/20260818000002_baseline.sql`). These four columns are also added to `kani_shared::types::Source` and round-trip through `get_source`/`list_sources`/library scan queries. The frontend (`static/js/pages/source-details.js`, `static/js/components/sources-sidebar.js`) reads them directly off the `Source` object: the sidebar list item swaps the initial-letter avatar for the decoded `icon` (`data:image/png;base64,...`) when present, and the source details page's "About" card shows the icon, description, and a `languages` chip list (parsed from the JSON column).
+A failure is a validation error naming the offending version or capability. Installation that passes gating persists `icon`, `description`, `languages` (JSON-encoded `Vec<String>`), and `schema_version` onto the `sources` table row, alongside the existing `name`/`version`/`base_url`/`unrestricted_http` columns (`migrations/20260818000002_baseline.sql`). These four columns are also added to `kani_shared::types::Source` and round-trip through `get_source`/`list_sources`/library scan queries. The frontend (`static/js/pages/source-details.js`, `static/js/components/sources-sidebar.js`) reads them directly off the `Source` object: the sidebar list item swaps the initial-letter avatar for the decoded `icon` when present, as a `data:` URL typed by the icon's own bytes (`static/js/source-icon.js`): `data:image/png;base64,...` for a PNG and `data:image/webp;base64,...` for a WebP, and the source details page's "About" card shows the icon, description, and a `languages` chip list (parsed from the JSON column).
 
 #### Chapter Sort
 
@@ -1545,6 +1548,7 @@ chapter_list:
                           # document. Populates `total_pages` on the returned
                           # MangaList/ChapterList; omit it when the source does not
                           # report a count and the host will rely on `has_next_page`.
+                          # With `pagination` it counts native pages (§3.3).
 ```
 
 When `has_next_page` is omitted there is no next page unless `total_pages` or native
@@ -1596,7 +1600,7 @@ pagination:
   offset_type: item        # "item" (0, 32, 64, …) or "page" with a start index
 ```
 
-When `pagination` is set on an endpoint, the framework calls `paginated-extract-html` instead of `extract-html`. It automatically fetches as many chunks as needed to fulfil the client's `page_size`, injects the correct `offset_param` value per chunk, and determines `has_next_page`. Extensions do not need to implement pagination loops.
+When `pagination` is set on an endpoint, the framework calls `paginated-extract-html` or `paginated-extract-json` (by the endpoint's `type`) instead of `extract-html` or `extract-json`. It automatically fetches as many chunks as needed to fulfil the client's `page_size`, injects the correct `offset_param` value per chunk, and determines `has_next_page`. Extensions do not need to implement pagination loops.
 
 **`offset_type` values:**
 
@@ -1631,9 +1635,28 @@ of these that applies:
 2. A declared `has_next_page`: a static value, or an expression. For an expression, the value from
    the last fetched chunk is used.
 3. A known `total_pages`, static or from a scalar: there is another page while `page < total_pages`.
-   With `pagination`, the total is rescaled from native pages to the client's page size.
-4. Native `pagination`: the last chunk was full (≥ `native_page_size` items).
+   With `pagination`, `total_pages` counts native pages and is restated in client pages (below).
+4. Native `pagination`: rows the page did not use are left in the last chunk fetched, or that chunk
+   was full (≥ `native_page_size` items).
 5. Otherwise there is none.
+
+**Where a paginated list ends.** A native page count says how many chunks there are, not how many
+items the last one holds, so on its own it gives only an upper bound: `total_pages` native pages of
+`native_page_size` items, rounded up to client pages. The end is exact once a fetch sees it:
+
+- A chunk with fewer than `native_page_size` rows is the last chunk, unless the source's declared
+  `has_next_page` says otherwise. Its offset plus its row count is the item count, and fetching stops
+  there.
+- For cursor pagination, the chunk after which the walk cannot continue (no cursor, a repeated one, no
+  rows, or `has_next_page` false) is the last, and the rows seen are the item count.
+- A `total_items` scalar, when the endpoint declares one, is the item count.
+
+When the item count is known, `total_pages` is that count divided by the client's page size, rounded
+up, so the page holding the last item reports no next page. Until the last chunk has been fetched,
+the upper bound stands: with `native_page_size: 32`, `total_pages: 3` and 70 items, a client paging by
+20 is told 5 pages; page 4 fetches the 6-item final chunk, reports 4 pages, and has no next page. The
+same rules apply to browser endpoints, whose captures are chunks. Both backends share this
+implementation (`kani_core::evaluator::json_eval::ChunkWalk`).
 
 A `chapter_list` with `pagination` is fetched chunk by chunk like any list, so a chapter list
 spanning several native chunks is read completely in both backends.
@@ -1828,198 +1851,234 @@ the settings page says so under the field.
 
 ### 3.6 Complete Schema Reference
 
+Every key the YAML format accepts, and nothing else. `kani-cli/tests/spec_schema_tests.rs` reads
+this block and checks it against the parser in both directions: at every mapping below, each key
+listed is accepted there, and each key accepted there is listed.
+
+How to read it: a line is `key: shape  # notes`. A key with indented lines beneath it is a mapping;
+`- key:` begins the mapping each list item holds. `<name>` stands for a key the author chooses, and
+when the same `<name>` appears more than once the entries are alternative shapes for one value. A
+capitalised name at the left margin (`Endpoint:`) defines a shape that other keys refer to by name,
+as `Endpoint`, `[Endpoint]` (a list of them) or `A | B` (either).
+
 <!-- schema sketch: not an executable example -->
 ```yaml
-# Top-level fields
-id: string                      # Required. Extension identifier.
+# Identity
+id: string                      # Required. [a-z][a-z0-9-]*
 name: string                    # Required. Display name.
 version: string                 # Required. Semver.
-base_url: string                # Required. Base URL.
-language: string                # Optional. Default: "en".
-nsfw: bool                      # Optional. Default: false.
-unrestricted_http: bool         # Optional. Default: false.
-schema_version: integer         # Optional. Default: 1, whatever version kani-cli supports.
+base_url: string                # Required. Absolute http(s) URL.
+language: string                # Default: "en".
+nsfw: bool                      # Default: false.
+unrestricted_http: bool         # Default: false. Contact hosts other than base_url's.
+mihon_source_id: integer        # Optional. Mihon's id for this source, used by Mihon import.
+
+# Compatibility gates (§3.2 Extension Metadata)
+schema_version: integer         # An omitted version always means 1. Newer than kani-cli supports: error.
 min_kani_version: string        # Optional. Semver floor on the host version.
-requires_capabilities: [string] # Optional. Host capability flags required to install.
+requires_capabilities: [string] # Optional. Host capabilities the extension needs.
 
-# Extension metadata (optional)
 metadata:
-  icon: string                  # Optional. Base64-encoded PNG or WebP, ≤ 64KB decoded.
+  icon: string                  # Optional. Base64 PNG or WebP, at most 64 KB decoded.
   rate_limit:
-    rps: number                 # Optional. Default: 2.0. Must be > 0.
-    burst: integer              # Optional. Default: 8.
-    max_concurrent: integer     # Optional. Default: 4.
-    max_hook_requests: integer  # Optional. Default: 3. Max hook-driven retries per request (§3.10).
-    max_requests: integer       # Optional. Default: 128, at most 1024. Requests per operation (§5.2).
-    max_response_bytes: integer # Optional. Default: 64 MiB, at most 256 MiB, per operation.
-    max_operation_seconds: integer # Optional. Default: 120, at most 600, per operation.
-  languages: [string]           # Optional.
-  description: string           # Optional.
-  sections:
-    - id: string                 # Required, non-empty, unique within `sections`. Reserved: not read by Kani 1.x.
+    rps: number                 # Default: 2.0. Greater than 0.
+    burst: integer              # Default: 8.
+    max_concurrent: integer     # Default: 4.
+    max_hook_requests: integer  # Default: 3. Hook-driven retries per request (§3.10).
+    max_requests: integer       # Default: 128. 1 to 1024 inclusive. Per operation (§5.2).
+    max_response_bytes: integer # Default: 64 MiB. 1 to 256 MiB inclusive. Per operation.
+    max_operation_seconds: integer # Default: 120. 1 to 600 inclusive. Per operation.
+  languages: [string]
+  description: string
+  sections:                     # Reserved: stored, not read by Kani 1.x.
+    - id: string                # Non-empty, unique.
       name: string
-      nsfw: bool                 # Optional. Default: false.
+      nsfw: bool                # Default: false.
 
-# Endpoints (all optional but at least one should be defined)
 endpoints:
-  popular:                      # -> get_popular_manga
-    delegate_to: string         # Optional: delegate to another endpoint (e.g. "search")
-    empty_without_filters: bool # Optional: return empty list when no filters are active
-    route: string
-    method: string              # Default: "GET"
-    headers: map<string, string>
-    queries: map<string, string>
-    filter_mapping: map<string, FilterMappingEntry>
-    filter_format: FilterFormatCfg # Optional. Controls filter -> query serialization.
-    type: "html" | "json"       # Default: "html"
-    container: string
-    bindings: map<string, string>
-    fields: map<string, FieldDef>
-    scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
-    total_pages: integer | string # Optional. Static count or DSL expression.
-    pagination: PaginationConfig
+  popular: Endpoint | Delegation
+  search: Endpoint
+  manga_details: Endpoint       # No pagination, has_next_page or total_pages (rule 22).
+  chapter_list: Endpoint
+  pages: Endpoint               # No pagination, has_next_page or total_pages (rule 22).
 
-  search:                       # -> search_manga
-    route: string
-    method: string              # Default: "GET"
-    headers: map<string, string>
-    queries: map<string, string>
-    filter_mapping: map<string, FilterMappingEntry>
-    filter_format: FilterFormatCfg # Optional. Controls filter -> query serialization.
-    type: "html" | "json"       # Default: "html"
-    container: string
-    bindings: map<string, string>
-    fields: map<string, FieldDef>
-    scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
-    total_pages: integer | string # Optional. Static count or DSL expression.
-    pagination: PaginationConfig
+get_url: string                 # Optional. Source-site URL for a manga (§3.1).
 
-  manga_details:                # -> get_manga_details
-    route: string
-    method: string
-    headers: map<string, string>
-    queries: map<string, string>
-    type: "html" | "json"
-    container: string           # Usually ":root" or ""
-    bindings: map<string, string>
-    fields: map<string, FieldDef>
-    scalars: map<string, FieldDef>
+filters: [Filter]               # §3.4
+preferences: [Preference]       # §3.5
 
-  chapter_list:                 # -> get_chapter_list
-    route: string
-    method: string
-    headers: map<string, string>
-    queries: map<string, string>
-    type: "html" | "json"
-    container: string
-    bindings: map<string, string>
-    fields: map<string, FieldDef>
-    scalars: map<string, FieldDef>
-    has_next_page: bool | string # Default: none (see §3.3 precedence). Static or DSL expression.
-    total_pages: integer | string # Optional. Static count or DSL expression.
-    pagination: PaginationConfig
-
-  pages:                        # -> get_pages
-    route: string
-    method: string
-    headers: map<string, string>
-    queries: map<string, string>
-    type: "html" | "json"
-    container: string
-    bindings: map<string, string>
-    fields: map<string, FieldDef>
-    scalars: map<string, FieldDef>
-
-# FieldDef is either:
-#   - A bare string (DSL expression, required field)
-#   - A map with:
-#       expr: string            # DSL expression
-#       optional: bool          # Default: false
-
-# Filters
-filters:
-  - id: string
-    name: string
-    name_i18n: string           # Optional. Alternate i18n key for the display name.
-    type: "checkbox" | "select" | "text_input" | "sort" | "multiselect" | "int_range" | "date_range"
-    options:                    # For select/sort/multiselect types (inline)
-      - name: string
-        value: string
-        nsfw: bool               # Optional. Default: false.
-    options_ref: string         # Optional. Resolve options from `option_sets.<name>` instead of inlining.
-    min: number                  # Required for int_range/date_range
-    max: number                  # Required for int_range/date_range
-    step: number                 # Optional, for int_range/date_range
-    default:                    # Optional
-      name: string
-      value: string
-    semantic: "author" | "artist" | "tag"  # Optional hint
-
-# FilterMappingEntry is either:
-#   - A bare string (query param name; "simple" mapping)
-#   - A map with `kind: sort_pair` and asc_param/desc_param
-#   - A map with `kind: tuple_split`, from_param, to_param (splits a "from:to" TextInput value)
-
-# FilterFormatCfg (optional, per-endpoint)
-filter_format:
-  multiselect: "default" | "bracket" | "comma_separated" | "repeated"  # Default: "default"
-  omit_empty: bool                # Default: true
-  bool_format: "true_false" | "one_zero" | "yes_no"                     # Default: "true_false"
-  array_separator: string         # Default: ",". Must not be empty.
-
-# Option sets (top-level, optional)
-option_sets:
-  <name>:                         # Static: a plain sequence of options
+option_sets:                    # §3.4
+  <name>:                       # A fixed list:
     - name: string
       value: string
-      nsfw: bool                   # Optional. Default: false.
-  <name>:                         # Fetched: resolved lazily by the host at render time
+      nsfw: bool                # Default: false.
+  <name>:                       # Or options the host fetches when the filter panel opens:
     options_fetched_by:
       route: string
-      type: "html" | "json"        # Default: "html"
-      container: string
-      fields: map<string, string>  # JSON Pointers (json) or "selector|attr" specs (html); not DSL
+      type: "html" | "json"     # Default: "html".
+      container: string         # CSS selector or JSON Pointer.
+      fields: map<string, string> # "selector|attr" (html) or JSON Pointer (json); not DSL.
+      nsfw_field: string        # Optional. Options whose field is true are dropped.
       cache:
-        ttl: integer                # Seconds. Default: 3600. Max: 30 days.
-        key: string
+        ttl: integer            # Seconds. Default: 3600. At most 30 days; 0 never expires.
+        key: string             # Unique among the source's fetched sets.
 
-# Preferences
-preferences:
-  - key: string
-    label: string
-    kind: "toggle" | "select" | "text" | "multi_value_list"
-    options:                    # For select kind (inline)
-      - name: string
-        value: string
-    options_ref: string         # Optional. Resolve options from `option_sets.<name>` instead of inlining.
-    default: string
-    description: string         # Optional
-    secret: bool                # Optional, for text kind. Default: false.
+id_encoding:                    # §3.2 Composite ID Encoding
+  manga: IdEncoding
+  chapter: IdEncoding
 
-# Pagination (per-endpoint; omit for sources with flexible page sizes)
-pagination:
-  native_page_size: integer          # Source's fixed chunk size
-  offset_param: string               # Query param name for offset/page/cursor
-  offset_type: "item" | "page" | "cursor"
-  page_start: integer                # For "page" type: starting page number (default: 1)
-  cursor_field: string               # Required for "cursor" type (and only allowed there): JSON Pointer to the next-page token
+cache:                          # §3.2 Cache Namespaces. At most 16.
+  <name>:
+    ttl: integer                # Seconds. Default: 3600. At most 30 days; 0 sets no maximum.
+    max_entries: integer        # Optional. 1 to 4096.
 
-# Scripting (top-level, optional; see §3.10)
-scripts:
-  pure:
-    <name>: string                   # Rhai source defining `fn <name>(...)`; also shared with hooks
+chapter_sort:                   # §3.2 Chapter Sort
+  default: string               # Optional. One of the option ids.
+  options:
+    - id: string
+      label: string
 
-pre_request: string                  # Rhai hook body; runs before each request whose endpoint has no pre_request of its own
-on_status:                           # Rhai hook bodies by status pattern
-  "401" | "4xx" | "5xx" | "default": string
+browser_scripts: map<string, string> # §3.8. Names match [a-z][a-z0-9_]* (rule 20).
 
-# Per-endpoint hooks (subset of above, on any endpoint block)
-# endpoints.<name>:
-#   pre_request: string              # Replaces source-level pre_request for this endpoint
-#   on_status:
-#     <pattern>: string
+scripts:                        # §3.10
+  pure: map<string, string>     # Rhai source defining `fn <name>(...)`. Names as rule 20.
+
+pre_request: string             # Source-level hook (§3.10).
+on_status: map<string, string>  # Keys: a status code, "4xx"-style pattern, or "default".
+
+factory:                        # §3.7
+  template: string              # Optional.
+  sources:
+    - id: string
+      name: string
+      base_url: string
+      language: string          # Default: "en".
+      mihon_source_id: integer
+      overrides: map<string, any> # Dot paths that must already exist in the template.
+      add: map<string, any>       # Dot paths whose parent exists and whose key does not.
+
+Delegation:
+  delegate_to: string           # Another declared endpoint, e.g. "search".
+  empty_without_filters: bool   # Default: false.
+
+Endpoint:
+  # Request (§3.2)
+  route: string                 # Path joined to base_url, or absolute. $var$ placeholders.
+  method: string                # Default: "GET".
+  headers: map<string, string>
+  queries: map<string, string>
+  body:                         # Not on GET.
+    type: "json" | "form" | "raw"
+    content: any
+    content_type: string        # raw only, and required there.
+  filter_mapping:               # popular and search (§3.4)
+    <filter>: string            # The query parameter.
+    <filter>:
+      kind: sort_pair           # A "key:dir" selection:
+      key_template: string      # parameter name with {} for the key; the value is dir.
+      direction_param: string   # Optional. Also sends dir under this name.
+    <filter>:
+      kind: tuple_split         # A "from:to" text value:
+      from_param: string
+      to_param: string
+  filter_format:
+    multiselect: "default" | "bracket" | "comma_separated" | "repeated" # Default: "default".
+    omit_empty: bool            # Default: true.
+    bool_format: "true_false" | "one_zero" | "yes_no" # Default: "true_false".
+    array_separator: string     # Default: ",". Not empty.
+
+  # Browser transport (§3.8)
+  via: "browser_payload"
+  page_url: string              # Required with via.
+  script: string                # Required with via. A browser_scripts name.
+  timeout_ms: integer           # Default: 30000.
+  auto_scroll: bool             # Default: false.
+
+  # Extraction (§3.2)
+  type: "html" | "json"         # Default: "html".
+  container: string             # CSS selector or JSON Pointer.
+  bindings: map<string, string> # $name: DSL expression.
+  fields:
+    <name>: string              # A DSL expression; the field is required.
+    <name>:
+      expr: string
+      optional: bool            # Default: false. Not allowed on required fields (rule 6).
+    <name>:                     # A composite id: one DSL expression per id_encoding field.
+      <part>: string
+  scalars:
+    <name>: string
+    <name>:
+      expr: string
+      optional: bool
+
+  # Paging (§3.3). popular, search and chapter_list only.
+  has_next_page: bool | string  # Static, or a DSL expression. Default: see §3.3 precedence.
+  total_pages: integer | string # Static, or a DSL expression. Native pages under pagination.
+  pagination:
+    native_page_size: integer
+    offset_param: string
+    offset_type: "item" | "page" | "cursor"
+    page_start: integer         # "page" only. Default: 1.
+    cursor_field: string        # "cursor" only, and required there. JSON Pointer.
+
+  # Chaining (§3.2)
+  then: [ThenStep]
+  for_each: [ForEachStep]
+
+  # Hooks (§3.10). Each replaces the source-level hook of the same event.
+  pre_request: string
+  on_status: map<string, string>
+
+ThenStep:
+  endpoint: string              # A declared endpoint.
+  url_expr: string              # DSL expression.
+  merge_as: string
+  on_failure: string            # "fail" (default), "skip", or a DSL fallback expression.
+
+ForEachStep:
+  endpoint: string
+  url_expr: string
+  merge_as: string
+  on_failure: string
+  deduplicate_by: string        # Optional. Interpreted sources only.
+  concurrency: any              # Accepted and ignored; see §3.2.
+
+Filter:
+  id: string                    # "group:value" for a grouped checkbox.
+  name: string
+  name_i18n: string             # Optional. Carried, not yet displayed.
+  type: "checkbox" | "select" | "sort" | "text_input" | "multiselect" | "int_range" | "date_range"
+  options:
+    - name: string
+      value: string
+      nsfw: bool                # Default: false.
+  options_ref: string           # An option_sets name, instead of options.
+  default: bool | string | FilterDefault
+  semantic: "author" | "artist" | "tag"
+  min: number                   # Required for int_range and date_range.
+  max: number                   # Required for int_range and date_range.
+  step: number
+
+FilterDefault:
+  name: string
+  value: string
+
+Preference:
+  key: string
+  label: string
+  kind: "toggle" | "select" | "text" | "multi_value_list"
+  options:
+    - name: string
+      value: string
+  options_ref: string
+  default: string
+  description: string
+  secret: bool                  # Default: false. Hides the value in the UI only.
+
+IdEncoding:
+  fields: [string]              # Identifier-like, unique, at least one.
+  delimiter: string             # Default: "|". Not empty with more than one field.
+  encoding: "base64_url" | "base64" | "passthrough" | "hex" # Default: "base64_url".
 ```
 
 ### 3.7 Multi-Source Factory
@@ -2181,8 +2240,10 @@ The `kani-cli validate` command checks:
 22. **Paging keys:** `pagination`, `has_next_page` and `total_pages` are accepted only on `popular`,
     `search` and `chapter_list`. `manga_details` and `pages` return one result, so these keys are
     refused there rather than ignored.
-23. **Arithmetic templates:** a `route`, query or header value made only of placeholders, number
-    literals, operators and parentheses, containing a number, a parenthesis or `*`, is refused. See
+23. **Arithmetic templates:** a `route`, query or header value whose placeholders are all `$page$`
+    or `$page_size$`, and whose other text is only number literals, operators and parentheses
+    including a number, a parenthesis or `*`, is refused. A text placeholder followed by such
+    characters (`$chapter_id$-1`) is a literal suffix. See
     [Variable Interpolation](#variable-interpolation).
 24. **Receiver kinds:** an element-only method (`attr`, `text`, `inner_html`, `select`, `first`,
     `has_class`, `children`) is refused when its receiver is known from the root and the preceding
@@ -2485,7 +2546,8 @@ and `refresh_auth` re-runs, and browser captures from `page_url`, hooks or WASM.
 | Response bytes read | 64 MiB | 256 MiB | `metadata.rate_limit.max_response_bytes` |
 | Elapsed time | 120 s | 600 s | `metadata.rate_limit.max_operation_seconds` |
 
-Validation refuses a declared value of 0 or above the cap. When any dimension runs out, the whole
+A declared value must be between 1 and the hard cap, inclusive: `max_requests: 1024` is accepted,
+and `0` or `1025` is refused. When any dimension runs out, the whole
 operation fails with a "budget exceeded" error naming the dimension, which the host reports as
 `BudgetExceeded`. No partial result is returned, and no `on_failure` policy (`skip` or a fallback)
 can absorb it, so a large listing never turns into rows with silently missing sub-fetches.

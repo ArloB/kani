@@ -1820,6 +1820,20 @@ fn arithmetic_in_a_request_template_is_refused_but_text_templates_are_not() {
 }
 
 #[test]
+fn a_number_after_a_text_placeholder_is_a_literal_suffix_not_arithmetic() {
+    let pages = |route: &str, query: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  pages:\n    route: \"{route}\"\n    queries:\n      \
+             v: \"{query}\"\n    container: \".p\"\n    fields:\n      index: \"index()\"\n      \
+             url: 'self.attr(\"src\")'\n"
+        )
+    };
+    assert_valid(&pages("/read/$chapter_id$-1", "$manga_id$-2"));
+    assert_valid(&pages("/read/$chapter_id$", "($manga_id$)"));
+    assert_invalid_containing(&pages("/read/$chapter_id$", "$page$-1"), "is arithmetic");
+}
+
+#[test]
 fn base_url_and_literal_page_urls_must_be_http() {
     let with_base = |base: &str| {
         format!("id: scheme\nname: Scheme\nversion: \"0.1.0\"\nbase_url: \"{base}\"\n")
@@ -1952,12 +1966,13 @@ fn declared_operation_limits_must_stay_within_the_hard_caps() {
     let yaml = |key: &str, value: u64| {
         format!("{METADATA_BASE}metadata:\n  rate_limit:\n    {key}: {value}\n")
     };
-    for (key, too_big) in [
-        ("max_requests", 1025),
-        ("max_response_bytes", 256 * 1024 * 1024 + 1),
-        ("max_operation_seconds", 601),
+    for (key, cap) in [
+        ("max_requests", 1024),
+        ("max_response_bytes", 256 * 1024 * 1024),
+        ("max_operation_seconds", 600),
     ] {
-        assert_invalid_containing(&yaml(key, too_big), &format!("metadata.rate_limit.{key}"));
+        assert_valid(&yaml(key, cap));
+        assert_invalid_containing(&yaml(key, cap + 1), &format!("metadata.rate_limit.{key}"));
         assert_invalid_containing(&yaml(key, 0), &format!("metadata.rate_limit.{key}"));
         assert_valid(&yaml(key, 60));
     }
@@ -2034,4 +2049,31 @@ fn a_request_body_must_be_well_formed_and_sendable() {
     ] {
         assert_invalid_containing(&yaml(method, body), needle);
     }
+}
+
+#[test]
+fn a_static_total_pages_under_pagination_is_counted_in_native_pages() {
+    use kani_cli::yaml::model::ValidatedTotalPages;
+    let yaml = |pagination: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    total_pages: 12\n{pagination}    \
+             container: \".i\"\n    fields:\n      id: 'self.attr(\"id\")'\n      title: 'self.text()'\n"
+        )
+    };
+    let paged = validate_str(&yaml(
+        "    pagination:\n      native_page_size: 32\n      offset_param: offset\n      offset_type: item\n",
+    ))
+    .unwrap();
+    assert!(
+        matches!(
+            paged.search.as_ref().unwrap().total_pages,
+            ValidatedTotalPages::Scalar(_)
+        ),
+        "a scalar reaches the host, which restates it in the client's page size"
+    );
+    let plain = validate_str(&yaml("")).unwrap();
+    assert!(matches!(
+        plain.search.as_ref().unwrap().total_pages,
+        ValidatedTotalPages::Static(12)
+    ));
 }

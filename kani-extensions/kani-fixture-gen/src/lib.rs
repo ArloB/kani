@@ -188,13 +188,17 @@ impl MangaExtension for FixtureGen {
             .field("language", Expr::lit("en"))
             .field("number", Expr::num(0.0))
             .field_opt("title", Expr::self_ref().first(".title").text())
+            .scalar_opt(
+                "total_pages",
+                Expr::dom(".pager").attr("data-last").parse_int(),
+            )
             .paginated(2, "p", OffsetType::PageNumber { start: 1 })
             .build();
         let rows = extract::paginated_html(page, page_size, &bp)?;
         Ok(kani_shared::unpack::unpack_chapter_list(
             &rows,
             kani_shared::unpack::HasNextPage::Derived { page },
-            kani_shared::unpack::TotalPages::None,
+            kani_shared::unpack::TotalPages::FromScalar,
             &[],
         )
         .logged("chapter_list"))
