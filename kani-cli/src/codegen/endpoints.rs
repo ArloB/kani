@@ -231,7 +231,7 @@ fn emit_chapter_list_args(ep: &ValidatedEndpoint) -> String {
     }
     let uses = |name: &str| referenced.iter().any(|v| v == name);
     let mut lines = vec!["let _ = (page, page_size, &sort);".to_string()];
-    if uses("page_size") {
+    if uses("page_size") || ep.pagination.is_some() {
         lines.push("let page_size = page_size.unwrap_or(100);".to_string());
     }
     if uses("sort") {
@@ -280,14 +280,7 @@ pub(crate) fn emit_chapter_list(
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, "chapter_list");
-        let fetch = match ep.response_type {
-            ResponseType::Html => {
-                "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
-            }
-            ResponseType::Json => {
-                "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
-            }
-        };
+        let fetch = emit_raw_fetch(ep);
         format!(
             "fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>, sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
              {arg_prologue}\
@@ -300,10 +293,7 @@ pub(crate) fn emit_chapter_list(
         )
     } else {
         let bp_chain = emit_blueprint_chain(ep, ext, "chapter_list");
-        let extract_call = match ep.response_type {
-            ResponseType::Json => "extract::json(None, &bp)?",
-            ResponseType::Html => "extract::html(None, &bp)?",
-        };
+        let extract_call = emit_extract_call(ep);
         format!(
             "fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>, sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
              {arg_prologue}\
@@ -437,18 +427,7 @@ fn emit_manga_list_method(
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, endpoint_id);
-        let fetch = if ep.pagination.is_some() {
-            "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string()
-        } else {
-            match ep.response_type {
-                ResponseType::Html => {
-                    "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;".to_string()
-                }
-                ResponseType::Json => {
-                    "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;".to_string()
-                }
-            }
-        };
+        let fetch = emit_raw_fetch(ep);
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
              {bp_bytes}\n\
@@ -459,14 +438,7 @@ fn emit_manga_list_method(
         )
     } else {
         let bp_chain = emit_blueprint_chain(ep, ext, endpoint_id);
-        let extract_call = if ep.pagination.is_some() {
-            "extract::paginated_html(page, page_size, &bp)?".to_string()
-        } else {
-            match ep.response_type {
-                ResponseType::Json => "extract::json(None, &bp)?".to_string(),
-                ResponseType::Html => "extract::html(None, &bp)?".to_string(),
-            }
-        };
+        let extract_call = emit_extract_call(ep);
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
              {req_block}\n\
@@ -497,7 +469,39 @@ fn emit_fn_args(ep: &ValidatedEndpoint) -> String {
 fn emit_hnp_spec(hnp: &ValidatedHnp) -> String {
     match hnp {
         ValidatedHnp::Static(b) => format!("kani_shared::unpack::HasNextPage::Static({b})"),
-        _ => "kani_shared::unpack::HasNextPage::FromScalar".to_string(),
+        ValidatedHnp::Scalar(_) => "kani_shared::unpack::HasNextPage::FromScalar".to_string(),
+        ValidatedHnp::Default => "kani_shared::unpack::HasNextPage::Derived { page }".to_string(),
+    }
+}
+
+fn emit_extract_call(ep: &ValidatedEndpoint) -> String {
+    let kind = match ep.response_type {
+        ResponseType::Json => "json",
+        ResponseType::Html => "html",
+    };
+    if ep.pagination.is_some() {
+        format!("extract::paginated_{kind}(page, page_size, &bp)?")
+    } else {
+        format!("extract::{kind}(None, &bp)?")
+    }
+}
+
+fn emit_raw_fetch(ep: &ValidatedEndpoint) -> String {
+    match (ep.pagination.is_some(), &ep.response_type) {
+        (true, ResponseType::Html) => {
+            "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string()
+        }
+        (true, ResponseType::Json) => {
+            "let rows = extract_raw::paginated_json(page, page_size, req, BP)?;".to_string()
+        }
+        (false, ResponseType::Html) => {
+            "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+                .to_string()
+        }
+        (false, ResponseType::Json) => {
+            "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+                .to_string()
+        }
     }
 }
 

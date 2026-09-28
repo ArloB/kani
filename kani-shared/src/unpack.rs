@@ -133,6 +133,9 @@ pub enum HasNextPage {
     Static(bool),
     /// Read the `has_next_page` scalar from the extraction result.
     FromScalar,
+    /// No rule was declared: `page < total_pages` when a total is known, otherwise the
+    /// `has_next_page` scalar native pagination sets from a full chunk, otherwise false.
+    Derived { page: i32 },
 }
 
 /// How an endpoint's `total_pages` is determined.
@@ -170,13 +173,19 @@ fn arg_or_field_req<T: JsonRows>(
         .ok_or_else(|| ExtensionError::parse(format!("Missing required field: /{name}")))
 }
 
-fn resolve_has_next_page<T: JsonRows>(result: &T, hnp: HasNextPage) -> bool {
+fn resolve_has_next_page<T: JsonRows>(
+    result: &T,
+    hnp: HasNextPage,
+    total_pages: Option<u32>,
+) -> bool {
     if result.rows_len() == 0 {
         return false;
     }
-    match hnp {
-        HasNextPage::Static(b) => b,
-        HasNextPage::FromScalar => result.get_scalar_bool("has_next_page"),
+    match (hnp, total_pages) {
+        (HasNextPage::Static(b), _) => b,
+        (HasNextPage::FromScalar, _) => result.get_scalar_bool("has_next_page"),
+        (HasNextPage::Derived { page }, Some(total)) => i64::from(page) < i64::from(total),
+        (HasNextPage::Derived { .. }, None) => result.get_scalar_bool("has_next_page"),
     }
 }
 
@@ -219,8 +228,8 @@ pub fn unpack_manga_list<T: JsonRows>(
     total: TotalPages,
     fn_args: FnArgs,
 ) -> Unpacked<wit_types::MangaList> {
-    let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
+    let has_next_page = resolve_has_next_page(result, hnp, total_pages);
     let rows = result.rows_len();
     let manga: Vec<_> = (0..rows)
         .filter_map(|i| {
@@ -280,8 +289,8 @@ pub fn unpack_chapter_list<T: JsonRows>(
     total: TotalPages,
     fn_args: FnArgs,
 ) -> Unpacked<wit_types::ChapterList> {
-    let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
+    let has_next_page = resolve_has_next_page(result, hnp, total_pages);
     let rows = result.rows_len();
     let chapters: Vec<_> = (0..rows)
         .filter_map(|i| {
@@ -418,6 +427,68 @@ mod tests {
         let omitted = json!({"rows": [{"id": "m1", "title": "A"}]});
         let list = unpack_manga_list(&omitted, HasNextPage::FromScalar, TotalPages::None, &[]);
         assert!(!list.value.has_next_page);
+    }
+
+    #[test]
+    fn has_next_page_follows_rule_then_total_then_native_paging_then_false() {
+        let rows = |scalars: serde_json::Value| json!({"rows": [{"id": "m1", "title": "A"}], "scalars": scalars});
+        let next = |result: &serde_json::Value, hnp, total| {
+            unpack_manga_list(result, hnp, total, &[])
+                .value
+                .has_next_page
+        };
+        let full_chunk = rows(json!({"has_next_page": true}));
+        let no_signal = rows(json!({}));
+
+        assert!(next(
+            &no_signal,
+            HasNextPage::Static(true),
+            TotalPages::Static(2)
+        ));
+        assert!(!next(
+            &rows(json!({"has_next_page": false})),
+            HasNextPage::FromScalar,
+            TotalPages::Static(5)
+        ));
+
+        assert!(next(
+            &full_chunk,
+            HasNextPage::Derived { page: 1 },
+            TotalPages::Static(3)
+        ));
+        assert!(
+            !next(
+                &full_chunk,
+                HasNextPage::Derived { page: 3 },
+                TotalPages::Static(3)
+            ),
+            "total beats a full chunk"
+        );
+        assert!(
+            next(
+                &no_signal,
+                HasNextPage::Derived { page: 2 },
+                TotalPages::Static(3)
+            ),
+            "total beats a missing signal"
+        );
+
+        assert!(
+            next(
+                &full_chunk,
+                HasNextPage::Derived { page: 2 },
+                TotalPages::None
+            ),
+            "a full native chunk"
+        );
+        assert!(
+            !next(
+                &no_signal,
+                HasNextPage::Derived { page: 2 },
+                TotalPages::None
+            ),
+            "nothing says there is more"
+        );
     }
 
     #[test]

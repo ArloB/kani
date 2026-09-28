@@ -130,7 +130,7 @@ impl MangaExtension for HooksTest {
         let rows = extract::json(None, &bp)?;
         Ok(kani_shared::unpack::unpack_manga_list(
             &rows,
-            kani_shared::unpack::HasNextPage::FromScalar,
+            kani_shared::unpack::HasNextPage::Derived { page },
             kani_shared::unpack::TotalPages::None,
             &[],
         )

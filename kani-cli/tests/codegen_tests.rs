@@ -320,6 +320,10 @@ fn cursor_pagination_generates_the_same_blueprint_the_interpreter_builds() {
         lib.contains("OffsetType::CursorToken"),
         "paginated with a cursor:\n{lib}"
     );
+    assert!(
+        lib.contains("extract::paginated_json(page, page_size, &bp)"),
+        "a JSON endpoint pages through the JSON extractor:\n{lib}"
+    );
 }
 
 #[test]
