@@ -1062,7 +1062,7 @@ nsfw: bool              # Whether the source contains NSFW content (default: fal
 unrestricted_http: bool # Whether the extension needs to contact external hosts (default: false)
 
 # === Schema/compatibility versioning ===
-schema_version: integer            # YAML schema version this file targets (default: current; error if newer than this kani-cli supports)
+schema_version: integer            # YAML schema version this file targets (default: 1, always; error if newer than this kani-cli supports)
 min_kani_version: string           # Optional semver floor on the host version required to install this extension
 requires_capabilities: [string]    # Optional list of host capability flags this extension requires
 
@@ -1112,7 +1112,7 @@ Each endpoint corresponds to a method in the `manga-provider` WIT interface. The
 ```yaml
 endpoint_name:
   # --- Request construction ---
-  route: string           # URL path appended to base_url. Supports {variable} templates.
+  route: string           # URL path appended to base_url. Supports $variable$ placeholders.
   method: string          # HTTP method (default: "GET")
   headers:                # Additional headers (optional)
     Header-Name: value
@@ -1139,7 +1139,13 @@ endpoint_name:
 
 #### Variable Interpolation
 
-Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function arguments:
+Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced with function
+arguments. Replacement is textual: `id-$manga_id$` sends `id-abc`, and text around a placeholder is
+kept as written. Nothing is evaluated, so a value built only from placeholders, numbers, operators and
+parentheses, such as `$page$+1` or `$page_size$ * ($page$ - 1)`, is refused at validation rather than
+sent as `2+1`. Compute offsets with `pagination` (§3.3) instead. A join such as `$hid$-$slug$`, with no
+number, parenthesis or `*`, is an ordinary template. In a route, `/` is a path separator, not an
+operator.
 
 | Variable | Available In | Description |
 |----------|-------------|-------------|
@@ -1195,6 +1201,11 @@ chapter_list:
 
 Codegen decodes the incoming `manga_id`/`chapter_id` function argument once at the top of the method and binds one local per referenced subfield (sanitized to `<role>_<field>`, since `.` is not a valid Rust identifier character). Only roles actually referenced by an endpoint's `route`/`queries` incur a decode call.
 
+An incoming id that does not decode (bad encoding, or fewer delimiter-separated parts than declared
+fields) fails the request with an extension parse error naming the argument, the id and the role.
+Both the interpreted and the generated extension report it this way; neither sends a request with
+the placeholder left unresolved.
+
 #### Cache Namespaces
 
 The top-level `cache` block declares the namespaces an extension's hook scripts may store values
@@ -1228,13 +1239,13 @@ accounts are a possible future feature, not a cache setting.
 The top-level `metadata` block carries the parts of an extension's identity that aren't required to construct a request or run extraction — icon, rate limiting, supported languages, a description, and reserved `sections` labels — plus the top-level `schema_version`/`min_kani_version`/`requires_capabilities` fields that gate installation:
 
 ```yaml
-schema_version: 1                  # Default: current schema version kani-cli supports
+schema_version: 1                  # Default: 1 — an unversioned file is always version 1
 min_kani_version: "0.5.0"          # Optional semver floor; install is rejected on older hosts
 requires_capabilities:
   - "unrestricted_http"            # Optional; install is rejected if the host lacks a listed capability
 
 metadata:
-  icon: "<base64-encoded PNG/WebP/SVG, ≤ 64KB decoded>"
+  icon: "<base64-encoded PNG or WebP, ≤ 64KB decoded>"
   rate_limit:
     rps: 2.0                       # Requests per second. Default: 2.0
     burst: 8                       # Default: 8
@@ -1370,9 +1381,12 @@ Otherwise define it as a full endpoint. JSON API example:
 ```yaml
 popular:
   route: "/manga"
+  pagination:
+    native_page_size: 32
+    offset_param: offset
+    offset_type: item
   queries:
-    limit: $page_size$
-    offset: "$page_size$ * ($page$ - 1)"
+    limit: "32"
     includes[]: cover_art
     order[followedCount]: desc
   type: json
@@ -1638,6 +1652,13 @@ search:
   fields: { ... }
 ```
 
+**Grouped checkboxes.** A checkbox id of the form `group:value` belongs to filter group `group`.
+Each checked box in a group sends one `param=value` pair, in the order the filters are listed, and
+an unchecked grouped box sends nothing, whatever `omit_empty` says. With the mapping `genre: genre`
+and both `genre:Action` and `genre:Adventure` checked, the request carries
+`genre=Action&genre=Adventure`. A plain checkbox id (no `:`) sends its `bool_format` literal
+instead.
+
 **`filter_format` (optional, per-endpoint):** controls how filter values are serialized into query parameters when the default encoding doesn't match the source's API:
 
 ```yaml
@@ -1647,7 +1668,7 @@ search:
     genres: genre
   filter_format:
     multiselect: bracket        # "default" (repeated param) | "bracket" (param[]) | "comma_separated" | "repeated"
-    omit_empty: false            # Default: true. When false, emits an explicit query for an unchecked checkbox.
+    omit_empty: false            # Default: true. When false, an unchecked plain checkbox sends its "false" literal (grouped boxes never send anything when unchecked).
     bool_format: one_zero        # "true_false" (default) | "one_zero" | "yes_no"
     array_separator: "|"         # Separator used by "comma_separated". Default: ",". Must not be empty.
   container: "..."
@@ -1707,13 +1728,13 @@ base_url: string                # Required. Base URL.
 language: string                # Optional. Default: "en".
 nsfw: bool                      # Optional. Default: false.
 unrestricted_http: bool         # Optional. Default: false.
-schema_version: integer         # Optional. Default: current schema version.
+schema_version: integer         # Optional. Default: 1, whatever version kani-cli supports.
 min_kani_version: string        # Optional. Semver floor on the host version.
 requires_capabilities: [string] # Optional. Host capability flags required to install.
 
 # Extension metadata (optional)
 metadata:
-  icon: string                  # Optional. Base64-encoded PNG/WebP/SVG, ≤ 64KB decoded.
+  icon: string                  # Optional. Base64-encoded PNG or WebP, ≤ 64KB decoded.
   rate_limit:
     rps: number                 # Optional. Default: 2.0. Must be > 0.
     burst: integer              # Optional. Default: 8.
@@ -1912,16 +1933,29 @@ factory:
 
 1. `kani-cli build my-source.yaml` detects the `.yaml` extension and enters factory mode.
 2. The factory block is validated (`validate_factory`): sources must be non-empty; IDs must be non-empty, unique, and non-duplicate; `base_url` and `name` must be non-empty.
-3. For each source entry, the template's YAML value tree is cloned and the source's named fields (`id`, `name`, `base_url`, `language`, `mihon_source_id`) are written as top-level overrides; then the dot-path `overrides` map is applied recursively.
+3. For each source entry, the template's YAML value tree is cloned and the source's named fields (`id`, `name`, `base_url`, `language`, `mihon_source_id`) are written as top-level overrides; then the dot-path `overrides` and `add` maps are applied.
 4. The expanded YAML is validated as a standalone extension (all standard validation rules apply).
 5. A Rust crate is generated to `kani-extensions/kani-{source.id}/` and then compiled to `wasm_sources/{source.id}.wasm`.
 
-**Dot-path override semantics:** keys use `.` as a path separator. Each segment descends into a YAML mapping. If an intermediate key is absent, a new empty mapping is created. Leaf values replace whatever was there. Unknown paths produce a stderr warning but do not abort the build.
+**Dot-path override semantics:** keys use `.` as a path separator, and each segment descends into
+a YAML mapping. Every path under `overrides` must already exist in the template, down to the leaf,
+which is replaced. Map entries count too, so a typo such as `endpoints.search.queries.pgae` fails the
+build with an error naming the path instead of adding a query nobody reads. To create an entry the
+template lacks, put it under `add`: its parent must exist and its final key must not.
+
+```yaml
+      overrides:
+        endpoints.search.route: "/find?q=$query$"
+      add:
+        endpoints.search.queries.lang: ja
+```
 
 **Validation rules for `factory`:**
 - `factory.sources` must not be empty.
 - Each source's `id` must be non-empty and unique within the factory block.
 - Each source's `name` and `base_url` must be non-empty.
+- Each `overrides` path must exist in the template; each `add` path must have an existing parent and
+  a new final key.
 
 ### 3.8 Browser Payload Endpoints
 
@@ -1975,7 +2009,7 @@ endpoints:
 **Validation rules for `via: browser_payload`:**
 - `page_url` must be present and non-empty.
 - `script` must be present, non-empty, and declared in `browser_scripts`.
-- `browser_scripts` entries must have non-empty names and non-empty source.
+- `browser_scripts` entries must have non-empty source, and names matching `[a-z][a-z0-9_]*` (rule 20).
 - Scripts that do not call `passPayload` produce a warning (not an error).
 
 ### 3.9 YAML Validation Rules
@@ -1988,22 +2022,57 @@ The `kani-cli validate` command checks:
    and cache namespaces, so a separator such as `:` or `_` would let two extensions' namespaces
    collide.
 3. **Version format:** Must be valid semver.
-4. **Base URL format:** Must be a valid URL with scheme.
+4. **Base URL format:** Must be an absolute `http` or `https` URL with a host.
 5. **DSL syntax:** All DSL strings must parse without errors.
-6. **Field completeness:** For `manga_details`, the required fields are `id`, `title`, `status`. For `chapter_list`, the required fields are `id`, `number`, `language`. For `pages`, the required fields are `index`, `url`, and `transform` is optional.
+6. **Field completeness:** every endpoint must declare its required row fields, and none of them
+   may be marked `optional: true`:
+
+   | Endpoint | Required fields |
+   |---|---|
+   | `popular`, `search` | `id`, `title` |
+   | `manga_details` | `id`, `title`, `status` |
+   | `chapter_list` | `id` (`number` defaults to `0`, `language` to `"en"`) |
+   | `pages` | `url`, `index` (`transform` is optional) |
+
+   A required field that evaluates to null fails the whole page. In `popular`, `search` and
+   `chapter_list`, a row whose required field evaluates to something other than a string or an
+   integer is skipped, and each page that skipped rows logs a warning with the count. The
+   interpreted and generated backends behave the same way.
 7. **Variable references:** All `$variable$` references in routes and queries must correspond to available function arguments or preference keys.
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
-9. **Filter mapping:** All filter mapping keys must correspond to declared filter group IDs.
+9. **Filter mapping:** every `filter_mapping` key must be a filter id, or the group part (before `:`) of a grouped checkbox id such as `genre:Action`. An unmatched key is an error rather than silently sending nothing.
 10. **No unused bindings:** Warn if a top-level binding is declared but never referenced.
 11. **`filter_format`:** `array_separator` must not be empty.
 12. **`options_ref`:** every filter or preference `options_ref` must resolve to a declared `option_sets` entry.
 13. **Range filters:** `int_range`/`date_range` filters must declare both `min` and `max`.
-14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days.
-15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and match a recognized PNG/WebP/SVG signature.
+14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days. Each fetched set's effective cache key (`cache.key`, or the set's name when it has no `cache` block) must be unique among the source's fetched sets, since they share the `fetched_opts:{source_id}` namespace.
+15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and start with a PNG or WebP
+    signature. The same check applies to a WASM extension's metadata icon at install. Markup such as
+    SVG is refused, since clients render the icon from a `data:` URL typed by those bytes.
 16. **`metadata.rate_limit.rps`:** must be greater than 0.
 17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.
-18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports.
+18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports. When omitted
+    it is 1, so a later schema version never reinterprets a file written without one.
 19. **`min_kani_version`:** when present, must be a valid semver version string.
+20. **Script names:** every `browser_scripts` and `scripts.pure` key must match `[a-z][a-z0-9_]*`.
+    A name becomes a file under the generated crate's `src/scripts/` and a Rust identifier, so a
+    separator could write outside that directory and `a-b`/`a_b` would collide. Code generation
+    refuses such a name even if validation is bypassed.
+21. **`id_encoding`:** each declared role must list at least one field; field names must be
+    non-empty, unique within the role, and use only letters, digits and `_`; a role with more than
+    one field must have a non-empty `delimiter`.
+22. **Paging keys:** `pagination`, `has_next_page` and `total_pages` are accepted only on `popular`,
+    `search` and `chapter_list`. `manga_details` and `pages` return one result, so these keys are
+    refused there rather than ignored.
+23. **Arithmetic templates:** a `route`, query or header value made only of placeholders, number
+    literals, operators and parentheses, containing a number, a parenthesis or `*`, is refused. See
+    [Variable Interpolation](#variable-interpolation).
+24. **Receiver kinds:** an element-only method (`attr`, `text`, `inner_html`, `select`, `first`,
+    `has_class`, `children`) is refused when its receiver is known from the root and the preceding
+    calls to be a list, string, number, boolean or JSON value. `self.select("img").attr("src")` and
+    `json("/id").text()` are refused with the field path and expression. A receiver whose kind
+    depends on data, such as `self`, a variable or `.at(0)` on a list, is left to runtime. Any receiver
+    check added after 1.0 reports a warning, never an error, so a file valid under 1.0 stays valid.
 
 ### 3.10 Scripting Hooks
 
@@ -2403,13 +2472,18 @@ declaring it in `cache:` (§3.2), which the runtime refuses on the first call.
 
 ## 7. Outbound Request Policy
 
-Every request an extension causes, directly or through the host, passes two checks. They apply
+Every request an extension causes, directly or through the host, passes three checks. They apply
 to the first request and to every redirect hop.
 
-1. **Host policy (`AllowedHost`).** A source may contact only its `base_url` host, matched
+1. **Scheme.** Only absolute `http` and `https` URLs are requested or loaded. The rule is applied
+   at `base_url` validation and install, at every built route and fetched-option URL, after a
+   `pre_request` hook rewrites `req.url`, on each redirect target, on every browser capture target
+   (`page_url`, hook and WASM captures, the solver), on page image downloads, in the image proxy,
+   and on repository URLs. A refused scheme is a permanent error: a download does not retry it.
+2. **Host policy (`AllowedHost`).** A source may contact only its `base_url` host, matched
    exactly, unless it declares `unrestricted_http: true`. The check runs on the final request,
    after any `pre_request` hook has rewritten it.
-2. **Forbidden addresses.** Private, loopback, link-local (including cloud metadata
+3. **Forbidden addresses.** Private, loopback, link-local (including cloud metadata
    `169.254.169.254`), CGNAT, multicast, documentation and reserved ranges are refused whatever
    the host policy allows. For a hostname, the validating resolver filters the addresses it
    resolves to at connect time, so DNS rebinding cannot change the answer after the check. For an

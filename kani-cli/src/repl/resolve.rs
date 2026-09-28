@@ -110,6 +110,17 @@ pub fn resolve(
             let value = match &qe.value {
                 crate::yaml::model::QueryValue::Static(v) => v.clone(),
                 crate::yaml::model::QueryValue::Arg(name) => arg_value(args, name),
+                crate::yaml::model::QueryValue::Template(template) => {
+                    let (texts, vars) = kani_shared::request::template_parts(template);
+                    texts
+                        .iter()
+                        .enumerate()
+                        .map(|(i, text)| {
+                            let value = vars.get(i).map(|v| arg_value(args, v));
+                            format!("{text}{}", value.unwrap_or_default())
+                        })
+                        .collect()
+                }
             };
             (qe.key.clone(), value)
         })

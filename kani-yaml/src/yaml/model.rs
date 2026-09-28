@@ -233,6 +233,8 @@ pub enum QueryValue {
     Static(String),
     /// Single `$var$` placeholder → Rust function-arg identifier.
     Arg(String),
+    /// Text with `$var$` placeholders, interpolated as text.
+    Template(String),
 }
 
 pub struct ValidatedBinding {

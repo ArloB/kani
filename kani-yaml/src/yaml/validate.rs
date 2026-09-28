@@ -48,6 +48,10 @@ pub fn validate(
         )));
     }
 
+    if let Err(e) = kani_shared::request::require_http_url(&ext.base_url) {
+        errors.push(YamlError::Validation(format!("base_url: {e}")));
+    }
+
     let id_encoding = ext.id_encoding.as_ref();
     if let Some(block) = id_encoding {
         errors.append(&mut validate_id_encoding(block));
@@ -145,6 +149,7 @@ pub fn validate(
     errors.append(&mut validate_browser_scripts(&ext.browser_scripts));
     errors.append(&mut validate_pure_scripts(&ext.scripts.pure));
     errors.append(&mut validate_hook_scripts(ext));
+    errors.append(&mut validate_filter_mapping_groups(ext));
 
     // Validate filter IDs: non-empty, no whitespace, no leading/trailing ':', at most one ':'.
     for filter in &ext.filters {
@@ -337,6 +342,22 @@ fn validate_filters_and_option_sets(
         }
     }
 
+    let mut cache_keys: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (name, def) in option_sets {
+        if let OptionSetDef::Fetched { options_fetched_by } = def {
+            let key = options_fetched_by
+                .cache
+                .as_ref()
+                .map_or(name.as_str(), |c| c.key.as_str());
+            if let Some(other) = cache_keys.insert(key, name) {
+                errors.push(YamlError::Validation(format!(
+                    "option_sets.{name}: cache key '{key}' is also used by option_sets.{other}; \
+                     fetched option sets share one cache namespace, so each needs its own key"
+                )));
+            }
+        }
+    }
+
     for (name, def) in option_sets {
         if name.is_empty() {
             errors.push(YamlError::Validation(
@@ -439,40 +460,21 @@ fn validate_cache(
 }
 
 /// Validates the optional `metadata` block: icon must be valid base64 decoding
-/// to a PNG/WebP/SVG payload no larger than 64KB; rate_limit.rps must be
+/// to a PNG/WebP payload no larger than 64KB; rate_limit.rps must be
 /// positive; section ids must be non-empty.
 fn validate_metadata(
     metadata: Option<&MetadataBlock>,
 ) -> Result<ValidatedMetadata, Vec<YamlError>> {
-    const MAX_ICON_BYTES: usize = 64 * 1024;
     let mut errors = Vec::new();
 
     let Some(metadata) = metadata else {
         return Ok(ValidatedMetadata::default());
     };
 
-    if let Some(icon) = &metadata.icon {
-        use base64::Engine;
-        match base64::engine::general_purpose::STANDARD.decode(icon) {
-            Ok(bytes) => {
-                if bytes.len() > MAX_ICON_BYTES {
-                    errors.push(YamlError::Validation(format!(
-                        "metadata.icon: decoded icon is {} bytes, exceeding the {MAX_ICON_BYTES}-byte limit",
-                        bytes.len()
-                    )));
-                }
-                if !is_known_image_format(&bytes) {
-                    errors.push(YamlError::Validation(
-                        "metadata.icon: decoded bytes do not match a supported PNG/WebP/SVG signature".to_string(),
-                    ));
-                }
-            }
-            Err(e) => {
-                errors.push(YamlError::Validation(format!(
-                    "metadata.icon: not valid base64: {e}"
-                )));
-            }
-        }
+    if let Some(icon) = &metadata.icon
+        && let Err(e) = kani_shared::types::source_icon_mime(icon)
+    {
+        errors.push(YamlError::Validation(format!("metadata.icon: {e}")));
     }
 
     let rate_limit = metadata.rate_limit.as_ref().map(|cfg| {
@@ -519,23 +521,6 @@ fn validate_metadata(
     } else {
         Err(errors)
     }
-}
-
-/// Recognizes the magic bytes of the icon formats we support: PNG, WebP
-/// (RIFF....WEBP), and SVG (sniffed as UTF-8 text starting with `<`, ignoring
-/// leading whitespace/BOM).
-fn is_known_image_format(bytes: &[u8]) -> bool {
-    const PNG_MAGIC: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-    if bytes.starts_with(PNG_MAGIC) {
-        return true;
-    }
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return true;
-    }
-    let text = String::from_utf8_lossy(bytes);
-    text.trim_start_matches('\u{feff}')
-        .trim_start()
-        .starts_with('<')
 }
 
 /// Validates the `chapter_sort` block: `options` must be non-empty, each
@@ -629,6 +614,11 @@ fn validate_id_encoding(block: &IdEncodingBlock) -> Vec<YamlError> {
             if f.is_empty() {
                 errors.push(YamlError::Validation(format!(
                     "id_encoding.{role}: field names must not be empty"
+                )));
+            } else if !f.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                errors.push(YamlError::Validation(format!(
+                    "id_encoding.{role}: field name {f:?} may use only letters, digits and '_', \
+                     since it is referenced as ${role}.{f}$"
                 )));
             } else if !seen.insert(f.as_str()) {
                 errors.push(YamlError::Validation(format!(
@@ -730,10 +720,7 @@ fn collect_composite_id_decodes(
 
     let mut vars = extract_dollar_vars(route);
     for v in queries.values() {
-        let trimmed = v.trim();
-        if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2 {
-            vars.push(trimmed[1..trimmed.len() - 1].to_string());
-        }
+        vars.extend(extract_dollar_vars(v));
     }
 
     let mut by_role: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
@@ -883,7 +870,17 @@ fn validate_endpoint(
         match via {
             EndpointVia::BrowserPayload => {
                 let page_url = match &body.page_url {
-                    Some(u) if !u.is_empty() => Some(u.clone()),
+                    Some(u) if !u.is_empty() => {
+                        let (texts, _) = kani_shared::request::template_parts(u);
+                        if !texts[0].is_empty()
+                            && let Err(e) = kani_shared::request::require_http_url(&texts.join("x"))
+                        {
+                            errors.push(YamlError::Validation(format!(
+                                "endpoints.{name}.page_url: {e}"
+                            )));
+                        }
+                        Some(u.clone())
+                    }
                     _ => {
                         errors.push(YamlError::Validation(format!(
                             "endpoints.{name}: 'page_url' is required when 'via: browser_payload' is set"
@@ -926,6 +923,7 @@ fn validate_endpoint(
             Some(r) => {
                 let mut route_errs = validate_route_vars(r, name, fn_args, id_encoding);
                 errors.append(&mut route_errs);
+                errors.extend(arithmetic_template_error(r, name, "route", "+-*"));
                 r.clone()
             }
             None => {
@@ -947,6 +945,14 @@ fn validate_endpoint(
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    for (key, value) in &headers {
+        errors.extend(arithmetic_template_error(
+            value,
+            name,
+            &format!("headers.{key}"),
+            "+-*/",
+        ));
+    }
 
     let queries = match build_query_entries(&body.queries, name, fn_args, id_encoding) {
         Ok(q) => q,
@@ -1043,6 +1049,10 @@ fn validate_endpoint(
             errors.push(YamlError::Validation(format!(
                 "endpoints.{name}: required field '{req}' is missing"
             )));
+        } else if body.fields.get(*req).is_some_and(|def| def.optional()) {
+            errors.push(YamlError::Validation(format!(
+                "endpoints.{name}.fields.{req}: a required field cannot be optional"
+            )));
         }
     }
 
@@ -1069,6 +1079,21 @@ fn validate_endpoint(
             source,
             optional,
         });
+    }
+
+    if !matches!(name, "popular" | "search" | "chapter_list") {
+        for (key, set) in [
+            ("has_next_page", body.has_next_page.is_some()),
+            ("total_pages", body.total_pages.is_some()),
+            ("pagination", body.pagination.is_some()),
+        ] {
+            if set {
+                errors.push(YamlError::Validation(format!(
+                    "endpoints.{name}.{key}: only popular, search and chapter_list page, \
+                     so {name} cannot declare it"
+                )));
+            }
+        }
     }
 
     let has_next_page = match &body.has_next_page {
@@ -1263,6 +1288,11 @@ fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<YamlError>> {
             errors,
         }]
     })?;
+    crate::dsl::check_receivers(&parse_ast.to_arena()?).map_err(|e| {
+        vec![YamlError::Validation(format!(
+            "{field_path}: {e} in {dsl:?}"
+        ))]
+    })?;
     parse_ast.try_into()
 }
 /// Detects `"$varname$"` — a DSL string literal wrapping a dollar-fenced identifier.
@@ -1320,6 +1350,31 @@ fn validate_route_vars(
         .collect()
 }
 
+fn arithmetic_template_error(
+    value: &str,
+    endpoint: &str,
+    location: &str,
+    operators: &str,
+) -> Option<YamlError> {
+    let (texts, vars) = kani_shared::request::template_parts(value);
+    let rest: String = texts.concat();
+    let only_arithmetic = rest.chars().all(|c| {
+        c.is_ascii_digit() || c.is_whitespace() || "()".contains(c) || operators.contains(c)
+    });
+    let has_operator = rest
+        .chars()
+        .any(|c| "()".contains(c) || operators.contains(c));
+    let reads_as_arithmetic = rest
+        .chars()
+        .any(|c| c.is_ascii_digit() || "()*".contains(c));
+    (!vars.is_empty() && only_arithmetic && has_operator && reads_as_arithmetic).then(|| {
+        YamlError::Validation(format!(
+            "endpoints.{endpoint}.{location}: {value:?} is arithmetic, which request templates \
+             do not evaluate; use `pagination` for offsets"
+        ))
+    })
+}
+
 fn build_query_entries(
     queries: &BTreeMap<String, String>,
     endpoint: &str,
@@ -1330,18 +1385,24 @@ fn build_query_entries(
     let mut errors = Vec::new();
 
     for (key, value) in queries {
-        let trimmed = value.trim();
-        let query_value = if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2
-        {
-            let var = &trimmed[1..trimmed.len() - 1];
-            let location = format!("queries.{key}");
-            if let Some(err) = validate_dollar_var(var, endpoint, &location, fn_args, id_encoding) {
-                errors.push(err);
-                continue;
-            }
-            QueryValue::Arg(var.to_string())
-        } else {
-            QueryValue::Static(value.clone())
+        let location = format!("queries.{key}");
+        if let Some(err) = arithmetic_template_error(value, endpoint, &location, "+-*/") {
+            errors.push(err);
+            continue;
+        }
+        let (texts, vars) = kani_shared::request::template_parts(value.trim());
+        let var_errors: Vec<YamlError> = vars
+            .iter()
+            .filter_map(|var| validate_dollar_var(var, endpoint, &location, fn_args, id_encoding))
+            .collect();
+        if !var_errors.is_empty() {
+            errors.extend(var_errors);
+            continue;
+        }
+        let query_value = match vars.as_slice() {
+            [] => QueryValue::Static(value.clone()),
+            [var] if texts.iter().all(String::is_empty) => QueryValue::Arg(var.clone()),
+            _ => QueryValue::Template(value.clone()),
         };
         entries.push(QueryEntry {
             key: key.clone(),
@@ -1356,16 +1417,29 @@ fn build_query_entries(
     }
 }
 
+/// Script names become file names and Rust identifiers in generated crates, so they are held to
+/// one grammar, `[a-z][a-z0-9_]*`, under which distinct names can never collide.
+pub fn is_script_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+fn script_name_error(block: &str, name: &str) -> Option<YamlError> {
+    (!is_script_name(name)).then(|| {
+        YamlError::Validation(format!(
+            "{block}: script name {name:?} must match [a-z][a-z0-9_]* (it becomes a file name \
+             and a Rust identifier)"
+        ))
+    })
+}
+
 fn validate_browser_scripts(
     scripts: &std::collections::BTreeMap<String, String>,
 ) -> Vec<YamlError> {
     let mut errors = Vec::new();
     for (name, src) in scripts {
-        if name.is_empty() {
-            errors.push(YamlError::Validation(
-                "browser_scripts: script name must not be empty".to_string(),
-            ));
-        }
+        errors.extend(script_name_error("browser_scripts", name));
         if src.is_empty() {
             errors.push(YamlError::Validation(format!(
                 "browser_scripts.{name}: script source must not be empty"
@@ -1383,6 +1457,7 @@ fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -
     let mut errors = Vec::new();
     let engine = make_validation_sandbox();
     for (name, src) in scripts {
+        errors.extend(script_name_error("scripts.pure", name));
         if name.is_empty() {
             errors.push(YamlError::Validation(
                 "scripts.pure: function name must not be empty".to_string(),
@@ -1469,6 +1544,34 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<YamlError> {
         }
     }
     errors
+}
+
+/// Every `filter_mapping` key must name a filter group: a filter id, or the part before `:` in a
+/// grouped checkbox id such as `genre:Action`. An unmatched key would be skipped silently.
+fn validate_filter_mapping_groups(ext: &super::schema::YamlExtension) -> Vec<YamlError> {
+    let groups: std::collections::BTreeSet<&str> = ext
+        .filters
+        .iter()
+        .map(|f| {
+            f.id.split_once(':')
+                .map_or(f.id.as_str(), |(group, _)| group)
+        })
+        .collect();
+    endpoint_iter(ext)
+        .into_iter()
+        .flat_map(|(name, ep)| {
+            ep.filter_mapping
+                .keys()
+                .filter(|key| !groups.contains(key.as_str()))
+                .map(move |key| {
+                    YamlError::Validation(format!(
+                        "endpoints.{name}.filter_mapping.{key}: no filter has id '{key}' or an id \
+                         of the form '{key}:<value>'"
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn endpoint_iter(ext: &super::schema::YamlExtension) -> Vec<(&str, &super::schema::EndpointBody)> {

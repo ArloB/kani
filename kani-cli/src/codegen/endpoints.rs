@@ -33,8 +33,9 @@ fn emit_composite_id_decode_prologue(ep: &ValidatedEndpoint) -> String {
             .join(", ");
         let local = format!("__{}_decoded", decode.role);
         out.push_str(&format!(
-            "let {local} = kani_shared::encoding::decode_composite({arg}, \"{delim}\", &{encoding_str}, &[{field_names}]).map_err(kani_shared::ExtensionError::parse)?;\n",
+            "let {local} = kani_shared::encoding::decode_composite({arg}, {delim:?}, &{encoding_str}, &[{field_names}]).map_err(|e| kani_shared::ExtensionError::parse(format!(\"{arg} {{:?}} is not a valid {role} id for this source: {{e}}\", {arg})))?;\n",
             arg = decode.fn_arg,
+            role = decode.role,
             delim = decode.delimiter,
         ));
         for (idx, field) in decode.fields.iter().enumerate() {
@@ -232,7 +233,7 @@ pub(crate) fn emit_chapter_list(
     );
 
     let unpack = format!(
-        "Ok(kani_shared::unpack::unpack_chapter_list(&rows, {}, {}, {}))",
+        "Ok(kani_shared::unpack::unpack_chapter_list(&rows, {}, {}, {}).logged(\"chapter_list\"))",
         emit_hnp_spec(&ep.has_next_page),
         emit_total_pages_spec(&ep.total_pages),
         emit_fn_args(ep),
@@ -386,7 +387,7 @@ fn emit_manga_list_method(
         Some(endpoint_id),
     );
     let unpack = format!(
-        "Ok(kani_shared::unpack::unpack_manga_list(&rows, {}, {}, {}))",
+        "Ok(kani_shared::unpack::unpack_manga_list(&rows, {}, {}, {}).logged({endpoint_id:?}))",
         emit_hnp_spec(&ep.has_next_page),
         emit_total_pages_spec(&ep.total_pages),
         emit_fn_args(ep),

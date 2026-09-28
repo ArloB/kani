@@ -10,6 +10,7 @@ endpoints:
     type: json
     queries:
       order: "score"
+      from: "page-$page$"
     pagination:
       native_page_size: 50
       offset_param: page

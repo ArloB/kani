@@ -32,6 +32,7 @@ endpoints:
     route: "/search"
     queries:
       q: $query$
+      kw: "title-$query$ extra"
     filter_mapping:
       genre: genre
     pagination:
@@ -46,6 +47,8 @@ endpoints:
 
   manga_details:
     route: "/manga/$manga_id$"
+    queries:
+      ref: "id-$manga_id$"
     container: ".manga"
     fields:
       id: '"$manga_id$"'

@@ -89,7 +89,8 @@ Validate examples rather than treating this page as a substitute for the parser.
 
 ## Metadata and rate limits
 
-`metadata.icon` accepts a base64 PNG, WebP, or SVG up to the validator's 64 KiB decoded limit.
+`metadata.icon` accepts a base64 PNG or WebP image up to 64 KiB decoded; SVG and other markup
+are refused.
 `metadata.languages` can advertise more than the primary language. Sections describe named source
 views.
 
@@ -185,7 +186,8 @@ Cache declarations specify namespace scope, TTL, entry limit, and an optional ke
 hooks can read and write declared namespaces through `ctx.cache`.
 
 A `factory` contains several source identities and dot-path overrides. Building the template
-validates each expansion and emits one extension per source.
+validates each expansion and emits one extension per source. An `overrides` path must already exist
+in the template; new entries go under `add`, so a misspelt path fails the build.
 
 ## Browser endpoints
 

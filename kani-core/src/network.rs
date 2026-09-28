@@ -8,6 +8,8 @@ use rquest::dns::{Addrs, Name, Resolve, Resolving};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
+pub use kani_shared::request::require_http_url;
+
 /// Every private, reserved, or otherwise untrusted IP range.
 pub fn is_forbidden_ip(ip: IpAddr) -> bool {
     match ip {
@@ -289,6 +291,28 @@ impl Resolve for ValidatingResolver {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn only_http_and_https_urls_are_requested() {
+        for ok in [
+            "http://a.example/x",
+            "https://a.example/x?y=1",
+            "HTTPS://A.EXAMPLE/",
+        ] {
+            assert!(super::require_http_url(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "file:///etc/passwd",
+            "ftp://a.example/x",
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "/relative/path",
+            "",
+        ] {
+            let err = super::require_http_url(bad).unwrap_err();
+            assert!(err.contains("only http and https"), "{bad}: {err}");
+        }
+    }
 
     fn ip4(s: &str) -> IpAddr {
         s.parse().unwrap()

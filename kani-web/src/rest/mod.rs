@@ -534,6 +534,7 @@ pub(crate) async fn image_proxy(
     let (source_id, url, referer) =
         crate::proxy::unseal_proxy_token_with_source(&query.token, &state.proxy_secret)
             .ok_or_else(|| AppError::Other("Invalid or expired proxy token".into()))?;
+    kani_core::network::require_http_url(&url).map_err(AppError::ValidationError)?;
     let client = match source_id {
         Some(id) => state.proxy_client_for_source(id).await,
         None => state.proxy_client.clone(),

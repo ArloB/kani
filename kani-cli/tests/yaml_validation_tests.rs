@@ -1179,7 +1179,7 @@ metadata:
             METADATA_BASE,
             base64_text("just some bytes that aren't an image"),
         ),
-        "do not match a supported",
+        "must be a PNG or WebP image",
     );
 }
 
@@ -1194,7 +1194,7 @@ metadata:
 "#,
             METADATA_BASE, huge
         ),
-        "exceeding the",
+        "over the 64 KiB limit",
     );
 }
 
@@ -1606,5 +1606,285 @@ fn an_id_outside_the_documented_form_is_rejected() {
             ),
             "must match [a-z][a-z0-9-]*",
         );
+    }
+}
+
+#[test]
+fn script_names_that_could_escape_or_collide_are_refused() {
+    for bad in ["../x", "a-b", "a\"b", "Upper", "1st", ""] {
+        let quoted = serde_json::to_string(bad).unwrap();
+        let browser =
+            format!("{METADATA_BASE}browser_scripts:\n  {quoted}: \"passPayload('{{}}')\"\n");
+        assert_invalid_containing(&browser, "must match [a-z][a-z0-9_]*");
+        let pure = format!("{METADATA_BASE}scripts:\n  pure:\n    {quoted}: \"fn f(x) {{ x }}\"\n");
+        assert_invalid_containing(&pure, "must match [a-z][a-z0-9_]*");
+    }
+    assert_valid(&format!(
+        "{METADATA_BASE}browser_scripts:\n  harvest_cipher_2: \"passPayload('{{}}')\"\n"
+    ));
+}
+
+fn fetched_set(name: &str, cache_key: Option<&str>) -> String {
+    let cache = cache_key
+        .map(|k| format!("      cache:\n        ttl: 600\n        key: {k}\n"))
+        .unwrap_or_default();
+    format!(
+        "  {name}:\n    options_fetched_by:\n      route: \"https://example.com/api/{name}\"\n      \
+         type: json\n      container: /items\n      fields:\n        name: /label\n        \
+         value: /slug\n{cache}"
+    )
+}
+
+#[test]
+fn fetched_option_sets_cannot_share_a_cache_key() {
+    let yaml = |a: String, b: String| format!("{METADATA_BASE}option_sets:\n{a}{b}");
+
+    assert_invalid_containing(
+        &yaml(
+            fetched_set("genres", Some("v1")),
+            fetched_set("tags", Some("v1")),
+        ),
+        "cache key 'v1' is also used by",
+    );
+    assert_invalid_containing(
+        &yaml(
+            fetched_set("genres", Some("tags")),
+            fetched_set("tags", None),
+        ),
+        "cache key 'tags' is also used by",
+    );
+    assert_valid(&yaml(
+        fetched_set("genres", Some("genres-v1")),
+        fetched_set("tags", None),
+    ));
+}
+
+#[test]
+fn a_filter_mapping_key_must_name_a_filter_group() {
+    let yaml = |mapping_key: &str| {
+        format!(
+            "{METADATA_BASE}filters:\n  - id: \"genre:Action\"\n    name: Action\n    type: checkbox\n  \
+             - id: \"genre:Adventure\"\n    name: Adventure\n    type: checkbox\n\
+             endpoints:\n  search:\n    route: \"/s\"\n    filter_mapping:\n      \
+             {mapping_key}: genre\n    fields:\n      id: 'dom(\".id\").text()'\n      \
+             title: 'dom(\".t\").text()'\n"
+        )
+    };
+    assert_valid(&yaml("genre"));
+    assert_invalid_containing(&yaml("genres"), "no filter has id 'genres'");
+}
+
+#[test]
+fn id_encoding_definitions_that_cannot_round_trip_are_refused() {
+    let yaml = |block: &str| format!("{METADATA_BASE}id_encoding:\n  manga:\n{block}");
+    assert_invalid_containing(
+        &yaml("    fields: []\n    delimiter: \"|\"\n"),
+        "'fields' must not be empty",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, hid]\n    delimiter: \"|\"\n"),
+        "duplicate",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, slug]\n    delimiter: \"\"\n"),
+        "'delimiter' must not be empty",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, \"the-slug\"]\n    delimiter: \"|\"\n"),
+        "may use only letters, digits and '_'",
+    );
+    assert_invalid_containing(
+        &yaml("    fields: [hid, \"a.b\"]\n    delimiter: \"|\"\n"),
+        "may use only letters, digits and '_'",
+    );
+    assert_valid(&yaml("    fields: [hid, slug_2]\n    delimiter: \"|\"\n"));
+}
+
+#[test]
+fn a_required_row_field_cannot_be_optional() {
+    let yaml = |endpoint: &str, field: &str| {
+        let plain: String = ["id", "title", "status"]
+            .iter()
+            .filter(|f| **f != field)
+            .map(|f| format!("      {f}: 'dom(\".{f}\").text()'\n"))
+            .collect();
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/x\"\n    fields:\n{plain}      \
+             {field}:\n        expr: 'dom(\".{field}\").text()'\n        optional: true\n"
+        )
+    };
+    for (endpoint, field) in [
+        ("popular", "id"),
+        ("search", "title"),
+        ("manga_details", "status"),
+        ("chapter_list", "id"),
+    ] {
+        assert_invalid_containing(
+            &yaml(endpoint, field),
+            &format!("endpoints.{endpoint}.fields.{field}: a required field cannot be optional"),
+        );
+    }
+    assert_valid(&yaml("search", "cover_url"));
+}
+
+#[test]
+fn a_file_without_schema_version_is_version_one() {
+    let validated = validate_str(METADATA_BASE).unwrap();
+    assert_eq!(validated.schema_version, 1);
+}
+
+#[test]
+fn a_scaffolded_extension_states_its_schema_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_kani-cli"))
+        .args(["new", "pinned-source"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let yaml = std::fs::read_to_string(dir.path().join("pinned-source.yaml")).unwrap();
+    assert!(
+        yaml.lines().any(|l| l == "schema_version: 1"),
+        "scaffold must pin schema_version: {yaml}"
+    );
+}
+
+#[test]
+fn an_svg_or_html_icon_is_refused() {
+    use base64::Engine;
+    for markup in ["<svg xmlns='http://www.w3.org/2000/svg'/>", "<html></html>"] {
+        let icon = base64::engine::general_purpose::STANDARD.encode(markup);
+        assert_invalid_containing(
+            &format!("{METADATA_BASE}metadata:\n  icon: \"{icon}\"\n"),
+            "PNG or WebP",
+        );
+    }
+    let webp = base64::engine::general_purpose::STANDARD.encode(b"RIFF\x10\0\0\0WEBPVP8 ");
+    assert_valid(&format!("{METADATA_BASE}metadata:\n  icon: \"{webp}\"\n"));
+}
+
+#[test]
+fn paging_keys_are_refused_on_endpoints_that_return_one_result() {
+    let yaml = |endpoint: &str, fields: &str, key: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  {endpoint}:\n    route: \"/x\"\n    {key}\n    fields:\n{fields}"
+        )
+    };
+    let details = "      id: 'dom(\".id\").text()'\n      title: 'dom(\".t\").text()'\n      \
+                   status: 'dom(\".s\").text()'\n";
+    let pages = "      url: 'self.attr(\"src\")'\n      index: 'self.index()'\n";
+    for (endpoint, fields) in [("manga_details", details), ("pages", pages)] {
+        for (key, name) in [
+            ("has_next_page: true", "has_next_page"),
+            ("total_pages: 3", "total_pages"),
+            (
+                "pagination:\n      offset_type: page\n      offset_param: p\n      native_page_size: 20",
+                "pagination",
+            ),
+        ] {
+            assert_invalid_containing(
+                &yaml(endpoint, fields, key),
+                &format!("endpoints.{endpoint}.{name}: only popular, search and chapter_list page"),
+            );
+        }
+    }
+    let list = "      id: 'dom(\".id\").text()'\n      title: 'dom(\".t\").text()'\n";
+    assert_valid(&yaml("search", list, "total_pages: 3"));
+}
+
+#[test]
+fn arithmetic_in_a_request_template_is_refused_but_text_templates_are_not() {
+    let yaml = |route: &str, key: &str, value: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"{route}\"\n    {key}:\n      \
+             v: \"{value}\"\n    fields:\n      id: 'dom(\".id\").text()'\n      \
+             title: 'dom(\".t\").text()'\n"
+        )
+    };
+    for value in ["$page_size$ * ($page$ - 1)", "$page$+1", "($page$)"] {
+        for key in ["queries", "headers"] {
+            assert_invalid_containing(
+                &yaml("/s", key, value),
+                &format!("{key}.v: {value:?} is arithmetic"),
+            );
+        }
+    }
+    assert_invalid_containing(
+        &yaml("$page$*2", "queries", "x"),
+        "route: \"$page$*2\" is arithmetic",
+    );
+    for value in ["id-$query$", "$query$ extra", "$query$-$page$", "$query$"] {
+        assert_valid(&yaml("/s/$query$/2", "queries", value));
+    }
+    assert_valid(&yaml("/$query$", "headers", "Bearer $query$"));
+}
+
+#[test]
+fn base_url_and_literal_page_urls_must_be_http() {
+    let with_base = |base: &str| {
+        format!("id: scheme\nname: Scheme\nversion: \"0.1.0\"\nbase_url: \"{base}\"\n")
+    };
+    for bad in [
+        "ftp://example.com",
+        "file:///srv/manga",
+        "example.com",
+        "javascript:x",
+    ] {
+        assert_invalid_containing(&with_base(bad), "base_url: only http and https");
+    }
+    assert_valid(&with_base("https://example.com"));
+
+    let with_page_url = |page_url: &str| {
+        format!(
+            "{METADATA_BASE}browser_scripts:\n  grab: |\n    passPayload(\"{{}}\");\nendpoints:\n  \
+             manga_details:\n    via: browser_payload\n    page_url: \"{page_url}\"\n    \
+             script: grab\n    container: \":root\"\n    fields:\n      id: '\"$manga_id$\"'\n      \
+             title: 'self.ptr(\"/t\").str()'\n      status: '\"unknown\"'\n"
+        )
+    };
+    for bad in [
+        "javascript:passPayload(1)",
+        "file:///m/$manga_id$",
+        "ftp://h/$manga_id$",
+    ] {
+        assert_invalid_containing(&with_page_url(bad), "page_url: only http and https");
+    }
+    for ok in ["https://example.com/m/$manga_id$", "$manga_id$"] {
+        assert_valid(&with_page_url(ok));
+    }
+}
+
+#[test]
+fn an_element_method_on_a_receiver_that_cannot_be_an_element_is_refused() {
+    let yaml = |expr: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    container: \".item\"\n    \
+             fields:\n      id: 'self.attr(\"data-id\")'\n      title: '{expr}'\n"
+        )
+    };
+    for (expr, receiver) in [
+        (r#"self.select("img").attr("src")"#, "a list"),
+        (r#"self.select("a").text()"#, "a list"),
+        (r#"self.first("a").text().first("b")"#, "a string"),
+        (r#""x".attr("y")"#, "a string"),
+        (r#"self.attr("n").int().text()"#, "a number"),
+        (r#"self.first("a").has_class("x").text()"#, "a boolean"),
+        (r#"json("/id").text()"#, "a JSON value"),
+        (r#"self.ptr("/id").text()"#, "a JSON value"),
+    ] {
+        assert_invalid_containing(
+            &yaml(expr),
+            &format!(
+                "endpoints.search.fields.title: this method needs an HTML element, but its receiver is {receiver}"
+            ),
+        );
+    }
+    for ok in [
+        r#"self.first("img").attr("src")"#,
+        r#"self.select("a").at(0).text()"#,
+        r#"self.select("a").map(self.attr("href")).join(",")"#,
+        r#"dom("h1").text().trim()"#,
+    ] {
+        assert_valid(&yaml(ok));
     }
 }

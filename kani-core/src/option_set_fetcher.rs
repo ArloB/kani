@@ -36,6 +36,7 @@ fn enforce_option_set_host(
     url: &str,
     unrestricted_http: bool,
 ) -> Result<AllowedHost> {
+    crate::network::require_http_url(url).map_err(Error::Other)?;
     if unrestricted_http {
         return Ok(AllowedHost::Unrestricted);
     }
@@ -322,6 +323,16 @@ mod tests {
     fn restricted_source_allows_its_own_host() {
         let url = resolve_route("https://source.invalid/manga/", "/api/genres").unwrap();
         assert!(enforce_option_set_host("https://source.invalid", &url, false).is_ok());
+    }
+
+    #[test]
+    fn an_option_set_url_must_be_http_even_when_unrestricted() {
+        for bad in ["ftp://anywhere.invalid/x", "file://localhost/etc/passwd"] {
+            let err = enforce_option_set_host("https://source.invalid", bad, true)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("only http and https"), "{bad}: {err}");
+        }
     }
 
     #[test]

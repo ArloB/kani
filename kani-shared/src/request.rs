@@ -18,6 +18,71 @@ pub enum QueryValue {
     Static(String),
     /// A `$var$` placeholder resolved from the runtime args (by the dot-replaced key).
     Arg(String),
+    /// Text with `$var$` placeholders, each replaced by its argument's value.
+    Template(String),
+}
+
+/// Refuses any URL that is not absolute `http` or `https` with a host. Every place Kani fetches
+/// or loads a URL on a source's behalf applies it, so `file:`, `ftp:` or `javascript:` never
+/// reach a client or a browser.
+pub fn require_http_url(url: &str) -> Result<(), String> {
+    let rest = ["https://", "http://"].iter().find_map(|scheme| {
+        url.get(..scheme.len())
+            .filter(|head| head.eq_ignore_ascii_case(scheme))
+            .map(|_| &url[scheme.len()..])
+    });
+    match rest.and_then(|r| r.chars().next()) {
+        Some(c) if !matches!(c, '/' | '?' | '#') && !c.is_whitespace() => Ok(()),
+        _ => Err(format!(
+            "only http and https URLs can be requested, not {url:?}"
+        )),
+    }
+}
+
+/// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
+/// names, starting and ending with text. A `$` that opens no placeholder stays literal.
+pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {
+    let mut texts = vec![String::new()];
+    let mut vars = Vec::new();
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'.')
+            {
+                end += 1;
+            }
+            if end < bytes.len() && bytes[end] == b'$' && end > start {
+                vars.push(template[start..end].to_string());
+                texts.push(String::new());
+                i = end + 1;
+                continue;
+            }
+        }
+        let ch = template[i..].chars().next().unwrap_or_default();
+        if let Some(last) = texts.last_mut() {
+            last.push(ch);
+        }
+        i += ch.len_utf8();
+    }
+    (texts, vars)
+}
+
+/// Replaces each `$var$` in `template` with its argument (looked up by the dot-replaced key),
+/// as plain text. `None` when an argument is missing, so a placeholder never reaches the wire.
+pub fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String> {
+    let (texts, vars) = template_parts(template);
+    let mut out = String::with_capacity(template.len());
+    for (i, text) in texts.iter().enumerate() {
+        out.push_str(text);
+        if let Some(var) = vars.get(i) {
+            out.push_str(args.get(&var.replace('.', "_"))?);
+        }
+    }
+    Some(out)
 }
 
 /// One declared query parameter.
@@ -157,6 +222,7 @@ pub fn build_queries(
             let val = match &e.value {
                 QueryValue::Static(s) => s.clone(),
                 QueryValue::Arg(name) => args.get(name.as_str())?.clone(),
+                QueryValue::Template(template) => interpolate(template, args)?,
             };
             Some((e.key.clone(), val))
         })
@@ -201,7 +267,7 @@ pub fn apply_filters(
                     };
                     out.push((param.clone(), v));
                 }
-                FilterState::Checkbox(false) if !omit_empty => {
+                FilterState::Checkbox(false) if !omit_empty && action.is_empty() => {
                     out.push((param.clone(), bool_literal(bool_fmt, false).to_string()));
                 }
                 FilterState::Multiselect(values) => match array_fmt {
@@ -280,6 +346,31 @@ mod tests {
     fn build_url_errors_on_unresolved_placeholder() {
         let err = build_url("https://s.example", "/list/$page$", &args(&[])).unwrap_err();
         assert!(err.contains("page"));
+    }
+
+    #[test]
+    fn checked_grouped_checkboxes_each_send_their_value_and_unchecked_send_nothing() {
+        let mapping = vec![("genre".to_string(), FilterMapping::Simple("genre".into()))];
+        let format = FilterFormat {
+            omit_empty: false,
+            ..FilterFormat::default()
+        };
+        let boxes = [("Action", true), ("Adventure", true), ("Comedy", false)];
+        let filters: Vec<ActiveFilter> = boxes
+            .iter()
+            .map(|(value, on)| ActiveFilter {
+                filter_name: format!("genre:{value}"),
+                state: FilterState::Checkbox(*on),
+            })
+            .collect();
+
+        assert_eq!(
+            apply_filters(&mapping, Some(&format), &filters),
+            vec![
+                ("genre".to_string(), "Action".to_string()),
+                ("genre".to_string(), "Adventure".to_string()),
+            ]
+        );
     }
 
     #[test]

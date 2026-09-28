@@ -90,7 +90,7 @@ pub enum AllowedHost {
 
 impl AllowedHost {
     /// Enforces this policy for a resolved request host. Shared by the HTTP path
-    /// (`HostState::check_allowed_host`) and the browser `page_url` check so both
+    /// (`HostState::check_allowed_url`) and the browser `page_url` check so both
     /// apply identical matching rules.
     pub fn allows_host(&self, host: &str) -> std::result::Result<(), String> {
         match self {
@@ -293,9 +293,10 @@ impl HostState {
         }
     }
 
-    /// Enforces the `AllowedHost` policy for a given request host string.
-    pub(crate) fn check_allowed_host(&self, host: &str) -> std::result::Result<(), String> {
-        self.allowed_host.allows_host(host)
+    /// Enforces the http/https rule and the `AllowedHost` policy for a request URL.
+    pub(crate) fn check_allowed_url(&self, url: &url::Url) -> std::result::Result<(), String> {
+        crate::network::require_http_url(url.as_str())?;
+        self.allowed_host.allows_host(url.host_str().unwrap_or(""))
     }
 
     pub(crate) fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {

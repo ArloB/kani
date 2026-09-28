@@ -1092,7 +1092,7 @@ pub async fn fetch_body(
             url.query_pairs_mut().extend_pairs(working.queries.iter());
         }
 
-        state.check_allowed_host(url.host_str().unwrap_or(""))?;
+        state.check_allowed_url(&url)?;
         state.charge_io()?;
 
         let method = match working.method.to_uppercase().as_str() {
@@ -1304,7 +1304,7 @@ pub(super) fn charge_fetch_request(
     endpoint_id: Option<String>,
 ) -> Result<kani_shared::ast::RequestDef, String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
-    state.check_allowed_host(parsed.host_str().unwrap_or(""))?;
+    state.check_allowed_url(&parsed)?;
     state.charge_io()?;
 
     let method_str = match method {

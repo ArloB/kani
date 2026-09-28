@@ -302,3 +302,28 @@ async fn a_cached_image_skips_the_upstream_throttle() {
         "a cache hit waited {elapsed:?}, which is at least the {INTERVAL:?} host interval it does not owe"
     );
 }
+
+#[tokio::test]
+async fn a_proxy_token_for_a_non_http_url_is_refused() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    for target in [
+        "ftp://files.example/cover.jpg",
+        "file://localhost/etc/passwd",
+    ] {
+        let res = app
+            .clone()
+            .oneshot(signed_get(&state, target, &cookie))
+            .await
+            .unwrap();
+        assert!(res.status().is_client_error(), "{target}: {}", res.status());
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("only http and https"), "{target}: {body}");
+    }
+}

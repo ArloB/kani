@@ -25,6 +25,7 @@ fn make_source(id: &str, name: &str, base_url: &str, lang: &str) -> FactorySourc
         language: lang.to_string(),
         mihon_source_id: None,
         overrides: BTreeMap::new(),
+        add: BTreeMap::new(),
     }
 }
 
@@ -55,7 +56,7 @@ fn apply_factory_overrides_sets_top_level_fields() {
     let base: serde_yaml::Value = serde_yaml::from_str(&src).unwrap();
     let source = make_source("new-id", "New Name", "https://new.example.com", "fr");
 
-    let result = apply_factory_overrides(base, &source);
+    let result = apply_factory_overrides(base, &source).unwrap();
     let result_ext: YamlExtension = serde_yaml::from_value(result).unwrap();
 
     assert_eq!(result_ext.id, "new-id");
@@ -74,7 +75,7 @@ fn apply_factory_overrides_dot_path_sets_nested_value() {
         serde_yaml::Value::String("$base_url$/find?q=$query$".to_string()),
     );
 
-    let result = apply_factory_overrides(base, &source);
+    let result = apply_factory_overrides(base, &source).unwrap();
     let result_ext: YamlExtension = serde_yaml::from_value(result).unwrap();
 
     let search_route = result_ext
@@ -145,7 +146,7 @@ fn factory_yaml_validates_cleanly() {
 
     for source_def in &factory.sources {
         let base: serde_yaml::Value = serde_yaml::from_str(&src).unwrap();
-        let expanded = apply_factory_overrides(base, source_def);
+        let expanded = apply_factory_overrides(base, source_def).unwrap();
         let expanded_src = serde_yaml::to_string(&expanded).unwrap();
         let expanded_ext: YamlExtension = serde_yaml::from_value(
             serde_yaml::from_str::<serde_yaml::Value>(&expanded_src).unwrap(),
@@ -220,5 +221,65 @@ factory:
     assert!(
         !ext_root.join("kani-dedup-alpha").exists(),
         "no crate may be generated for a refused source"
+    );
+}
+
+#[test]
+fn an_override_must_name_a_path_the_template_has() {
+    let (_, src) = load_factory_yaml("factory.yaml");
+    let base: serde_yaml::Value = serde_yaml::from_str(&src).unwrap();
+    let yaml = |s: &str| serde_yaml::Value::String(s.to_string());
+
+    for typo in [
+        "endpoints.search.rotue",
+        "endpoints.serach.route",
+        "endpoints.search.fields.id.exrp",
+    ] {
+        let mut source = make_source("beta", "Beta", "https://beta.example.com", "ja");
+        source.overrides.insert(typo.to_string(), yaml("/x"));
+        let errors = apply_factory_overrides(base.clone(), &source).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains(&format!("overrides.{typo}")) && e.contains("use add:")),
+            "{typo}: {errors:?}"
+        );
+    }
+
+    let mut source = make_source("beta", "Beta", "https://beta.example.com", "ja");
+    source.add.insert(
+        "endpoints.search.queries".to_string(),
+        serde_yaml::from_str("{page: $page$}").unwrap(),
+    );
+    let added: YamlExtension =
+        serde_yaml::from_value(apply_factory_overrides(base.clone(), &source).unwrap()).unwrap();
+    let search = added.endpoints.search.unwrap();
+    assert_eq!(
+        search.queries.get("page").map(String::as_str),
+        Some("$page$")
+    );
+
+    let mut source = make_source("beta", "Beta", "https://beta.example.com", "ja");
+    source
+        .add
+        .insert("endpoints.search.route".to_string(), yaml("/x"));
+    let errors = apply_factory_overrides(base.clone(), &source).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("add.endpoints.search.route") && e.contains("already exists")),
+        "{errors:?}"
+    );
+
+    let mut source = make_source("beta", "Beta", "https://beta.example.com", "ja");
+    source
+        .add
+        .insert("endpoints.serach.queries".to_string(), yaml("x"));
+    let errors = apply_factory_overrides(base, &source).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("add.endpoints.serach.queries") && e.contains("serach")),
+        "{errors:?}"
     );
 }

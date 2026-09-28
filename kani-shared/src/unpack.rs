@@ -185,17 +185,41 @@ fn resolve_total_pages<T: JsonRows>(result: &T, total: TotalPages) -> Option<u32
     }
 }
 
-/// Unpack a manga listing. Rows missing a required field are skipped, matching the
-/// list semantics both engines already had.
+/// A listing and the number of rows skipped because a required field was not a
+/// string or integer.
+pub struct Unpacked<T> {
+    pub value: T,
+    pub skipped: usize,
+}
+
+impl<T> Unpacked<T> {
+    /// Returns the listing, reporting skipped rows as a host warning.
+    #[cfg(target_family = "wasm")]
+    pub fn logged(self, endpoint: &str) -> T {
+        if self.skipped > 0 {
+            crate::utility::log(2, line!(), &skipped_rows_message(endpoint, self.skipped));
+        }
+        self.value
+    }
+}
+
+/// The warning both backends log when a listing skipped rows.
+pub fn skipped_rows_message(endpoint: &str, skipped: usize) -> String {
+    format!("{endpoint}: skipped {skipped} row(s) whose required field was not a string or integer")
+}
+
+/// Unpack a manga listing. Rows without a usable `id` or `title` are skipped and
+/// counted.
 pub fn unpack_manga_list<T: JsonRows>(
     result: &T,
     hnp: HasNextPage,
     total: TotalPages,
     fn_args: FnArgs,
-) -> wit_types::MangaList {
+) -> Unpacked<wit_types::MangaList> {
     let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
-    let manga = (0..result.rows_len())
+    let rows = result.rows_len();
+    let manga: Vec<_> = (0..rows)
         .filter_map(|i| {
             let row = result.rows_get(i).ok()?;
             Some(wit_types::MangaListItem {
@@ -205,10 +229,16 @@ pub fn unpack_manga_list<T: JsonRows>(
             })
         })
         .collect();
-    wit_types::MangaList {
-        manga,
-        has_next_page,
-        total_pages,
+    let skipped = usize::try_from(rows)
+        .unwrap_or(0)
+        .saturating_sub(manga.len());
+    Unpacked {
+        value: wit_types::MangaList {
+            manga,
+            has_next_page,
+            total_pages,
+        },
+        skipped,
     }
 }
 
@@ -240,16 +270,17 @@ pub fn unpack_manga_info<T: JsonRows>(
     })
 }
 
-/// Unpack a chapter listing.
+/// Unpack a chapter listing. Rows without a usable `id` are skipped and counted.
 pub fn unpack_chapter_list<T: JsonRows>(
     result: &T,
     hnp: HasNextPage,
     total: TotalPages,
     fn_args: FnArgs,
-) -> wit_types::ChapterList {
+) -> Unpacked<wit_types::ChapterList> {
     let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
-    let chapters = (0..result.rows_len())
+    let rows = result.rows_len();
+    let chapters: Vec<_> = (0..rows)
         .filter_map(|i| {
             let row = result.rows_get(i).ok()?;
             Some(wit_types::ChapterInfo {
@@ -279,10 +310,16 @@ pub fn unpack_chapter_list<T: JsonRows>(
             })
         })
         .collect();
-    wit_types::ChapterList {
-        chapters,
-        has_next_page,
-        total_pages,
+    let skipped = usize::try_from(rows)
+        .unwrap_or(0)
+        .saturating_sub(chapters.len());
+    Unpacked {
+        value: wit_types::ChapterList {
+            chapters,
+            has_next_page,
+            total_pages,
+        },
+        skipped,
     }
 }
 
@@ -343,12 +380,27 @@ mod tests {
             "rows": [{"id": "m1", "title": "A"}, {"id": "m2", "title": "B", "cover_url": "c"}],
             "scalars": {"has_next_page": true}
         });
-        let out = unpack_manga_list(&result, HasNextPage::FromScalar, TotalPages::None, &[]);
+        let out = unpack_manga_list(&result, HasNextPage::FromScalar, TotalPages::None, &[]).value;
         assert_eq!(out.manga.len(), 2);
         assert_eq!(out.manga[0].id, "m1");
         assert_eq!(out.manga[1].cover_url.as_deref(), Some("c"));
         assert!(out.has_next_page);
         assert_eq!(out.total_pages, None);
+    }
+
+    #[test]
+    fn listing_rows_without_a_usable_required_field_are_counted_as_skipped() {
+        let manga = json!({
+            "rows": [{"id": "m1", "title": "A"}, {"id": true, "title": "B"}, {"id": "m3", "title": ["C"]}]
+        });
+        let out = unpack_manga_list(&manga, HasNextPage::Static(false), TotalPages::None, &[]);
+        assert_eq!(out.skipped, 2);
+        assert_eq!(out.value.manga.len(), 1);
+
+        let chapters = json!({"rows": [{"id": "c1"}, {"id": {"n": 2}}]});
+        let out = unpack_chapter_list(&chapters, HasNextPage::Static(false), TotalPages::None, &[]);
+        assert_eq!(out.skipped, 1);
+        assert_eq!(out.value.chapters.len(), 1);
     }
 
     #[test]
@@ -370,7 +422,8 @@ mod tests {
         let result = json!({
             "rows": [{"id": "c1", "number": 1.5, "page_count": "20"}]
         });
-        let out = unpack_chapter_list(&result, HasNextPage::Static(false), TotalPages::None, &[]);
+        let out =
+            unpack_chapter_list(&result, HasNextPage::Static(false), TotalPages::None, &[]).value;
         assert_eq!(out.chapters.len(), 1);
         assert_eq!(out.chapters[0].number, 1.5);
         assert_eq!(out.chapters[0].language, "en");

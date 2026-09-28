@@ -41,8 +41,9 @@ pub(crate) fn emit_request_block(
 
     for entry in queries {
         let val = match &entry.value {
-            QueryValue::Static(s) => format!("\"{}\"", s),
+            QueryValue::Static(s) => format!("{s:?}"),
             QueryValue::Arg(name) => name.replace('.', "_"),
+            QueryValue::Template(template) => emit_text_format(template),
         };
         lines.push(format!("    .query(\"{}\", {})", entry.key, val));
     }
@@ -134,6 +135,20 @@ fn emit_filter_apply(
 /// composite-id subfield; these are sanitized to `manga_hid` since `.` is not
 /// a valid Rust identifier character (the matching local is emitted by the
 /// decode prologue).
+fn emit_text_format(template: &str) -> String {
+    let (texts, vars) = kani_shared::request::template_parts(template);
+    let fmt: String = texts
+        .iter()
+        .map(|t| t.replace('{', "{{").replace('}', "}}"))
+        .collect::<Vec<_>>()
+        .join("{}");
+    let args: String = vars
+        .iter()
+        .map(|v| format!(", {}", v.replace('.', "_")))
+        .collect();
+    format!("format!({fmt:?}{args})")
+}
+
 pub(crate) fn emit_route_format(route: &str, base_url_expr: &str) -> String {
     let mut vars: Vec<String> = Vec::new();
     let mut fmt = String::new();

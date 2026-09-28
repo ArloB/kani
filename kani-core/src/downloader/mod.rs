@@ -303,7 +303,7 @@ impl DownloaderManager {
             e,
             error::Error::HttpStatus { status, .. }
                 if matches!(status, 400 | 401 | 403 | 404 | 405 | 410 | 451)
-        )
+        ) || matches!(e, error::Error::UnsupportedScheme(_))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1029,6 +1029,32 @@ impl PageListFetcher for MockPageListFetcher {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[tokio::test]
+    async fn a_page_url_that_is_not_http_fails_at_once_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let client = SmartClient::new(None).unwrap();
+        let started = std::time::Instant::now();
+        let err = DownloaderManager::download_page_with_retry_for_test(
+            &client,
+            "ftp://cdn.example/p1.jpg",
+            0,
+            tmp.path(),
+            5,
+            1000,
+            "https://source.example",
+            None,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("only http and https"), "{err}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(900),
+            "the refusal was retried"
+        );
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
 
     #[tokio::test]
     async fn an_empty_page_list_fails_rather_than_sealing_a_zero_page_cbz() {

@@ -219,6 +219,11 @@ async fn search_request_parity_with_filter_and_pagination() {
         "pagination offset param must match across engines"
     );
     assert_eq!(y_genre.as_deref(), Some("action"));
+    assert_eq!(
+        y_req.query_param("kw").as_deref(),
+        Some("title-naruto+extra")
+    );
+    assert_eq!(w_req.query_param("kw"), y_req.query_param("kw"));
 }
 
 #[tokio::test]
@@ -229,9 +234,11 @@ async fn details_request_path_parity() {
     let y = interpreted(&origin.base());
 
     y.get_manga_details("manga-1").await.unwrap();
-    let y_path = origin.last_request("/manga/manga-1").map(|r| r.path);
+    let y_req = origin.last_request("/manga/manga-1").unwrap();
     w.get_manga_details("manga-1").await.unwrap();
-    let w_path = origin.last_request("/manga/manga-1").map(|r| r.path);
-    assert_eq!(w_path, y_path);
-    assert_eq!(w_path.as_deref(), Some("/manga/manga-1"));
+    let w_req = origin.last_request("/manga/manga-1").unwrap();
+    assert_eq!(w_req.path, y_req.path);
+    assert_eq!(w_req.path, "/manga/manga-1");
+    assert_eq!(y_req.query_param("ref").as_deref(), Some("id-manga-1"));
+    assert_eq!(w_req.query_param("ref"), y_req.query_param("ref"));
 }

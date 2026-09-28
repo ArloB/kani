@@ -84,7 +84,8 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::Static(false),
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("popular"))
     }
 
     fn search_manga(
@@ -96,7 +97,8 @@ impl MangaExtension for FixtureGen {
     ) -> ExtensionResult<MangaList> {
         let mut req = HttpRequest::get(format!("{}/search", self.base_url))
             .endpoint_id("search")
-            .query("q", query);
+            .query("q", query)
+            .query("kw", format!("title-{} extra", query));
 
         let __filter_mapping: [(String, kani_shared::request::FilterMapping); 1] = [(
             "genre".to_string(),
@@ -122,12 +124,14 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::FromScalar,
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("search"))
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
         let req = HttpRequest::get(format!("{}/manga/{}", self.base_url, manga_id))
-            .endpoint_id("manga_details");
+            .endpoint_id("manga_details")
+            .query("ref", format!("id-{}", manga_id));
         let bp = BlueprintBuilder::new(".manga")
             .request(req)
             .field("artists", Expr::list(vec![]))
@@ -162,7 +166,8 @@ impl MangaExtension for FixtureGen {
             kani_shared::unpack::HasNextPage::Static(false),
             kani_shared::unpack::TotalPages::None,
             &[],
-        ))
+        )
+        .logged("chapter_list"))
     }
 
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {

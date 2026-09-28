@@ -132,6 +132,31 @@ pub fn is_valid_extension_id(id: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// Largest decoded source icon, in bytes.
+pub const MAX_ICON_BYTES: usize = 64 * 1024;
+
+/// Checks a base64 source icon and returns the MIME type its bytes carry. Only PNG and WebP
+/// are accepted, so an icon rendered from a `data:` URL can never be markup.
+pub fn source_icon_mime(icon: &str) -> Result<&'static str, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(icon)
+        .map_err(|e| format!("icon is not valid base64: {e}"))?;
+    if bytes.len() > MAX_ICON_BYTES {
+        return Err(format!(
+            "icon is {} bytes decoded, over the 64 KiB limit",
+            bytes.len()
+        ));
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Ok("image/png")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Ok("image/webp")
+    } else {
+        Err("icon must be a PNG or WebP image".to_string())
+    }
+}
+
 const AUTO_SCROLL_ON: &str = "/*kani:auto-scroll=true*/\n";
 const AUTO_SCROLL_OFF: &str = "/*kani:auto-scroll=false*/\n";
 

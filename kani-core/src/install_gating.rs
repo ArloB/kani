@@ -104,6 +104,12 @@ pub fn check_extension_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn check_icon(icon: Option<&str>) -> Result<(), String> {
+    icon.map_or(Ok(()), |icon| {
+        kani_shared::types::source_icon_mime(icon).map(|_| ())
+    })
+}
+
 /// What an artifact declares about itself, whichever format it is.
 pub struct ArtifactFacts<'a> {
     pub id: &'a str,
@@ -111,6 +117,8 @@ pub struct ArtifactFacts<'a> {
     pub dsl_schema_version: Option<u32>,
     pub requires_capabilities: &'a [String],
     pub scripts: &'a crate::scripting::HookScripts,
+    pub icon: Option<&'a str>,
+    pub base_url: &'a str,
 }
 
 /// Scripts that do not compile on the engine they run on. A source loaded anyway would run
@@ -142,6 +150,8 @@ pub fn check_artifact(
         check_min_kani_version(facts.min_kani_version, host_version),
         check_dsl_schema_version(facts.dsl_schema_version),
         check_required_capabilities(facts.requires_capabilities, solver),
+        check_icon(facts.icon),
+        crate::network::require_http_url(facts.base_url).map_err(|e| format!("base_url: {e}")),
     ]
     .into_iter()
     .filter_map(Result::err)
@@ -190,17 +200,49 @@ mod tests {
                 dsl_schema_version: Some(kani_shared::ast::DSL_SCHEMA_VERSION + 1),
                 requires_capabilities: &caps,
                 scripts: &crate::scripting::HookScripts::default(),
+                icon: Some("PHN2Zz4="),
+                base_url: "ftp://files.example",
             },
             "1.0.0",
             SolverCapability::Capture,
         );
-        let expected = ["reserved", "99.0.0", "schema version", "teleport"];
+        let expected = [
+            "reserved",
+            "99.0.0",
+            "schema version",
+            "teleport",
+            "PNG or WebP",
+            "base_url: only http and https",
+        ];
         assert_eq!(problems.len(), expected.len(), "{problems:?}");
         for (problem, needle) in problems.iter().zip(expected) {
             assert!(
                 problem.contains(needle),
                 "{problem:?} should mention {needle:?}"
             );
+        }
+    }
+
+    #[test]
+    fn only_png_and_webp_icons_install() {
+        use base64::Engine;
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let png = b64(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        let webp = b64(b"RIFF\x10\0\0\0WEBPVP8 ");
+        for ok in [None, Some(png.as_str()), Some(webp.as_str())] {
+            assert!(check_icon(ok).is_ok(), "{ok:?}");
+        }
+        let svg = b64(b"<svg xmlns='http://www.w3.org/2000/svg'/>");
+        let html = b64(b"<html><script>alert(1)</script></html>");
+        let oversized = b64(&[b"\x89PNG\r\n\x1a\n".as_slice(), &[0; 64 * 1024]].concat());
+        for (bad, needle) in [
+            (svg.as_str(), "PNG or WebP"),
+            (html.as_str(), "PNG or WebP"),
+            ("not base64!", "base64"),
+            (oversized.as_str(), "64 KiB"),
+        ] {
+            let err = check_icon(Some(bad)).unwrap_err();
+            assert!(err.contains(needle), "{err}");
         }
     }
 
