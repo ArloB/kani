@@ -91,6 +91,18 @@ impl MangaExtension for ForEachSource {
             .endpoint_id("search");
         let bp = BlueprintBuilder::new(":root")
             .request(req)
+            .bind(
+                "$banner",
+                Expr::fetch_html(
+                    Expr::dom(".banner").attr("href"),
+                    BlueprintBuilder::new(":root")
+                        .field("id", Expr::dom(".id").text())
+                        .field("status", Expr::dom(".status").text())
+                        .field("title", Expr::dom(".title").text())
+                        .build(),
+                )
+                .with_endpoint_id("search/banner"),
+            )
             .field("id", Expr::dom(".id").text())
             .field("title", Expr::dom(".title").text())
             .field(
@@ -103,6 +115,7 @@ impl MangaExtension for ForEachSource {
                         .field("title", Expr::dom(".title").text())
                         .build(),
                 )
+                .with_endpoint_id("search/details")
                 .with_on_failure(kani_shared::ast::OnFailurePolicy::Skip),
             )
             .build();

@@ -290,3 +290,16 @@ fn every_fixture_generates_its_recorded_output() {
         }
     }
 }
+
+#[test]
+fn a_then_result_is_bound_under_the_name_expressions_use() {
+    let validated = load_and_validate("for_each.yaml");
+    let lib = codegen::generate(&validated, false).lib_rs;
+    assert!(lib.contains("\"$banner\""), "then binds $merge_as:\n{lib}");
+    for id in ["search/banner", "search/details"] {
+        assert!(
+            lib.contains(&format!(".with_endpoint_id(\"{id}\")")),
+            "sub-fetch {id} carries its endpoint id for hook lookup:\n{lib}"
+        );
+    }
+}

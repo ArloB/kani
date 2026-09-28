@@ -1909,3 +1909,40 @@ fn the_selected_chapter_sort_is_a_chapter_list_argument() {
         "sort",
     );
 }
+
+#[test]
+fn each_chaining_phase_may_only_use_the_context_it_has() {
+    let yaml = |then: &str, dedup: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  popular:\n    route: \"/p\"\n    container: \".item\"\n    \
+             fields:\n      id: 'self.attr(\"data-id\")'\n      title: 'self.first(\".t\").text()'\n    \
+             then:\n      - endpoint: manga_details\n{then}        merge_as: banner\n    \
+             for_each:\n      - endpoint: manga_details\n        url_expr: 'self.first(\"a\").attr(\"href\")'\n        \
+             merge_as: details\n{dedup}  manga_details:\n    route: \"/m/$manga_id$\"\n    container: \".m\"\n    \
+             fields:\n      id: '\"$manga_id$\"'\n      title: 'self.first(\"h1\").text()'\n      status: '\"unknown\"'\n"
+        )
+    };
+    let url = |e: &str| format!("        url_expr: '{e}'\n");
+    let then_ok = url(r#"dom(".banner").attr("href")"#);
+    assert_valid(&yaml(&then_ok, ""));
+    for (then, needle) in [
+        (
+            url(r#"self.first(".banner").attr("href")"#),
+            "then[0].url_expr: a then step runs once per document",
+        ),
+        (
+            format!("{then_ok}        on_failure: 'index()'\n"),
+            "then[0].on_failure: a then step runs once per document",
+        ),
+    ] {
+        assert_invalid_containing(&yaml(&then, ""), needle);
+    }
+    assert_invalid_containing(
+        &yaml(&then_ok, "        deduplicate_by: 'dom(\".id\").text()'\n"),
+        "deduplicate_by: runs on the finished JSON row",
+    );
+    assert_valid(&yaml(
+        &then_ok,
+        "        deduplicate_by: 'self.ptr(\"/details/title\").str()'\n",
+    ));
+}

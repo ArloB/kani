@@ -221,7 +221,7 @@ pub fn emit_expr(expr: &Expr) -> String {
             headers,
             kind,
             on_failure,
-            ..
+            endpoint_id,
         } => {
             use kani_shared::ast::{HttpMethod, SubBlueprintKind};
             let method_str = match method {
@@ -248,13 +248,18 @@ pub fn emit_expr(expr: &Expr) -> String {
                     e(fallback)
                 ),
             };
+            let endpoint_id_chain = endpoint_id
+                .as_ref()
+                .map(|id| format!(".with_endpoint_id({id:?})"))
+                .unwrap_or_default();
             format!(
-                "Expr::{}({}, {}){}{}{}",
+                "Expr::{}({}, {}){}{}{}{}",
                 kind_fn,
                 e(url_expr),
                 emit_blueprint_from_struct(blueprint),
                 method_str,
                 headers_chain,
+                endpoint_id_chain,
                 on_failure_chain
             )
         }

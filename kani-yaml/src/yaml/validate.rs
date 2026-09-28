@@ -1197,8 +1197,44 @@ fn compile_on_failure(
     }
 }
 
+fn dsl_uses_leaf(dsl: &str, wanted: fn(&kani_shared::ast::ExprLeaf) -> bool) -> bool {
+    let Ok(Expr::Arena { arena, .. }) = parse_dsl_expression(dsl.trim_end())
+        .map_err(|_| ())
+        .and_then(|parsed| parsed.to_arena().map_err(|_| ()))
+    else {
+        return false;
+    };
+    arena
+        .nodes
+        .iter()
+        .any(|node| matches!(node, kani_shared::ast::ExprNode::Leaf(leaf) if wanted(leaf)))
+}
+
+fn uses_element(leaf: &kani_shared::ast::ExprLeaf) -> bool {
+    matches!(
+        leaf,
+        kani_shared::ast::ExprLeaf::SelfRef | kani_shared::ast::ExprLeaf::Index
+    )
+}
+
 fn validate_then_step(step: &ThenStep, path: &str) -> Result<ValidatedThenStep, Vec<YamlError>> {
     let mut errors = Vec::new();
+
+    let fallback = match &step.on_failure {
+        Some(OnFailure::Use(dsl)) => Some(dsl.as_str()),
+        _ => None,
+    };
+    for (part, dsl) in [
+        ("url_expr", Some(step.url_expr.as_str())),
+        ("on_failure", fallback),
+    ] {
+        if dsl.is_some_and(|d| dsl_uses_leaf(d, uses_element)) {
+            errors.push(YamlError::Validation(format!(
+                "{path}.{part}: a then step runs once per document, so it has no `self` or \
+                 `index()`; use dom() or json()"
+            )));
+        }
+    }
 
     if step.merge_as.is_empty() {
         errors.push(YamlError::Validation(format!(
@@ -1254,6 +1290,16 @@ fn validate_for_each_step(
         }
     };
 
+    if step
+        .deduplicate_by
+        .as_deref()
+        .is_some_and(|d| dsl_uses_leaf(d, |l| matches!(l, kani_shared::ast::ExprLeaf::Dom(_))))
+    {
+        errors.push(YamlError::Validation(format!(
+            "{path}.deduplicate_by: runs on the finished JSON row, which has no HTML document; \
+             address it with self or json()"
+        )));
+    }
     let deduplicate_by = if let Some(dsl) = &step.deduplicate_by {
         match parse_dsl(dsl, &format!("{path}.deduplicate_by")) {
             Ok(e) => Some(e),

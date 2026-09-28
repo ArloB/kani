@@ -28,8 +28,8 @@ pub(crate) fn emit_blueprint_chain(
             let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
             let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             lines.push(format!(
-                "    .bind(\"{}\", {})",
-                step.merge_as,
+                "    .bind({:?}, {})",
+                kani_yaml::then_binding_name(&step.merge_as),
                 emit_expr(&fetch)
             ));
         }

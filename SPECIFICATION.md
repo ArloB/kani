@@ -1342,6 +1342,24 @@ endpoints:
 - `fail` — propagate the error (default).
 - `"<dsl expr>"` — any other string is treated as a DSL expression evaluated as a fallback value.
 
+**Evaluation order and scope.** A chained endpoint runs in these phases, in order. Each phase sees
+only the context listed; validation refuses `self`/`index()` in a `then` step and `dom()` in
+`deduplicate_by`, and both backends build the same blueprint, so a phase cannot silently read another
+phase's context.
+
+| # | Phase | `self` | `dom()` / `json()` | Variables in scope |
+|---|---|---|---|---|
+| 1 | `bindings`, then each `then` step's `url_expr`, fetch and `on_failure` | none | main document | preferences, earlier bindings, earlier `$merge_as` |
+| 2 | `scalars` (including an expression `has_next_page`) | none | main document | as above, plus every `then` result as `$merge_as` |
+| 3 | row `fields`, then each `for_each` step's `url_expr` | the container element | main document | as above, plus `index()` |
+| 4 | the `for_each` sub-endpoint's own fields | the sub-page's container element | the sub-page | the sub-endpoint's own bindings only |
+| 5 | a `for_each` `on_failure` fallback | the container element | main document | as in phase 3 |
+| 6 | merge: the sub-endpoint's first row becomes the row's `merge_as` field | — | — | — |
+| 7 | `deduplicate_by` (interpreted only) | the finished JSON row | `json()` is the row; no `dom()` | none |
+
+A sub-fetch that fails, whether by network error, a non-2xx status a hook did not accept, or an extraction
+error, is handled by the step's `on_failure`. It is never silently turned into an empty result.
+
 **`for_each` keeps only the sub-fetch's first row.** The sub-endpoint is extracted
 normally, but the value stored as `merge_as` is its first row, not the whole list —
 so a sub-endpoint whose container matches several elements silently contributes only

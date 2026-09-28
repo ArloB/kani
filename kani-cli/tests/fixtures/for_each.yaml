@@ -16,6 +16,10 @@ endpoints:
         url_expr: "dom(\".link\").attr(\"href\")"
         merge_as: details
         on_failure: skip
+    then:
+      - endpoint: manga_details
+        url_expr: "dom(\".banner\").attr(\"href\")"
+        merge_as: banner
 
   manga_details:
     route: "https://example.com/manga/$manga_id$"

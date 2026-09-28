@@ -1105,6 +1105,21 @@ pub async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
+    fetch_body_with(state, req, false).await
+}
+
+pub(super) async fn fetch_sub_body(
+    state: &mut crate::wasm::HostState,
+    req: &kani_shared::ast::RequestDef,
+) -> Result<String, String> {
+    fetch_body_with(state, req, true).await
+}
+
+async fn fetch_body_with(
+    state: &mut crate::wasm::HostState,
+    req: &kani_shared::ast::RequestDef,
+    any_error_status_fails: bool,
+) -> Result<String, String> {
     use crate::scripting::{HookActionKind, ScriptableCtx, ScriptableRequest, ScriptableResponse};
 
     let hook_registry = state.hook_registry.clone();
@@ -1269,7 +1284,13 @@ pub async fn fetch_body(
         }
 
         let code = status.as_u16();
-        if !proceeded && (code == 429 || code == 401 || code == 403 || (500..600).contains(&code)) {
+        if !proceeded
+            && (code == 429
+                || code == 401
+                || code == 403
+                || (500..600).contains(&code)
+                || (any_error_status_fails && !status.is_success()))
+        {
             let ra = retry_after.map(|s| s.to_string()).unwrap_or_default();
             return Err(format!("{HTTP_STATUS_ERR_PREFIX}{code}:{ra}"));
         }
@@ -1416,6 +1437,10 @@ pub(super) async fn send_prepared_request(
     .await
     .map_err(|_| "HTTP request timed out after 90 seconds".to_string())?
     .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("{HTTP_STATUS_ERR_PREFIX}{}:", status.as_u16()));
+    }
 
     const MAX_BYTES: usize = 15 * 1024 * 1024;
     let body = response
@@ -1454,7 +1479,7 @@ pub(super) async fn eval_fetch_field(
         endpoint_id,
     };
 
-    let body = fetch_body(state, &req).await?;
+    let body = fetch_sub_body(state, &req).await?;
 
     let result = match kind {
         kani_shared::ast::SubBlueprintKind::Html => {

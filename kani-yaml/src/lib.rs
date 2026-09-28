@@ -65,7 +65,7 @@ pub fn build_blueprint_core(
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
             let endpoint_id = Some(format!("{endpoint_name}/{}", step.merge_as));
             let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
-            builder = builder.bind(&step.merge_as, fetch);
+            builder = builder.bind(&then_binding_name(&step.merge_as), fetch);
         }
     }
 
@@ -112,6 +112,16 @@ pub fn build_blueprint_core(
     }
 
     builder
+}
+
+/// The variable a `then` step's result is bound to: `$merge_as`, the name DSL expressions use
+/// to reference it.
+pub fn then_binding_name(merge_as: &str) -> String {
+    if merge_as.starts_with('$') {
+        merge_as.to_string()
+    } else {
+        format!("${merge_as}")
+    }
 }
 
 /// Build a request-free, non-chaining sub-blueprint for `then` and `for_each` fetch expressions.

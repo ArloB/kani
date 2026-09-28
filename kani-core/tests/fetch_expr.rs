@@ -674,3 +674,129 @@ async fn a_sub_fetch_redirect_is_held_to_the_sources_host() {
         "refused at the redirect, got: {err}"
     );
 }
+
+/// Each phase of a chained endpoint reads its own context: row fields and `for_each.url_expr`
+/// the container element, the sub-endpoint's fields the sub-page, an `on_failure` fallback the
+/// container element again, and a `then` step the main document. The pages disagree on every
+/// value, so a phase reading the wrong context produces a visibly wrong row.
+#[tokio::test]
+async fn each_chaining_phase_reads_its_own_context() {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    let page = |body: String| ResponseTemplate::new(200).set_body_raw(body, "text/html");
+    let mount = |p: &str, body: String| {
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path(p.to_string()))
+            .respond_with(page(body))
+    };
+    mount(
+        "/popular",
+        format!(
+            r#"<a class="banner" href="{base}/banner"></a>
+            <div class="item" data-id="row-1"><span class="t">One</span><a class="link" href="{base}/sub/A"></a></div>
+            <div class="item" data-id="row-2"><span class="t">Two</span><a class="link" href="{base}/sub/missing"></a></div>"#
+        ),
+    )
+    .mount(&server)
+    .await;
+    mount(
+        "/sub/A",
+        format!(
+            r#"<div class="manga"><h1>Sub A</h1><a class="link" href="{base}/sub/WRONG"></a></div>"#
+        ),
+    )
+    .mount(&server)
+    .await;
+    mount(
+        "/banner",
+        r#"<div class="manga"><h1>Banner</h1><a class="link" href="/b"></a></div>"#.to_string(),
+    )
+    .mount(&server)
+    .await;
+
+    let yaml = format!(
+        r#"id: phases
+name: phases
+version: "1.0.0"
+base_url: "{base}"
+endpoints:
+  popular:
+    route: /popular
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".t").text()'
+      link_seen: 'self.first(".link").attr("href")'
+    scalars:
+      banner: '$banner'
+    then:
+      - endpoint: manga_details
+        url_expr: 'dom(".banner").attr("href")'
+        merge_as: banner
+    for_each:
+      - endpoint: manga_details
+        url_expr: 'self.first(".link").attr("href")'
+        merge_as: details
+        on_failure: 'self.attr("data-id")'
+  manga_details:
+    route: "/m/$manga_id$"
+    container: ".manga"
+    fields:
+      id: '"$manga_id$"'
+      title: 'self.first("h1").text()'
+      status: '"unknown"'
+      link: 'self.first(".link").attr("href")'
+"#
+    );
+    let ext = kani_yaml::parse_and_validate(&yaml, std::path::Path::new("phases.yaml")).unwrap();
+    let ep = ext.endpoint_by_name("popular").unwrap();
+    let bp = kani_yaml::build_blueprint(
+        ep,
+        &ext,
+        "popular",
+        RequestDef {
+            url: format!("{base}/popular"),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        },
+    );
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let result = extract_html(&mut state, None, &bp).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+
+    assert_eq!(
+        rows[0]["link_seen"],
+        format!("{base}/sub/A"),
+        "row fields read the container"
+    );
+    assert_eq!(
+        rows[0]["details"]["title"], "Sub A",
+        "url_expr read the container link"
+    );
+    assert_eq!(
+        rows[0]["details"]["link"],
+        format!("{base}/sub/WRONG"),
+        "sub-endpoint fields read the sub-page"
+    );
+    assert_eq!(
+        rows[1]["details"], "row-2",
+        "on_failure reads the container element"
+    );
+    assert_eq!(
+        result["scalars"]["banner"]["title"], "Banner",
+        "then reads the main document"
+    );
+    let requested: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(
+        !requested.contains(&"/sub/WRONG".to_string()),
+        "{requested:?}"
+    );
+}
