@@ -578,7 +578,17 @@ impl crate::ast::Blueprint {
 
 #[cfg(feature = "builder")]
 fn http_request_to_def(req: HttpRequest) -> crate::ast::RequestDef {
+    let body = req.body.map(|bytes| crate::ast::RequestBody {
+        content_type: req
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "application/octet-stream".to_string()),
+        bytes,
+    });
     crate::ast::RequestDef {
+        body,
         url: req.url.unwrap_or_default(),
         method: match req.method {
             HttpMethod::Get => "GET",

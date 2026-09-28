@@ -257,6 +257,7 @@ async fn opds_reflects_what_the_source_actually_returned() {
         optional: false,
     };
     let chapter_list = ValidatedEndpoint {
+        body: None,
         route: "/chapters/$manga_id$".into(),
         method: "GET".into(),
         headers: vec![],

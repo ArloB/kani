@@ -55,6 +55,7 @@ fn paginated_blueprint(
 ) -> Blueprint {
     BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -330,6 +331,7 @@ async fn the_sources_own_has_next_page_scalar_overrides_the_chunk_length() {
         .await;
     let blueprint = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -372,6 +374,7 @@ async fn a_source_that_denies_a_next_page_ends_the_walk_early() {
         .await;
     let blueprint = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -470,6 +473,7 @@ async fn a_blueprint_without_pagination_is_refused() {
     serve_chunk(&server, "offset", "0", chunk_html(0, 2)).await;
     let blueprint = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],

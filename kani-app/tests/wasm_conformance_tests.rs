@@ -118,6 +118,7 @@ fn wasm_backend_with_client(origin_base: &str, client: SmartClient) -> Option<So
 
 fn list_endpoint(route: &str, container: &str) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.to_string(),
         method: "GET".into(),
         headers: vec![],
@@ -169,6 +170,7 @@ fn text_field(name: &str, selector: &str) -> ValidatedField {
 
 fn ep(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         fields,
         ..list_endpoint(route, container)
     }

@@ -95,7 +95,7 @@ impl MangaExtension for FixtureGen {
         page_size: i32,
         filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
-        let mut req = HttpRequest::get(format!("{}/search", self.base_url))
+        let mut req = HttpRequest::post(format!("{}/search", self.base_url))
             .endpoint_id("search")
             .query("kw", format!("title-{} extra", query))
             .query("q", query);
@@ -112,6 +112,23 @@ impl MangaExtension for FixtureGen {
         ) {
             req = req.query(k, v);
         }
+        let body_args: std::collections::HashMap<String, String> = [
+            ("page".to_string(), page.to_string()),
+            ("query".to_string(), query.to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let (body_type, body_bytes) = kani_shared::request::render_body(
+            &kani_shared::request::BodyTemplate::Json(
+                kani_shared::serde_json::from_str(
+                    "{\"label\":\"p$page$\",\"page\":\"$page$\",\"q\":\"$query$\"}",
+                )
+                .map_err(|e| kani_shared::ExtensionError::internal(e.to_string()))?,
+            ),
+            &body_args,
+        )
+        .map_err(kani_shared::ExtensionError::invalid_input)?;
+        let req = req.header("Content-Type", body_type).body(body_bytes);
         let bp = BlueprintBuilder::new(".item")
             .request(req)
             .field("id", Expr::self_ref().attr("data-id"))

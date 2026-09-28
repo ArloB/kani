@@ -3,6 +3,7 @@
 use crate::yaml::model::{QueryEntry, QueryValue};
 use crate::yaml::schema::{ArrayFormat, BoolFormat, FilterFormatCfg, FilterMappingEntry};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_request_block(
     route: &str,
     method: &str,
@@ -11,6 +12,7 @@ pub(crate) fn emit_request_block(
     filter_mapping: &[(String, FilterMappingEntry)],
     filter_format: Option<&FilterFormatCfg>,
     endpoint_id: Option<&str>,
+    body: Option<&kani_shared::request::BodyTemplate>,
 ) -> String {
     let mut lines = Vec::new();
 
@@ -61,7 +63,53 @@ pub(crate) fn emit_request_block(
         lines.push(emit_filter_apply(filter_mapping, filter_format));
     }
 
+    if let Some(body) = body {
+        lines.push(emit_body(body));
+    }
+
     lines.join("\n")
+}
+
+fn emit_body(body: &kani_shared::request::BodyTemplate) -> String {
+    use kani_shared::request::BodyTemplate;
+    let mut vars = body.placeholders();
+    vars.sort();
+    vars.dedup();
+    let args: String = vars
+        .iter()
+        .map(|v| {
+            format!(
+                "({:?}.to_string(), {}.to_string()), ",
+                v.replace('.', "_"),
+                v.replace('.', "_")
+            )
+        })
+        .collect();
+    let template = match body {
+        BodyTemplate::Json(value) => format!(
+            "kani_shared::request::BodyTemplate::Json(kani_shared::serde_json::from_str({:?}).map_err(|e| kani_shared::ExtensionError::internal(e.to_string()))?)",
+            value.to_string()
+        ),
+        BodyTemplate::Form(fields) => {
+            let pairs: String = fields
+                .iter()
+                .map(|(k, v)| format!("({k:?}.to_string(), {v:?}.to_string()), "))
+                .collect();
+            format!("kani_shared::request::BodyTemplate::Form(vec![{pairs}])")
+        }
+        BodyTemplate::Raw {
+            content,
+            content_type,
+        } => format!(
+            "kani_shared::request::BodyTemplate::Raw {{ content: {content:?}.to_string(), content_type: {content_type:?}.to_string() }}"
+        ),
+    };
+    format!(
+        "let body_args: std::collections::HashMap<String, String> = [{args}].into_iter().collect();\n\
+         let (body_type, body_bytes) = kani_shared::request::render_body(&{template}, &body_args)\n    \
+         .map_err(kani_shared::ExtensionError::invalid_input)?;\n\
+         let req = req.header(\"Content-Type\", body_type).body(body_bytes);"
+    )
 }
 
 /// Emit a call to the shared `kani_shared::request::apply_filters`, with the

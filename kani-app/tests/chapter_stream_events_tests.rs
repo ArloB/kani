@@ -71,6 +71,7 @@ fn self_attr_field(name: &str, attr: &str) -> ValidatedField {
 
 fn chapter_list_endpoint(route: &str, container: &str) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.to_string(),
         method: "GET".into(),
         headers: vec![],

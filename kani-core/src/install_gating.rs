@@ -166,10 +166,10 @@ mod tests {
 
     #[test]
     fn only_readable_blueprint_versions_pass() {
-        for ok in [None, Some(5), Some(kani_shared::ast::DSL_SCHEMA_VERSION)] {
+        for ok in [None, Some(kani_shared::ast::DSL_SCHEMA_VERSION)] {
             assert!(check_dsl_schema_version(ok).is_ok(), "{ok:?}");
         }
-        for bad in [4, kani_shared::ast::DSL_SCHEMA_VERSION + 1] {
+        for bad in [5, 6, kani_shared::ast::DSL_SCHEMA_VERSION + 1] {
             let err = check_dsl_schema_version(Some(bad)).unwrap_err();
             assert!(
                 err.contains(&format!("schema version {bad}")) && err.contains("rebuild"),

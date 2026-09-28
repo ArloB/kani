@@ -44,6 +44,7 @@ fn field(name: &str, expr: Expr) -> ValidatedField {
 
 fn chapter_list_endpoint() -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$/chapters".into(),
         method: "GET".into(),
         headers: vec![],
@@ -76,6 +77,7 @@ fn chapter_list_endpoint() -> ValidatedEndpoint {
 /// scan loop always advances to the next page until a fetch/extraction fails.
 fn chapter_list_endpoint_always_paginated() -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         has_next_page: ValidatedHnp::Static(true),
         ..chapter_list_endpoint()
     }
@@ -711,6 +713,7 @@ const DETAILS_HTML: &str = r#"<html><body><div class="manga"><h1>x</h1></div></b
 
 fn details_endpoint(cover_url: &str) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/manga/$manga_id$".into(),
         method: "GET".into(),
         headers: vec![],

@@ -1998,3 +1998,40 @@ fn cursor_pagination_needs_a_cursor_field_on_a_json_endpoint() {
         "cursor_field only applies to offset_type: cursor",
     );
 }
+
+#[test]
+fn a_request_body_must_be_well_formed_and_sendable() {
+    let yaml = |method: &str, body: &str| {
+        format!(
+            "{METADATA_BASE}endpoints:\n  search:\n    route: \"/s\"\n    method: {method}\n    \
+             body:\n{body}    fields:\n      id: 'self.attr(\"i\")'\n      title: 'self.attr(\"t\")'\n"
+        )
+    };
+    let json = "      type: json\n      content:\n        q: \"$query$\"\n";
+    assert_valid(&yaml("POST", json));
+    for (method, body, needle) in [
+        ("GET", json, "a GET request has no body"),
+        (
+            "POST",
+            "      type: raw\n      content: \"$query$\"\n",
+            "a raw body needs content_type",
+        ),
+        (
+            "POST",
+            "      type: json\n      content_type: text/plain\n      content:\n        q: 1\n",
+            "content_type is set by json and form bodies",
+        ),
+        (
+            "POST",
+            "      type: form\n      content: \"q=1\"\n",
+            "form content must be a map",
+        ),
+        (
+            "POST",
+            "      type: json\n      content:\n        q: \"$nope$\"\n",
+            "nope",
+        ),
+    ] {
+        assert_invalid_containing(&yaml(method, body), needle);
+    }
+}

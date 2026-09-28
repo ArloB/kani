@@ -30,6 +30,13 @@ endpoints:
 
   search:
     route: "/search"
+    method: POST
+    body:
+      type: json
+      content:
+        q: "$query$"
+        page: "$page$"
+        label: "p$page$"
     queries:
       q: $query$
       kw: "title-$query$ extra"

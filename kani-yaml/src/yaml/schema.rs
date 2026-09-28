@@ -254,6 +254,9 @@ pub struct EndpointBody {
     /// Per-element chained fetches: evaluated for each row, result stored as `merge_as` field.
     #[serde(default)]
     pub for_each: Vec<ForEachStep>,
+    /// The request body, for a non-GET endpoint.
+    #[serde(default)]
+    pub body: Option<BodyCfg>,
     /// When set, the endpoint is fetched via a headless browser rather than direct HTTP.
     #[serde(default)]
     pub via: Option<EndpointVia>,
@@ -431,6 +434,25 @@ pub enum SortPairKind {
 #[serde(rename_all = "snake_case")]
 pub enum TupleSplitKind {
     TupleSplit,
+}
+
+/// A request body: its kind decides how `$var$` placeholders are filled and encoded.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BodyCfg {
+    #[serde(rename = "type")]
+    pub kind: BodyKind,
+    pub content: serde_yaml::Value,
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyKind {
+    Json,
+    Form,
+    Raw,
 }
 
 #[derive(Debug, Deserialize, Clone)]

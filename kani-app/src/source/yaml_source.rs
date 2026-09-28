@@ -315,7 +315,17 @@ impl YamlSource {
             ep.filter_format.as_ref(),
             filters,
         ));
+        let body = ep
+            .body
+            .as_ref()
+            .map(|template| kani_shared::request::render_body(template, &resolved))
+            .transpose()?
+            .map(|(content_type, bytes)| kani_shared::ast::RequestBody {
+                content_type,
+                bytes,
+            });
         Ok(kani_shared::ast::RequestDef {
+            body,
             url,
             method: ep.method.clone(),
             headers: ep

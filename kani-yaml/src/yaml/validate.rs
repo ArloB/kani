@@ -243,8 +243,30 @@ pub fn validate(
         ("chapter_list", chapter_list.as_ref()),
         ("pages", pages.as_ref()),
     ];
+    let has_body = |target: &str| {
+        chained_endpoints
+            .iter()
+            .any(|(n, ep)| *n == target && ep.is_some_and(|ep| ep.body.is_some()))
+    };
     for (ep_name, ep_opt) in &chained_endpoints {
         let Some(ep) = ep_opt else { continue };
+        let targets = ep
+            .then_steps
+            .iter()
+            .map(|s| ("then", s.endpoint_name.as_str()))
+            .chain(
+                ep.for_each_steps
+                    .iter()
+                    .map(|s| ("for_each", s.endpoint_name.as_str())),
+            );
+        for (kind, target) in targets {
+            if has_body(target) {
+                errors.push(YamlError::Validation(format!(
+                    "endpoints.{ep_name}.{kind}: endpoint '{target}' declares a body, which a \
+                     sub-fetch does not send; chain to an endpoint without one"
+                )));
+            }
+        }
         for step in &ep.then_steps {
             if !known_endpoint_names.contains(step.endpoint_name.as_str()) {
                 errors.push(YamlError::Validation(format!(
@@ -744,6 +766,7 @@ fn collect_composite_id_decodes(
     route: &str,
     queries: &BTreeMap<String, String>,
     headers: &BTreeMap<String, String>,
+    body_strings: &[String],
     id_encoding: Option<&IdEncodingBlock>,
 ) -> Vec<CompositeIdDecode> {
     let Some(id_encoding) = id_encoding else {
@@ -751,7 +774,7 @@ fn collect_composite_id_decodes(
     };
 
     let mut vars = extract_dollar_vars(route);
-    for v in queries.values().chain(headers.values()) {
+    for v in queries.values().chain(headers.values()).chain(body_strings) {
         vars.extend(extract_dollar_vars(v));
     }
 
@@ -999,8 +1022,18 @@ fn validate_endpoint(
         }
     };
 
-    let composite_id_decodes =
-        collect_composite_id_decodes(&route, &body.queries, &body.headers, id_encoding);
+    let body_strings = body
+        .body
+        .as_ref()
+        .map(|b| yaml_strings(&b.content))
+        .unwrap_or_default();
+    let composite_id_decodes = collect_composite_id_decodes(
+        &route,
+        &body.queries,
+        &body.headers,
+        &body_strings,
+        id_encoding,
+    );
 
     let filter_mapping: Vec<(String, FilterMappingEntry)> = body
         .filter_mapping
@@ -1206,8 +1239,18 @@ fn validate_endpoint(
         }
     }
 
+    let request_body = match &body.body {
+        Some(cfg) => {
+            let (template, mut errs) = validate_body(cfg, &body.method, name, fn_args, id_encoding);
+            errors.append(&mut errs);
+            template
+        }
+        None => None,
+    };
+
     if errors.is_empty() {
         Ok(ValidatedEndpoint {
+            body: request_body,
             route,
             method: body.method.clone(),
             headers,
@@ -1481,6 +1524,84 @@ fn arithmetic_template_error(
              do not evaluate; use `pagination` for offsets"
         ))
     })
+}
+
+fn validate_body(
+    cfg: &super::schema::BodyCfg,
+    method: &str,
+    endpoint: &str,
+    fn_args: &[&str],
+    id_encoding: Option<&IdEncodingBlock>,
+) -> (Option<kani_shared::request::BodyTemplate>, Vec<YamlError>) {
+    use super::schema::BodyKind;
+    use kani_shared::request::BodyTemplate;
+
+    let path = format!("endpoints.{endpoint}.body");
+    let mut errors = Vec::new();
+    let mut error = |msg: String| errors.push(YamlError::Validation(format!("{path}: {msg}")));
+    if method.eq_ignore_ascii_case("GET") {
+        error("a GET request has no body; set method: POST (or PUT, DELETE)".into());
+    }
+    match (cfg.kind, &cfg.content_type) {
+        (BodyKind::Raw, None) => error("a raw body needs content_type".into()),
+        (BodyKind::Json | BodyKind::Form, Some(_)) => {
+            error("content_type is set by json and form bodies; use type: raw to choose it".into())
+        }
+        _ => {}
+    }
+    let template = match cfg.kind {
+        BodyKind::Json => kani_shared::serde_json::to_value(&cfg.content)
+            .map(BodyTemplate::Json)
+            .map_err(|e| format!("content is not JSON-representable: {e}")),
+        BodyKind::Form => match &cfg.content {
+            serde_yaml::Value::Mapping(map) => map
+                .iter()
+                .map(|(k, v)| match (k, v) {
+                    (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) => {
+                        Ok((k.clone(), v.clone()))
+                    }
+                    (serde_yaml::Value::String(k), serde_yaml::Value::Number(n)) => {
+                        Ok((k.clone(), n.to_string()))
+                    }
+                    (serde_yaml::Value::String(k), serde_yaml::Value::Bool(b)) => {
+                        Ok((k.clone(), b.to_string()))
+                    }
+                    _ => Err("form content maps names to text, numbers or booleans".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(BodyTemplate::Form),
+            _ => Err("form content must be a map of field names to values".to_string()),
+        },
+        BodyKind::Raw => match &cfg.content {
+            serde_yaml::Value::String(text) => Ok(BodyTemplate::Raw {
+                content: text.clone(),
+                content_type: cfg.content_type.clone().unwrap_or_default(),
+            }),
+            _ => Err("raw content must be text".to_string()),
+        },
+    };
+    let template = match template {
+        Ok(t) => Some(t),
+        Err(e) => {
+            error(e);
+            None
+        }
+    };
+    for var in template.iter().flat_map(|t| t.placeholders()) {
+        if let Some(e) = validate_dollar_var(&var, endpoint, "body", fn_args, id_encoding) {
+            errors.push(e);
+        }
+    }
+    (template, errors)
+}
+
+fn yaml_strings(value: &serde_yaml::Value) -> Vec<String> {
+    match value {
+        serde_yaml::Value::String(s) => vec![s.clone()],
+        serde_yaml::Value::Sequence(items) => items.iter().flat_map(yaml_strings).collect(),
+        serde_yaml::Value::Mapping(map) => map.values().flat_map(yaml_strings).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn build_query_entries(

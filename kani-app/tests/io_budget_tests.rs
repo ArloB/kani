@@ -41,6 +41,7 @@ fn self_text_field(name: &str) -> ValidatedField {
 
 fn base_endpoint(container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: "/popular".into(),
         method: "GET".into(),
         headers: vec![],

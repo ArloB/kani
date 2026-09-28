@@ -69,6 +69,14 @@ fn req_set_url(req: &mut ScriptableRequest, url: String) {
     req.url = url;
 }
 
+fn req_get_body(req: &mut ScriptableRequest) -> Dynamic {
+    req.body.clone().map_or(Dynamic::UNIT, Dynamic::from)
+}
+
+fn req_set_body(req: &mut ScriptableRequest, body: String) {
+    req.body = Some(body);
+}
+
 fn req_get_endpoint_id(req: &mut ScriptableRequest) -> String {
     req.endpoint_id.clone().unwrap_or_default()
 }
@@ -317,6 +325,8 @@ pub(crate) fn register_hook_bindings(engine: &mut Engine) {
         .register_get("method", req_get_method)
         .register_get("url", req_get_url)
         .register_set("url", req_set_url)
+        .register_get("body", req_get_body)
+        .register_set("body", req_set_body)
         .register_get("endpoint_id", req_get_endpoint_id)
         .register_get("headers", req_get_headers)
         .register_get("queries", req_get_queries)

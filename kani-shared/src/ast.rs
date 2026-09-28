@@ -986,11 +986,13 @@ impl ExprNode {
 }
 
 /// Current serialized blueprint schema understood by codegen and the host evaluator.
-pub const DSL_SCHEMA_VERSION: u32 = 6;
+pub const DSL_SCHEMA_VERSION: u32 = 7;
 
-/// Oldest blueprint schema the host still reads. Within 1.x a version bump only appends enum
-/// variants, so every version from this one up to [`DSL_SCHEMA_VERSION`] stays readable.
-pub const MIN_READABLE_DSL_SCHEMA_VERSION: u32 = 5;
+/// Oldest blueprint schema the host still reads. Version 7 added the request body to
+/// [`RequestDef`], which changes the serialized layout, so earlier blueprints must be rebuilt.
+/// Within 1.x a version bump only appends enum variants, so every version from this one up to
+/// [`DSL_SCHEMA_VERSION`] stays readable.
+pub const MIN_READABLE_DSL_SCHEMA_VERSION: u32 = 7;
 
 pub fn is_readable_dsl_schema_version(version: u32) -> bool {
     (MIN_READABLE_DSL_SCHEMA_VERSION..=DSL_SCHEMA_VERSION).contains(&version)
@@ -1075,6 +1077,20 @@ pub struct RequestDef {
     pub queries: Vec<(String, String)>,
     #[cfg_attr(any(feature = "host", feature = "builder"), serde(default))]
     pub endpoint_id: Option<String>,
+    /// The rendered request body, already filled and encoded.
+    #[cfg_attr(any(feature = "host", feature = "builder"), serde(default))]
+    pub body: Option<RequestBody>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+/// A request body: the exact bytes to send and their content type.
+pub struct RequestBody {
+    pub content_type: String,
+    pub bytes: Vec<u8>,
 }
 
 #[cfg(feature = "builder")]
@@ -2328,6 +2344,7 @@ mod tests {
             .scalar("total", Expr::dom(".pagination").text().parse_int())
             .scalar_opt("has_next", Expr::Null)
             .with_request(RequestDef {
+                body: None,
                 url: "https://example.com/popular".into(),
                 method: "GET".into(),
                 headers: vec![("Accept".into(), "text/html".into())],
@@ -2413,6 +2430,7 @@ mod tests {
             .build();
 
         let req = RequestDef {
+            body: None,
             url: "https://test.com/list".into(),
             method: "POST".into(),
             headers: vec![],
@@ -2509,8 +2527,8 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_is_six() {
-        assert_eq!(DSL_SCHEMA_VERSION, 6);
+    fn schema_version_is_seven() {
+        assert_eq!(DSL_SCHEMA_VERSION, 7);
     }
 
     #[test]
@@ -2543,7 +2561,7 @@ mod tests {
     }
 
     #[test]
-    fn version_six_arena_blueprint_bytes_are_deterministic() {
+    fn arena_blueprint_bytes_are_deterministic_and_carry_the_current_version() {
         let arena = Arc::new(ExprArena {
             nodes: vec![ExprNode::Leaf(ExprLeaf::Literal("title".into()))],
         });
@@ -2559,6 +2577,6 @@ mod tests {
         let first = blueprint.to_bytes();
         assert_eq!(first, blueprint.to_bytes());
         let (version, _): (u32, &[u8]) = postcard::take_from_bytes(&first).unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, DSL_SCHEMA_VERSION);
     }
 }

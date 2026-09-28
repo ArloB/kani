@@ -178,6 +178,7 @@ pub(crate) fn emit_manga_details(
         &[],
         None,
         Some("manga_details"),
+        ep.body.as_ref(),
     );
 
     if embedded_bytes {
@@ -218,6 +219,7 @@ pub(crate) fn emit_manga_details(
 
 fn emit_chapter_list_args(ep: &ValidatedEndpoint) -> String {
     let mut referenced = kani_shared::request::template_parts(&ep.route).1;
+    referenced.extend(ep.body.iter().flat_map(|b| b.placeholders()));
     for q in &ep.queries {
         match &q.value {
             crate::yaml::model::QueryValue::Arg(name) => referenced.push(name.clone()),
@@ -253,6 +255,7 @@ pub(crate) fn emit_chapter_list(
         &[],
         None,
         Some("chapter_list"),
+        ep.body.as_ref(),
     );
 
     let unpack = format!(
@@ -328,6 +331,7 @@ pub(crate) fn emit_pages(
         &[],
         None,
         Some("pages"),
+        ep.body.as_ref(),
     );
 
     let unpack = format!(
@@ -411,6 +415,7 @@ fn emit_manga_list_method(
         &ep.filter_mapping,
         ep.filter_format.as_ref(),
         Some(endpoint_id),
+        ep.body.as_ref(),
     );
     let unpack = format!(
         "Ok(kani_shared::unpack::unpack_manga_list(&rows, {}, {}, {}).logged({endpoint_id:?}))",

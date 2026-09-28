@@ -47,6 +47,7 @@ fn attr_field(name: &str, attr: &str) -> ValidatedField {
 
 fn endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.into(),
         method: "GET".into(),
         headers: vec![],
@@ -117,6 +118,7 @@ fn backend(origin: &TestOrigin) -> SourceBackend {
             vec![attr_field("id", "data-id"), text_field("title", ".title")],
         )),
         search: Some(ValidatedEndpoint {
+            body: None,
             filter_mapping: vec![("sort".into(), FilterMappingEntry::Simple("order".into()))],
             ..endpoint(
                 "/search?q=$query$",

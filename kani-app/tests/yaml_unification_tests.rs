@@ -315,3 +315,29 @@ async fn awkward_ids_are_encoded_identically_on_the_wire() {
         assert!(err.contains("CR or LF"), "{err}");
     }
 }
+
+#[tokio::test]
+async fn request_bodies_are_byte_identical_on_both_backends() {
+    let origin = TestOrigin::start().await;
+    seed(&origin);
+    let w = compiled_or_skip!(origin);
+    let y = interpreted(&origin.base());
+    let query = "say \"hi\" \\ back\nnext é 🐉";
+
+    y.search_manga(query, 1, 20, &[]).await.unwrap();
+    let y_req = origin.last_request("/search").unwrap();
+    w.search_manga(query, 1, 20, &[]).await.unwrap();
+    let w_req = origin.last_request("/search").unwrap();
+
+    assert_eq!(y_req.method, "POST");
+    assert_eq!(y_req.header("content-type"), Some("application/json"));
+    assert_eq!(
+        String::from_utf8(y_req.body.clone()).unwrap(),
+        r#"{"label":"p1","page":1,"q":"say \"hi\" \\ back\nnext é 🐉"}"#
+    );
+    assert_eq!(
+        w_req.body, y_req.body,
+        "the compiled backend sends the same bytes"
+    );
+    assert_eq!(w_req.header("content-type"), y_req.header("content-type"));
+}

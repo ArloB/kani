@@ -55,6 +55,154 @@ pub fn check_header_value(name: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The largest request body sent, checked on the final bytes after placeholders are filled and
+/// after any hook has replaced the body.
+pub const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+
+/// Arguments whose values are numbers; a JSON body placeholder standing alone for one of these
+/// is written as a JSON number, and every other argument as a JSON string.
+pub const NUMERIC_ARGS: &[&str] = &["page", "page_size"];
+
+/// A request body as declared: its kind decides how placeholders are filled and encoded.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+pub enum BodyTemplate {
+    /// A JSON value; string leaves may contain `$var$` placeholders.
+    Json(serde_json::Value),
+    /// Form fields, each value a text template, sent `application/x-www-form-urlencoded`.
+    Form(Vec<(String, String)>),
+    /// A text template sent as-is with the declared content type.
+    Raw {
+        content: String,
+        content_type: String,
+    },
+}
+
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+impl BodyTemplate {
+    /// Every `$var$` placeholder the template fills, in order of appearance.
+    pub fn placeholders(&self) -> Vec<String> {
+        fn json_strings(v: &serde_json::Value, out: &mut Vec<String>) {
+            match v {
+                serde_json::Value::String(s) => out.push(s.clone()),
+                serde_json::Value::Array(a) => a.iter().for_each(|v| json_strings(v, out)),
+                serde_json::Value::Object(m) => m.values().for_each(|v| json_strings(v, out)),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        match self {
+            BodyTemplate::Json(v) => json_strings(v, &mut texts),
+            BodyTemplate::Form(fields) => texts.extend(fields.iter().map(|(_, v)| v.clone())),
+            BodyTemplate::Raw { content, .. } => texts.push(content.clone()),
+        }
+        texts.iter().flat_map(|t| template_parts(t).1).collect()
+    }
+}
+
+/// Refuses a body larger than [`MAX_REQUEST_BODY_BYTES`].
+pub fn check_body_size(len: usize) -> Result<(), String> {
+    if len > MAX_REQUEST_BODY_BYTES {
+        return Err(format!(
+            "request body is {len} bytes, over the {MAX_REQUEST_BODY_BYTES}-byte limit"
+        ));
+    }
+    Ok(())
+}
+
+/// Fills a body template's placeholders from `args` and encodes it, returning the content type
+/// and the exact bytes to send. Shared by the interpreted and generated backends.
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+pub fn render_body(
+    template: &BodyTemplate,
+    args: &HashMap<String, String>,
+) -> Result<(String, Vec<u8>), String> {
+    let fill = |text: &str| {
+        interpolate(text, args).ok_or_else(|| format!("body: unresolved placeholder in {text:?}"))
+    };
+    let (content_type, bytes) = match template {
+        BodyTemplate::Json(value) => {
+            let rendered = render_json(value, &fill)?;
+            let bytes = serde_json::to_vec(&rendered).map_err(|e| e.to_string())?;
+            ("application/json".to_string(), bytes)
+        }
+        BodyTemplate::Form(fields) => {
+            let mut out = String::new();
+            for (i, (key, value)) in fields.iter().enumerate() {
+                if i > 0 {
+                    out.push('&');
+                }
+                out.push_str(&form_encode(key));
+                out.push('=');
+                out.push_str(&form_encode(&fill(value)?));
+            }
+            (
+                "application/x-www-form-urlencoded".to_string(),
+                out.into_bytes(),
+            )
+        }
+        BodyTemplate::Raw {
+            content,
+            content_type,
+        } => (content_type.clone(), fill(content)?.into_bytes()),
+    };
+    check_body_size(bytes.len())?;
+    Ok((content_type, bytes))
+}
+
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+fn render_json(
+    value: &serde_json::Value,
+    fill: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    Ok(match value {
+        Value::String(text) => {
+            let (texts, vars) = template_parts(text);
+            match vars.as_slice() {
+                [var]
+                    if texts.iter().all(String::is_empty)
+                        && NUMERIC_ARGS.contains(&var.as_str()) =>
+                {
+                    let raw = fill(text)?;
+                    raw.parse::<i64>()
+                        .map(Value::from)
+                        .map_err(|_| format!("body: ${var}$ is {raw:?}, not a number"))?
+                }
+                _ => Value::String(fill(text)?),
+            }
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| render_json(v, fill))
+                .collect::<Result<_, _>>()?,
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| Ok((k.clone(), render_json(v, fill)?)))
+                .collect::<Result<_, String>>()?,
+        ),
+        other => other.clone(),
+    })
+}
+
+/// The WHATWG `application/x-www-form-urlencoded` byte serializer: ASCII letters, digits and
+/// `*-._` are kept, a space becomes `+`, and every other byte of the UTF-8 text is `%XX`.
+pub fn form_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Splits `template` at its `$var$` placeholders: literal text alternates with placeholder
 /// names, starting and ending with text. A `$` that opens no placeholder stays literal.
 pub fn template_parts(template: &str) -> (Vec<String>, Vec<String>) {
@@ -404,5 +552,65 @@ mod tests {
                 ("g".to_string(), "b".to_string())
             ]
         );
+    }
+}
+
+#[cfg(all(test, any(feature = "host", feature = "builder")))]
+mod body_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn args() -> HashMap<String, String> {
+        [("query", "say \"hi\" \\ back\nnext é 🐉"), ("page", "2")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_json_body_is_rendered_byte_exact_with_typed_placeholders() {
+        let template = BodyTemplate::Json(serde_json::json!({
+            "q": "$query$",
+            "label": "p$page$",
+            "page": "$page$",
+            "tags": ["$query$", 3, true, null]
+        }));
+        let (content_type, bytes) = render_body(&template, &args()).unwrap();
+        assert_eq!(content_type, "application/json");
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            r#"{"label":"p2","page":2,"q":"say \"hi\" \\ back\nnext é 🐉","tags":["say \"hi\" \\ back\nnext é 🐉",3,true,null]}"#
+        );
+    }
+
+    #[test]
+    fn a_form_body_is_encoded_once_byte_exact() {
+        let template = BodyTemplate::Form(vec![
+            ("q".into(), "$query$".into()),
+            ("page".into(), "$page$".into()),
+        ]);
+        let (content_type, bytes) = render_body(&template, &args()).unwrap();
+        assert_eq!(content_type, "application/x-www-form-urlencoded");
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            "q=say+%22hi%22+%5C+back%0Anext+%C3%A9+%F0%9F%90%89&page=2"
+        );
+    }
+
+    #[test]
+    fn a_body_over_64_kib_after_substitution_is_refused() {
+        let mut big = args();
+        big.insert("query".into(), "x".repeat(MAX_REQUEST_BODY_BYTES + 1));
+        let template = BodyTemplate::Raw {
+            content: "$query$".into(),
+            content_type: "text/plain".into(),
+        };
+        let err = render_body(&template, &big).unwrap_err();
+        assert!(err.contains("over the 65536-byte limit"), "{err}");
+        let fits = BodyTemplate::Raw {
+            content: "q=$page$".into(),
+            content_type: "text/plain".into(),
+        };
+        assert_eq!(render_body(&fits, &args()).unwrap().1, b"q=2");
     }
 }

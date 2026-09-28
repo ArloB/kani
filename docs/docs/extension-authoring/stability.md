@@ -32,26 +32,20 @@ guest's generated bindings encode it — that is a 2.0 change.
 
 ## Extraction DSL — `DSL_SCHEMA_VERSION`
 
-`kani-shared::ast::DSL_SCHEMA_VERSION` is **5**. Every serialised `Blueprint` carries it as a
-postcard header, and the host checks it on arrival:
+`kani-shared::ast::DSL_SCHEMA_VERSION` is **7**, and
+`MIN_READABLE_DSL_SCHEMA_VERSION` is also **7**. Every serialised `Blueprint` carries its version as
+a postcard header; the host reads any version in that range and rejects others with a "recompile
+the extension" error. The extension's metadata also records the version it was built with, so
+install and reload refuse an unreadable extension up front.
 
-```rust
-if version != kani_shared::ast::DSL_SCHEMA_VERSION {
-    return Err(format!(
-        "Blueprint DSL schema version {} is not supported (host requires {}); \
-         recompile the extension", …));
-}
-```
+Version 7 added the request body to `RequestDef`. postcard is not self-describing, so a new field
+changes the layout, and extensions built against versions 5 and 6 must be rebuilt. That break was
+taken before 1.0.
 
-**The check is strict equality, not a minimum.** A host accepts exactly one DSL version, so
-bumping it rejects every extension compiled against the previous value with a "recompile the
-extension" error. That makes a bump a breaking change for the entire ecosystem at once.
-
-**Rule for 1.x: `DSL_SCHEMA_VERSION` does not change.** It bumps only for a change to the
-`Expr`/`Blueprint` *wire shape*, which is therefore a 2.0 event. Adding an `Expr` variant is not
-automatically such a change — postcard encodes enum variants by index, so appending a variant at
-the end of the enum is compatible with hosts that never receive it, while inserting or reordering
-one is not. Append only.
+**Rule for 1.x: append only.** A version bump within 1.x may only append enum variants. postcard
+encodes a variant by its index, so an appended variant leaves older payloads decodable, and the
+host keeps reading every version from 7 onwards. Adding, removing or reordering a field or variant
+changes the wire shape, which is a 2.0 event.
 
 ## YAML schema — `schema_version`
 

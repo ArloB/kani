@@ -51,6 +51,7 @@ fn backend(origin: &TestOrigin, id: &str, route: &str) -> SourceBackend {
         language: "en".into(),
         unrestricted_http: true,
         search: Some(ValidatedEndpoint {
+            body: None,
             route: route.into(),
             method: "GET".into(),
             headers: vec![],

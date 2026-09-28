@@ -1012,8 +1012,10 @@ Blueprints are serialized with **[`postcard`](https://docs.rs/postcard)** (a com
 | 4 | Added `endpoint_id: Option<String>` to `RequestDef` for per-endpoint hook dispatch (§3.10). |
 | 5 | Added `endpoint_id: Option<String>` to `Expr::Fetch` so sub-fetches (`then:` / `for_each:` steps) participate in per-endpoint hook dispatch. |
 | 6 | Added `Expr::Arena`, flat storage for large expressions. Appended as a new variant, so version 5 payloads still decode. |
+| 7 | Added `body: Option<RequestBody>` to `RequestDef` (the rendered request body). This changes the serialized layout of every blueprint that carries a request, so versions 5 and 6 are no longer readable and extensions built with them must be rebuilt. |
 
-The current version is **6**. The host reads versions **5 and 6**; versions 1–4 are rejected.
+The current version is **7**. The host reads version **7** only; earlier versions are rejected
+with a "recompile the extension" error.
 
 **Compatibility rule.** A WASM extension depends on the host in two independent ways, and each
 has its own rule. Both are checked when an artifact is installed, reloaded, and loaded at startup,
@@ -1022,7 +1024,7 @@ so an incompatible extension is refused up front instead of failing on its first
 - *Blueprint format.* postcard is not self-describing: appending a variant to an enum leaves
   older payloads decodable, but adding, removing, or reordering a field or variant does not.
   Within 1.x, a version bump may only append enum variants, and the host keeps reading every
-  version from 5 onwards. A change that cannot be expressed that way needs a new variant, not a
+  version from 7 onwards. A change that cannot be expressed that way needs a new variant, not a
   changed one. The extension's metadata records the version it was built with
   (`dsl_schema_version`); install and reload refuse an unreadable one, and at startup it is
   registered as a load degradation for that source. `decode_blueprint` still checks the prefix on
@@ -1119,6 +1121,10 @@ endpoint_name:
   queries:                # Query parameters (optional)
     param: value          # Static value
     param: $variable$     # Dynamic value from function arguments
+  body:                   # Request body (optional; not on GET). See "Request bodies" below.
+    type: json | form | raw
+    content: any          # json: any YAML value; form: map of field -> value; raw: text
+    content_type: string  # raw only (required there)
   type: string            # Response type: "html" (default) or "json"
 
   # --- Extraction ---
@@ -1136,6 +1142,24 @@ endpoint_name:
       expr: "dsl expression"
       optional: true
 ```
+
+#### Request bodies
+
+A non-GET endpoint may send a body. Placeholders are filled from the same arguments as the route,
+and the body is encoded by its `type`. Both backends render it with one function
+(`kani_shared::request::render_body`), so they send the same bytes.
+
+| `type` | Content | Encoding and `Content-Type` |
+|---|---|---|
+| `json` | any YAML value | Serialized as JSON, `application/json`. A string that is exactly one placeholder for a numeric argument (`$page$`, `$page_size$`) becomes a JSON number; every other placeholder, and any text around one, becomes a JSON string escaped by the serializer, so quotes, backslashes, newlines and non-ASCII text are always valid JSON. Keys are not interpolated. |
+| `form` | map of field name to value | Each value is filled, then the pairs are encoded once as `application/x-www-form-urlencoded` (space becomes `+`, other reserved or non-ASCII bytes become `%XX`), in declaration order. |
+| `raw` | text | Filled as text and sent as-is with the required `content_type`. |
+
+The body is sent on every attempt, including hook `retry()`s. A `pre_request` hook may read or
+replace it as `req.body`. The final bytes are limited to 64 KiB, checked at send time after
+placeholders are filled and after any hook has replaced the body; a larger body fails the request.
+`content_type` may be set only for `raw`. A `then` or `for_each` step may not target an endpoint
+that declares a body, because sub-fetches do not send one.
 
 #### Variable Interpolation
 

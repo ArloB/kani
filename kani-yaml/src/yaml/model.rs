@@ -175,6 +175,7 @@ pub struct ValidatedEndpoint {
     pub timeout_ms: u32,
     /// Whether browser capture periodically scrolls the page.
     pub auto_scroll: bool,
+    pub body: Option<kani_shared::request::BodyTemplate>,
 }
 
 pub struct ValidatedThenStep {

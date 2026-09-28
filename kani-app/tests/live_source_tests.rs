@@ -34,6 +34,7 @@ fn json_field(name: &str, pointer: &str, optional: bool) -> ValidatedField {
 
 fn json_endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
     ValidatedEndpoint {
+        body: None,
         route: route.to_string(),
         method: "GET".into(),
         headers: vec![],
@@ -1139,6 +1140,7 @@ async fn a_preference_change_propagates_without_a_restart() {
     );
 
     let popular = ValidatedEndpoint {
+        body: None,
         route: "/popular".into(),
         container: ".item".into(),
         fields: vec![
@@ -1627,6 +1629,7 @@ fn wire_endless_migration_target(
         ],
     );
     let chapters = ValidatedEndpoint {
+        body: None,
         has_next_page: ValidatedHnp::Static(true),
         ..json_endpoint(
             "/target/$manga_id$/chapters",

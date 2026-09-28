@@ -50,6 +50,7 @@ async fn json_fetch_list_then_detail() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -112,6 +113,7 @@ async fn html_fetch_sub_blueprint() {
 
     let list_bp = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -161,6 +163,7 @@ async fn fetch_disallowed_host_is_rejected() {
     let detail_bp = BlueprintBuilder::new("").build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -205,6 +208,7 @@ async fn nested_fetch_is_rejected() {
 
     let outer_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -249,6 +253,7 @@ async fn a_json_fetch_past_the_operation_request_limit_is_a_budget_error() {
     let detail_bp = BlueprintBuilder::new("").build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -301,6 +306,7 @@ async fn on_failure_skip_produces_null() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -353,6 +359,7 @@ async fn on_failure_fail_propagates_error() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -387,6 +394,7 @@ async fn on_failure_use_evaluates_fallback() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -447,6 +455,7 @@ async fn html_sub_fetches_run_concurrently_not_sequentially() {
 
     let list_bp = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -534,6 +543,7 @@ async fn json_sub_fetches_run_concurrently_not_sequentially() {
 
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -612,6 +622,7 @@ async fn redirecting_to(target: &str) -> MockServer {
 
 fn start_request(server: &MockServer) -> RequestDef {
     RequestDef {
+        body: None,
         url: format!("{}/start", server.uri()),
         method: "GET".into(),
         headers: vec![],
@@ -658,6 +669,7 @@ async fn a_sub_fetch_redirect_is_held_to_the_sources_host() {
         .build();
     let list_bp = BlueprintBuilder::new("")
         .with_request(RequestDef {
+            body: None,
             url: format!("{}/list", server.uri()),
             method: "GET".into(),
             headers: vec![],
@@ -760,6 +772,7 @@ endpoints:
         &ext,
         "popular",
         RequestDef {
+            body: None,
             url: format!("{base}/popular"),
             method: "GET".into(),
             headers: vec![],
@@ -827,6 +840,7 @@ async fn fifty_row_listing() -> (MockServer, kani_shared::ast::Blueprint) {
         .build();
     let list = BlueprintBuilder::new("li")
         .with_request(RequestDef {
+            body: None,
             url: format!("{base}/list"),
             method: "GET".into(),
             headers: vec![],
@@ -952,6 +966,7 @@ endpoints:
         &ext,
         "search",
         RequestDef {
+            body: None,
             url: format!("{base}/list"),
             method: "GET".into(),
             headers: vec![],

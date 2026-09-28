@@ -1129,9 +1129,13 @@ async fn fetch_body_with(
         url: req.url.clone(),
         headers: req.headers.clone(),
         queries: req.queries.clone(),
-        body: None,
+        body: req
+            .body
+            .as_ref()
+            .and_then(|b| String::from_utf8(b.bytes.clone()).ok()),
         endpoint_id: req.endpoint_id.clone(),
     };
+    let declared_body = req.body.clone();
 
     let max_hook_retries = state.max_hook_requests;
     let mut hook_retries = 0u32;
@@ -1186,6 +1190,27 @@ async fn fetch_body_with(
         for (k, v) in &working.headers {
             kani_shared::request::check_header_value(k, v)?;
             builder = builder.header(k, v);
+        }
+        let body = match (&working.body, &declared_body) {
+            (Some(text), declared) => Some((
+                declared.as_ref().map(|b| b.content_type.clone()),
+                text.clone().into_bytes(),
+            )),
+            (None, Some(declared)) => {
+                Some((Some(declared.content_type.clone()), declared.bytes.clone()))
+            }
+            (None, None) => None,
+        };
+        if let Some((content_type, bytes)) = body {
+            kani_shared::request::check_body_size(bytes.len())?;
+            let has_type = working
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+            if let (Some(ct), false) = (content_type, has_type) {
+                builder = builder.header("Content-Type", ct);
+            }
+            builder = builder.body(bytes);
         }
         let request = builder.build().map_err(|e| e.to_string())?;
 
@@ -1394,6 +1419,7 @@ pub(super) fn charge_fetch_request(
         kani_shared::ast::HttpMethod::Delete => "DELETE",
     };
     Ok(kani_shared::ast::RequestDef {
+        body: None,
         url: url.to_string(),
         method: method_str.to_string(),
         headers,
@@ -1475,6 +1501,7 @@ pub(super) async fn eval_fetch_field(
     };
 
     let req = kani_shared::ast::RequestDef {
+        body: None,
         url: url.to_string(),
         method: method_str.to_string(),
         headers,
@@ -1652,6 +1679,7 @@ mod tests {
 
     fn simple_request(url: &str) -> RequestDef {
         RequestDef {
+            body: None,
             url: url.to_string(),
             method: "GET".to_string(),
             headers: vec![],

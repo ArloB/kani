@@ -157,6 +157,7 @@ pub fn resolve(
 
     Ok(ResolvedRequest {
         request: kani_shared::ast::RequestDef {
+            body: None,
             url,
             method: ep.method.clone(),
             headers: ep.headers.clone().into_iter().collect(),
@@ -225,6 +226,7 @@ pub fn apply_pre_request(
         .map_err(CliError::Other)?;
 
     Ok(kani_shared::ast::RequestDef {
+        body: None,
         url: scriptable.url,
         method: scriptable.method,
         headers: scriptable.headers,
