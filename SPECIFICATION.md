@@ -1660,9 +1660,9 @@ Both backends share this implementation (`kani_core::evaluator::json_eval::Chunk
 **Browser endpoints.** A browser endpoint (`via: browser_payload`, §3.8) may use `offset_type: item`
 or `page`: each capture loads `page_url` with that chunk's `offset_param` and counts as one chunk, so
 the short-chunk end, the `total_pages` restatement and the precedence above apply to it unchanged.
-It may not use `offset_type: cursor`, which validation refuses, because a capture cannot carry a
-cursor read from the previous capture's response. The cursor rules above therefore apply to direct
-JSON endpoints only.
+It may not use `offset_type: cursor`, which validation refuses: cursor traversal is not supported
+for browser endpoints in this version. The cursor rules above therefore apply to direct JSON
+endpoints only.
 
 A `chapter_list` with `pagination` is fetched chunk by chunk like any list, so a chapter list
 spanning several native chunks is read completely in both backends.
