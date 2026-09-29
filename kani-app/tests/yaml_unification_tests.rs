@@ -390,3 +390,81 @@ async fn a_chapter_list_spanning_two_native_chunks_matches_on_both_backends() {
         "the compiled backend pages the same way"
     );
 }
+
+fn chapter_chunk(ids: &[&str], last_native_page: u32) -> Response {
+    let rows: String = ids
+        .iter()
+        .map(|id| {
+            format!(r#"<div class="ch" data-id="{id}"><span class="title">{id}</span></div>"#)
+        })
+        .collect();
+    Response::html(&format!(
+        r#"<html><body>{rows}<div class="pager" data-last="{last_native_page}"></div></body></html>"#
+    ))
+}
+
+#[tokio::test]
+async fn a_declared_total_pages_expression_reaches_the_client_on_both_backends() {
+    let origin = TestOrigin::start().await;
+    seed(&origin);
+    let w = compiled_or_skip!(origin);
+    let y = interpreted(&origin.base());
+
+    let mut results = Vec::new();
+    for backend in [&y, &w] {
+        origin.script(
+            "/manga/manga-1/chapters",
+            vec![chapter_chunk(&["ch-1", "ch-2"], 5)],
+        );
+        let list = backend
+            .get_chapter_list("manga-1", 1, Some(2), None)
+            .await
+            .unwrap();
+        results.push((list.total_pages, list.has_next_page));
+    }
+    assert_eq!(
+        results[0],
+        (Some(5), true),
+        "the source's page count is the declared expression's value"
+    );
+    assert_eq!(results[1], results[0], "the compiled backend agrees");
+}
+
+#[tokio::test]
+async fn a_short_final_chunk_makes_the_page_count_exact_on_both_backends() {
+    let origin = TestOrigin::start().await;
+    seed(&origin);
+    let w = compiled_or_skip!(origin);
+    let y = interpreted(&origin.base());
+
+    let mut results = Vec::new();
+    for backend in [&y, &w] {
+        origin.script("/manga/manga-1/chapters", vec![chapter_chunk(&["ch-3"], 2)]);
+        let list = backend
+            .get_chapter_list("manga-1", 3, Some(1), None)
+            .await
+            .unwrap();
+        let seen = origin.last_request("/manga/manga-1/chapters").unwrap();
+        results.push((
+            list.chapters
+                .iter()
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>(),
+            list.total_pages,
+            list.has_next_page,
+            seen.query_param("p"),
+        ));
+    }
+    assert_eq!(
+        results[0],
+        (
+            vec!["ch-3".to_string()],
+            Some(3),
+            false,
+            Some("2".to_string())
+        ),
+        "two native pages of two could hold four chapters, but the second held one: \
+         three pages of one, and page 3 is the last"
+    );
+    assert_eq!(results[1], results[0], "the compiled backend agrees");
+}

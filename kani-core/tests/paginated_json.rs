@@ -288,3 +288,107 @@ fn a_matching_page_size_leaves_the_total_alone() {
     kani_core::evaluator::json_eval::rescale_total_pages_for_test(&mut scalars, 20, 20);
     assert_eq!(scalars["total_pages"], 42);
 }
+
+#[tokio::test]
+async fn rows_left_in_a_short_final_chunk_are_a_next_page() {
+    let server = MockServer::start().await;
+    for (offset, ids) in [("0", 1usize..=4), ("4", 5..=6)] {
+        let items: Vec<String> = ids.map(|i| format!(r#"{{"id":{i}}}"#)).collect();
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::query_param("offset", offset))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(format!("[{}]", items.join(","))),
+            )
+            .mount(&server)
+            .await;
+    }
+    let bp = BlueprintBuilder::new("")
+        .with_request(RequestDef {
+            body: None,
+            url: server.uri(),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .paginated(4, "offset", OffsetType::ItemOffset)
+        .field("id", Expr::self_ref().ptr("/id").int_val())
+        .build();
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let fifth = extract_json_paginated(&mut state, 5, 1, &bp).await.unwrap();
+    assert_eq!(fifth["rows"], serde_json::json!([{"id": 5}]));
+    assert_eq!(
+        fifth["scalars"]["has_next_page"], true,
+        "item 6 is in the chunk already fetched"
+    );
+
+    let sixth = extract_json_paginated(&mut state, 6, 1, &bp).await.unwrap();
+    assert_eq!(sixth["rows"], serde_json::json!([{"id": 6}]));
+    assert_eq!(sixth["scalars"]["has_next_page"], false);
+}
+
+#[tokio::test]
+async fn a_cursor_walk_restates_the_page_count_in_client_pages() {
+    let server = MockServer::start().await;
+    for (cursor, body) in [
+        (None, r#"{"items":[{"v":1},{"v":2}],"next":"b","pages":3}"#),
+        (
+            Some("b"),
+            r#"{"items":[{"v":3},{"v":4}],"next":"c","pages":3}"#,
+        ),
+        (Some("c"), r#"{"items":[{"v":5}],"pages":3}"#),
+    ] {
+        let mock = Mock::given(method("GET"));
+        let mock = match cursor {
+            None => mock.and(wiremock::matchers::query_param_is_missing("cursor")),
+            Some(c) => mock.and(wiremock::matchers::query_param("cursor", c)),
+        };
+        mock.respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+    }
+    let bp = BlueprintBuilder::new("/items")
+        .with_request(RequestDef {
+            body: None,
+            url: server.uri(),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .paginated(
+            2,
+            "cursor",
+            OffsetType::CursorToken {
+                next_cursor_field: "next".into(),
+            },
+        )
+        .scalar_opt("next", Expr::json_root("/next").str_val())
+        .scalar_opt("total_pages", Expr::json_root("/pages").int_val())
+        .field("v", Expr::self_ref().ptr("/v").int_val())
+        .build();
+
+    let mut state = make_state(AllowedHost::Unrestricted);
+    let first = extract_json_paginated(&mut state, 1, 4, &bp).await.unwrap();
+    assert_eq!(
+        first["scalars"]["total_pages"], 2,
+        "three pages of two are at most six items: two pages of four"
+    );
+
+    let second = extract_json_paginated(&mut state, 2, 4, &bp).await.unwrap();
+    assert_eq!(second["rows"], serde_json::json!([{"v": 5}]));
+    assert_eq!(second["scalars"]["total_pages"], 2);
+    assert_eq!(second["scalars"]["has_next_page"], false);
+
+    let third = extract_json_paginated(&mut state, 1, 1, &bp).await.unwrap();
+    assert_eq!(
+        third["scalars"]["total_pages"], 6,
+        "before the end is seen, the count is the upper bound"
+    );
+    let last = extract_json_paginated(&mut state, 5, 1, &bp).await.unwrap();
+    assert_eq!(
+        last["scalars"]["total_pages"], 5,
+        "the short last chunk shows there are five items"
+    );
+}

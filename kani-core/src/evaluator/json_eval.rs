@@ -625,7 +625,9 @@ async fn extract_json_cursor_paginated(
     blueprint: &Blueprint,
     offset_param: &str,
     next_cursor_field: &str,
+    native_size: usize,
 ) -> Result<serde_json::Value, String> {
+    let mut end = None;
     let slice_start = ((page - 1).max(0) as usize) * (page_size.max(0) as usize);
     let slice_end = slice_start + page_size.max(0) as usize;
     let mut chunk_start = 0usize;
@@ -663,6 +665,9 @@ async fn extract_json_cursor_paginated(
         let upstream_has_more = !rows.is_empty()
             && chunk["scalars"]["has_next_page"].as_bool() != Some(false)
             && next.as_ref().is_some_and(|n| !followed.contains(n));
+        if !upstream_has_more {
+            end = Some(chunk_end);
+        }
 
         if chunk_end >= slice_end {
             break chunk_end > slice_end || upstream_has_more;
@@ -677,6 +682,7 @@ async fn extract_json_cursor_paginated(
     let mut scalars = last_scalars;
     scalars.remove(next_cursor_field);
     scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
+    rescale_total_pages(&mut scalars, native_size, page_size.max(0) as usize, end);
     Ok(serde_json::json!({ "rows": rows_out, "scalars": scalars }))
 }
 
@@ -699,22 +705,20 @@ pub async fn extract_json_paginated(
             blueprint,
             &pagination.offset_param,
             next_cursor_field,
+            pagination.native_page_size,
         )
         .await;
     }
 
     let native_size = pagination.native_page_size;
-    let global_start = ((page - 1).max(0) as usize) * (page_size as usize);
-    let first_chunk_offset = (global_start / native_size) * native_size;
-    let offset_in_first_chunk = global_start % native_size;
-    let mut remaining = page_size as usize;
-    let mut current_chunk_offset = first_chunk_offset;
+    let mut walk = ChunkWalk::new(page, page_size, native_size);
     let mut all_rows: Vec<serde_json::Value> = Vec::new();
     let has_next_page;
 
     let mut last_scalars = serde_json::Map::new();
 
     loop {
+        let current_chunk_offset = walk.chunk_offset;
         let mut chunk_bp = blueprint.clone();
         if let Some(req) = &mut chunk_bp.request {
             match &pagination.offset_type {
@@ -742,45 +746,74 @@ pub async fn extract_json_paginated(
 
         let empty = vec![];
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
-        let chunk_len = rows.len();
-
-        let skip = if current_chunk_offset == first_chunk_offset {
-            offset_in_first_chunk
-        } else {
-            0
-        };
-        let available = chunk_len.saturating_sub(skip);
-        let to_take = available.min(remaining);
-
-        all_rows.extend_from_slice(&rows[skip..skip + to_take]);
-        remaining -= to_take;
-
         let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
-        let chunk_full = chunk_len >= native_size;
-
-        if remaining == 0 {
-            has_next_page = scalar_hnp.unwrap_or(chunk_full);
+        let (taken, done) = walk.take(rows, scalar_hnp);
+        all_rows.extend_from_slice(taken);
+        if let Some(next) = done {
+            has_next_page = next;
             break;
         }
-        if chunk_len == 0 || !chunk_full || scalar_hnp == Some(false) {
-            has_next_page = false;
-            break;
-        }
-
-        current_chunk_offset += native_size;
     }
 
     let mut scalars = last_scalars;
     scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
-    rescale_total_pages(&mut scalars, native_size, page_size as usize);
+    rescale_total_pages(&mut scalars, native_size, page_size as usize, walk.end);
 
     Ok(serde_json::json!({ "rows": all_rows, "scalars": scalars }))
 }
 
-/// A source counts pages at its own chunk size; the client asked for pages of
-/// `page_size`. Without this the strip shows the source's page count, which is
-/// wrong by the ratio between the two. A `total_items` scalar gives the exact
-/// answer; the page-count fallback overestimates by up to one native chunk.
+/// One client page's walk over a source's fixed-size chunks: which chunk to fetch next, which of
+/// its rows belong to the page, and, once a chunk comes back short, how many items the source has.
+pub struct ChunkWalk {
+    native_size: usize,
+    skip: usize,
+    remaining: usize,
+    /// Item offset of the next chunk to fetch.
+    pub chunk_offset: usize,
+    /// The source's exact item count, known once a chunk shorter than `native_size` was fetched.
+    pub end: Option<usize>,
+}
+
+impl ChunkWalk {
+    /// Starts the walk for 1-based `page` of `page_size` items.
+    pub fn new(page: i32, page_size: i32, native_size: usize) -> Self {
+        let native_size = native_size.max(1);
+        let start = ((page - 1).max(0) as usize) * (page_size.max(0) as usize);
+        Self {
+            native_size,
+            skip: start % native_size,
+            remaining: page_size.max(0) as usize,
+            chunk_offset: (start / native_size) * native_size,
+            end: None,
+        }
+    }
+
+    /// Takes this page's share of the chunk just fetched. Returns whether another page exists
+    /// once the walk is over, or `None` when the next chunk is needed.
+    pub fn take<'a, T>(
+        &mut self,
+        rows: &'a [T],
+        declared_next: Option<bool>,
+    ) -> (&'a [T], Option<bool>) {
+        let skip = std::mem::take(&mut self.skip).min(rows.len());
+        let taken = &rows[skip..skip + (rows.len() - skip).min(self.remaining)];
+        self.remaining -= taken.len();
+        let full = rows.len() >= self.native_size;
+        if !full && declared_next != Some(true) {
+            self.end = Some(self.chunk_offset + rows.len());
+        }
+        let left_over = skip + taken.len() < rows.len();
+        if self.remaining == 0 {
+            return (taken, Some(left_over || declared_next.unwrap_or(full)));
+        }
+        if rows.is_empty() || !full || declared_next == Some(false) {
+            return (taken, Some(false));
+        }
+        self.chunk_offset += self.native_size;
+        (taken, None)
+    }
+}
+
 /// Test seam for the page-count rescale, which is otherwise reachable only
 /// through a live paginated fetch.
 pub fn rescale_total_pages_for_test(
@@ -788,29 +821,33 @@ pub fn rescale_total_pages_for_test(
     native_size: usize,
     page_size: usize,
 ) {
-    rescale_total_pages(scalars, native_size, page_size)
+    rescale_total_pages(scalars, native_size, page_size, None)
 }
 
-pub(crate) fn rescale_total_pages(
+/// Restates the source's `total_pages` (counted in `native_size` chunks) in pages of
+/// `page_size`. A `total_items` scalar, or an `end` seen by a short chunk, is exact; otherwise the
+/// count is an upper bound, since the last native page may be short.
+pub fn rescale_total_pages(
     scalars: &mut serde_json::Map<String, serde_json::Value>,
     native_size: usize,
     page_size: usize,
+    end: Option<usize>,
 ) {
     if page_size == 0 {
         return;
     }
     let scalar = |name: &str| scalars.get(name).and_then(serde_json::Value::as_i64);
+    let native_pages = scalar("total_pages");
 
-    let items = match scalar("total_items") {
-        Some(total) => total.max(0) as usize,
-        None => {
+    let items = match (scalar("total_items"), end) {
+        (Some(total), _) => total.max(0) as usize,
+        (None, _) if native_pages.is_none() => return,
+        (None, Some(end)) => end,
+        (None, None) => {
             if native_size == page_size {
                 return;
             }
-            let Some(native_pages) = scalar("total_pages") else {
-                return;
-            };
-            (native_pages.max(0) as usize).saturating_mul(native_size)
+            (native_pages.unwrap_or(0).max(0) as usize).saturating_mul(native_size)
         }
     };
 

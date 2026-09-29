@@ -51,10 +51,14 @@ impl PageWindow {
         self.first_native + capture
     }
 
+    fn end_after(&self, capture: usize, rows: usize) -> Option<usize> {
+        (rows < self.native).then(|| self.native_index(capture) * self.native + rows)
+    }
+
     /// Cuts the fetched captures down to this page. Rows the window pulled in
     /// beyond it belong to the next page, so they are reported as one rather
     /// than shown here, and the site's page count is restated in these pages.
-    fn trim(&self, value: &mut serde_json::Value) {
+    fn trim(&self, value: &mut serde_json::Value, end: Option<usize>) {
         let Some(rows) = value.get_mut("rows").and_then(|r| r.as_array_mut()) else {
             return;
         };
@@ -63,23 +67,22 @@ impl PageWindow {
         let surplus = rows.len() > self.take;
         rows.truncate(self.take);
 
-        let Some(scalars) = value.get_mut("scalars").and_then(|s| s.as_object_mut()) else {
+        let Some(value) = value.as_object_mut() else {
+            return;
+        };
+        let scalars = value
+            .entry("scalars")
+            .or_insert_with(|| serde_json::Value::Object(Default::default()));
+        let Some(scalars) = scalars.as_object_mut() else {
             return;
         };
         if surplus {
             scalars.insert("has_next_page".to_string(), serde_json::Value::Bool(true));
         }
-        if let Some(native_total) = scalars
-            .get("total_pages")
-            .and_then(serde_json::Value::as_i64)
-            .filter(|n| *n > 0)
-        {
-            let items = native_total as usize * self.native;
-            scalars.insert(
-                "total_pages".to_string(),
-                serde_json::Value::from(items.div_ceil(self.take)),
-            );
-        }
+        scalars
+            .entry("has_next_page")
+            .or_insert(serde_json::Value::Bool(end.is_none()));
+        kani_core::evaluator::json_eval::rescale_total_pages(scalars, self.native, self.take, end);
     }
 }
 
@@ -447,6 +450,7 @@ impl YamlSource {
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
 
         let mut merged: Option<serde_json::Value> = None;
+        let mut end = None;
         for capture in 0..captures {
             let mut params = params.clone();
             if let (Some(p), Some(w)) = (pagination, window) {
@@ -508,13 +512,21 @@ impl YamlSource {
             let value = json_eval::extract_json_str(&mut state, &payload, &bp)
                 .await
                 .map_err(invalid)?;
+            let fetched = value["rows"].as_array().map_or(0, Vec::len);
+            let more_declared = value["scalars"]["has_next_page"].as_bool() == Some(true);
             merge_capture(&mut merged, value);
+            end = window
+                .filter(|_| !more_declared)
+                .and_then(|w| w.end_after(capture, fetched));
+            if end.is_some() {
+                break;
+            }
         }
 
         let mut merged =
             merged.ok_or_else(|| invalid("browser_payload produced no captures".to_string()))?;
         if let Some(w) = window {
-            w.trim(&mut merged);
+            w.trim(&mut merged, end);
         }
         Ok(merged)
     }
@@ -1191,7 +1203,7 @@ mod browser_pagination_tests {
                 merge_capture(&mut merged, rows(w.native_index(capture) * 28, 28));
             }
             let mut merged = merged.unwrap();
-            w.trim(&mut merged);
+            w.trim(&mut merged, None);
             let page_rows: Vec<usize> = serde_json::from_value(merged["rows"].clone()).unwrap();
             assert_eq!(
                 page_rows.len(),
@@ -1211,9 +1223,41 @@ mod browser_pagination_tests {
             merge_capture(&mut merged, rows(w.native_index(capture) * 28, 28));
         }
         let mut merged = merged.unwrap();
-        w.trim(&mut merged);
+        w.trim(&mut merged, None);
         let page_rows: Vec<usize> = serde_json::from_value(merged["rows"].clone()).unwrap();
         assert_eq!(page_rows, (12..24).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_short_capture_makes_the_page_count_exact() {
+        let w = window(1, 14);
+        let mut merged = Some(rows(0, 20));
+        w.trim(merged.as_mut().unwrap(), w.end_after(0, 20));
+        let merged = merged.unwrap();
+        assert_eq!(
+            merged["scalars"]["total_pages"],
+            serde_json::json!(2),
+            "ten site pages could hold 280 items, but the first held 20: two pages of 14"
+        );
+        assert_eq!(merged["scalars"]["has_next_page"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn a_full_capture_with_no_declared_flag_has_a_next_page() {
+        let w = window(1, 28);
+        let mut merged = Some(serde_json::json!({ "rows": (0..28).collect::<Vec<_>>() }));
+        w.trim(merged.as_mut().unwrap(), w.end_after(0, 28));
+        assert_eq!(
+            merged.unwrap()["scalars"]["has_next_page"],
+            serde_json::json!(true)
+        );
+
+        let mut short = Some(serde_json::json!({ "rows": (0..5).collect::<Vec<_>>() }));
+        w.trim(short.as_mut().unwrap(), w.end_after(0, 5));
+        assert_eq!(
+            short.unwrap()["scalars"]["has_next_page"],
+            serde_json::json!(false)
+        );
     }
 
     #[test]
@@ -1229,7 +1273,7 @@ mod browser_pagination_tests {
             }),
         );
         let mut merged = merged.unwrap();
-        w.trim(&mut merged);
+        w.trim(&mut merged, None);
         assert_eq!(merged["rows"].as_array().unwrap().len(), 32);
         assert_eq!(
             merged["scalars"]["has_next_page"],
@@ -1242,7 +1286,7 @@ mod browser_pagination_tests {
     fn the_sites_page_count_is_restated_in_the_pages_being_served() {
         let w = window(1, 14);
         let mut merged = Some(rows(0, 28));
-        w.trim(merged.as_mut().unwrap());
+        w.trim(merged.as_mut().unwrap(), None);
         assert_eq!(
             merged.unwrap()["scalars"]["total_pages"],
             serde_json::json!(20),

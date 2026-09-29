@@ -1,7 +1,9 @@
 //! Emit Rust source for a BlueprintBuilder chain from a ValidatedEndpoint.
 
 use super::expr::emit_expr;
-use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp};
+use crate::yaml::model::{
+    FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp, ValidatedTotalPages,
+};
 use kani_yaml::{build_blueprint_core, make_fetch_expr};
 
 pub(crate) fn emit_blueprint_chain(
@@ -77,6 +79,13 @@ pub(crate) fn emit_blueprint_chain(
     if let ValidatedHnp::Scalar(expr) = &ep.has_next_page {
         lines.push(format!(
             "    .scalar(\"has_next_page\", {})",
+            emit_expr(expr)
+        ));
+    }
+
+    if let ValidatedTotalPages::Scalar(expr) = &ep.total_pages {
+        lines.push(format!(
+            "    .scalar_opt(\"total_pages\", {})",
             emit_expr(expr)
         ));
     }

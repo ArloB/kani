@@ -52,7 +52,7 @@ pub fn build_blueprint_core(
     endpoint_name: &str,
 ) -> kani_shared::ast::BlueprintBuilder {
     use kani_shared::ast::BlueprintBuilder;
-    use yaml::model::{FieldSource, ValidatedHnp};
+    use yaml::model::{FieldSource, ValidatedHnp, ValidatedTotalPages};
 
     let mut builder = BlueprintBuilder::new(&ep.container);
 
@@ -98,6 +98,10 @@ pub fn build_blueprint_core(
 
     if let ValidatedHnp::Scalar(expr) = &ep.has_next_page {
         builder = builder.scalar("has_next_page", expr.clone());
+    }
+
+    if let ValidatedTotalPages::Scalar(expr) = &ep.total_pages {
+        builder = builder.scalar_opt("total_pages", expr.clone());
     }
 
     if let Some(pag) = &ep.pagination {

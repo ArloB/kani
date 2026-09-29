@@ -442,16 +442,13 @@ pub async fn extract_html_paginated(
         .ok_or("paginated_extract_html called on blueprint without PaginationConfig")?;
 
     let native_size = pagination.native_page_size;
-    let global_start = ((page - 1).max(0) as usize) * (page_size as usize);
-    let first_chunk_offset = (global_start / native_size) * native_size;
-    let offset_in_first_chunk = global_start % native_size;
-    let mut remaining = page_size as usize;
-    let mut current_chunk_offset = first_chunk_offset;
+    let mut walk = crate::evaluator::json_eval::ChunkWalk::new(page, page_size, native_size);
     let mut all_rows: Vec<serde_json::Value> = Vec::new();
     let has_next_page;
     let mut last_scalars = serde_json::Map::new();
 
     loop {
+        let current_chunk_offset = walk.chunk_offset;
         let mut chunk_bp = blueprint.clone();
         if let Some(req) = &mut chunk_bp.request {
             let offset_value = match &pagination.offset_type {
@@ -474,40 +471,26 @@ pub async fn extract_html_paginated(
 
         let empty = vec![];
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
-        let chunk_len = rows.len();
-
-        let skip = if current_chunk_offset == first_chunk_offset {
-            offset_in_first_chunk
-        } else {
-            0
-        };
-        let available = chunk_len.saturating_sub(skip);
-        let to_take = available.min(remaining);
-
-        all_rows.extend_from_slice(&rows[skip..skip + to_take]);
-        remaining -= to_take;
-
         if let Some(map) = chunk_result["scalars"].as_object() {
             last_scalars = map.clone();
         }
         let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
-        let chunk_full = chunk_len >= native_size;
-
-        if remaining == 0 {
-            has_next_page = scalar_hnp.unwrap_or(chunk_full);
+        let (taken, done) = walk.take(rows, scalar_hnp);
+        all_rows.extend_from_slice(taken);
+        if let Some(next) = done {
+            has_next_page = next;
             break;
         }
-        if chunk_len == 0 || !chunk_full || scalar_hnp == Some(false) {
-            has_next_page = false;
-            break;
-        }
-
-        current_chunk_offset += native_size;
     }
 
     let mut scalars = last_scalars;
     scalars.insert("has_next_page".into(), serde_json::json!(has_next_page));
-    crate::evaluator::json_eval::rescale_total_pages(&mut scalars, native_size, page_size as usize);
+    crate::evaluator::json_eval::rescale_total_pages(
+        &mut scalars,
+        native_size,
+        page_size as usize,
+        walk.end,
+    );
 
     Ok(serde_json::json!({ "rows": all_rows, "scalars": scalars }))
 }

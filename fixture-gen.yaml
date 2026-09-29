@@ -73,6 +73,7 @@ endpoints:
       native_page_size: 2
       offset_param: p
       offset_type: page
+    total_pages: 'dom(".pager").attr("data-last").parse_int()'
     container: ".ch"
     fields:
       id: 'self.attr("data-id")'
