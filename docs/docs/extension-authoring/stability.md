@@ -28,15 +28,22 @@ have to land with the codegen change, so it is not worth doing inside 1.x for a 
 already covered.
 
 Adding a WIT function is additive and safe. Changing an existing signature is not, because the
-guest's generated bindings encode it — that is a 2.0 change.
+guest's generated bindings encode it — that is a 2.0 change. Every install, reload and startup
+links the component against the host's imports before running it, so an extension that imports
+something the host lacks (built for a newer Kani) is refused with the linker's error.
 
 ## Extraction DSL — `DSL_SCHEMA_VERSION`
 
 `kani-shared::ast::DSL_SCHEMA_VERSION` is **7**, and
 `MIN_READABLE_DSL_SCHEMA_VERSION` is also **7**. Every serialised `Blueprint` carries its version as
-a postcard header; the host reads any version in that range and rejects others with a "recompile
-the extension" error. The extension's metadata also records the version it was built with, so
-install and reload refuse an unreadable extension up front.
+a postcard header. An extension's metadata records the version it was built with, and the host
+checks it when the extension is installed, reloaded, and loaded at startup, as well as on every
+decode:
+
+```text
+extension was built for blueprint schema version 8, but this Kani reads 7 to 7;
+rebuild it with a matching kani-cli
+```
 
 Version 7 added the request body to `RequestDef`. postcard is not self-describing, so a new field
 changes the layout, and extensions built against versions 5 and 6 must be rebuilt. That break was
@@ -46,6 +53,10 @@ taken before 1.0.
 encodes a variant by its index, so an appended variant leaves older payloads decodable, and the
 host keeps reading every version from 7 onwards. Adding, removing or reordering a field or variant
 changes the wire shape, which is a 2.0 event.
+
+An extension compiled by a newer `kani-cli` that uses a new variant needs a host that reads its
+version; the install-time check refuses it on an older host with the message above rather than
+failing on its first request.
 
 ## YAML schema — `schema_version`
 
@@ -59,12 +70,16 @@ schema_version: 2 is newer than the schema version this kani-cli supports (1)
 
 Older values are accepted. This surface is genuinely forward-compatible in the direction that
 matters: raising `CURRENT_SCHEMA_VERSION` keeps every existing file valid, so a bump is additive
-and permitted within 1.x. Use it when adding keys that older builds must not silently ignore.
+and permitted within 1.x.
+
+A key the schema does not define is an error, not ignored, so a file using a key added in a later
+release is refused by an older host with the key's name and line. Declare `min_kani_version`
+alongside such a key so the refusal names the version it needs.
 
 ## Host version gate — `min_kani_version`
 
 An extension may declare `min_kani_version` as a semver version. `kani-cli validate` rejects a
-malformed value, and `kani_app::install_gating::check_min_kani_version` refuses installation on an
+malformed value, and `kani_core::install_gating::check_min_kani_version` refuses installation on an
 older host. Declare it whenever the extension uses a capability added after 1.0; that is the
 supported way to depend on a newer host without breaking older ones.
 
@@ -72,8 +87,8 @@ supported way to depend on a newer host without breaking older ones.
 
 | Surface | Version | Check | Bump allowed in 1.x |
 | --- | --- | --- | --- |
-| WIT world | unversioned package | binding generation | Additive functions only |
-| Extraction DSL | `DSL_SCHEMA_VERSION` = 5 | strict equality | **No** — breaks every extension |
+| WIT world | unversioned package | linked at install and load | Additive functions only |
+| Extraction DSL | `DSL_SCHEMA_VERSION` = 7, reads 7 | readable range, at install and load | Yes, append-only; the minimum stays 7 |
 | YAML schema | `CURRENT_SCHEMA_VERSION` = 1 | rejects newer only | Yes, additive |
 | Host gate | `min_kani_version` | semver at install | N/A, per extension |
 
