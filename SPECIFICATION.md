@@ -1608,7 +1608,7 @@ When `pagination` is set on an endpoint, the framework calls `paginated-extract-
 |-------|-------------|
 | `item` | Offset param = absolute item count: 0, 32, 64, … |
 | `page` | Offset param = page number. Defaults to 1-based. Use `page_start: 0` for 0-based. |
-| `cursor` | Cursor-token pagination, JSON endpoints only (not browser endpoints). Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request. See below. |
+| `cursor` | Cursor-token pagination, for direct `type: json` endpoints only. Validation refuses it on a browser endpoint (`via: browser_payload`) and on an HTML endpoint. Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request. See below. |
 
 **Cursor pagination walks from the start.** A cursor can only be obtained from the response
 before it, so a request for page `p` of size `n` fetches from the first chunk (no cursor) onwards,
@@ -1654,9 +1654,15 @@ items the last one holds, so on its own it gives only an upper bound: `total_pag
 When the item count is known, `total_pages` is that count divided by the client's page size, rounded
 up, so the page holding the last item reports no next page. Until the last chunk has been fetched,
 the upper bound stands: with `native_page_size: 32`, `total_pages: 3` and 70 items, a client paging by
-20 is told 5 pages; page 4 fetches the 6-item final chunk, reports 4 pages, and has no next page. The
-same rules apply to browser endpoints, whose captures are chunks. Both backends share this
-implementation (`kani_core::evaluator::json_eval::ChunkWalk`).
+20 is told 5 pages; page 4 fetches the 6-item final chunk, reports 4 pages, and has no next page.
+Both backends share this implementation (`kani_core::evaluator::json_eval::ChunkWalk`).
+
+**Browser endpoints.** A browser endpoint (`via: browser_payload`, §3.8) may use `offset_type: item`
+or `page`: each capture loads `page_url` with that chunk's `offset_param` and counts as one chunk, so
+the short-chunk end, the `total_pages` restatement and the precedence above apply to it unchanged.
+It may not use `offset_type: cursor`, which validation refuses, because a capture cannot carry a
+cursor read from the previous capture's response. The cursor rules above therefore apply to direct
+JSON endpoints only.
 
 A `chapter_list` with `pagination` is fetched chunk by chunk like any list, so a chapter list
 spanning several native chunks is read completely in both backends.

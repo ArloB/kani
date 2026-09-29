@@ -2005,6 +2005,19 @@ fn cursor_pagination_needs_a_cursor_field_on_a_json_endpoint() {
         &yaml("html", cursor),
         "cursor pagination reads a JSON response",
     );
+
+    let browser = |offset: &str| {
+        format!(
+            "{METADATA_BASE}browser_scripts:\n  grab: |\n    passPayload(\"{{}}\");\nendpoints:\n  \
+             search:\n    via: browser_payload\n    page_url: \"https://example.com/s\"\n    \
+             script: grab\n    type: json\n    container: \"/items\"\n    pagination:\n      \
+             native_page_size: 32\n      offset_param: after\n{offset}    fields:\n      \
+             id: 'self.ptr(\"/i\").str()'\n      title: 'self.ptr(\"/t\").str()'\n"
+        )
+    };
+    assert_invalid_containing(&browser(cursor), "a direct (not browser) endpoint");
+    assert_valid(&browser("      offset_type: item\n"));
+    assert_valid(&browser("      offset_type: page\n"));
     assert_invalid_containing(
         &yaml(
             "json",
