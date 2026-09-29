@@ -6,6 +6,63 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0-rc.5] - 2026-09-29
+
+### Changed
+
+- **WASM extensions must be rebuilt.** The extraction blueprint format is now version 7, which adds
+  request bodies, and this release reads version 7 only. An extension built for rc.4 or earlier is
+  refused at install, reload and startup with a "rebuild it with a matching kani-cli" message. The
+  official repository publishes rebuilt versions alongside this release. YAML extensions are
+  unaffected.
+- YAML extensions are validated strictly before 1.0 fixes the format. A misspelt or unknown key is
+  now an error naming the key and its line instead of being ignored. Also refused:
+  - arithmetic in request templates, such as `$page$+1`;
+  - `pagination`, `has_next_page` or `total_pages` on `manga_details` or `pages`;
+  - required fields marked `optional`;
+  - unusable `id_encoding` declarations;
+  - element-only DSL methods called on values known not to be elements;
+  - SVG icons;
+  - non-http(s) URLs;
+  - script names that are not plain identifiers.
+- Omitting `has_next_page` now means there is no next page unless `total_pages` or native
+  pagination shows one, and a page with no rows never has a next page.
+- Every source operation has one budget: 128 requests, 64 MiB read and 120 s by default, up to
+  1024, 256 MiB and 600 s when an extension declares more. Pagination, sub-fetches, hook retries and
+  browser captures all count against it. Running out fails the operation instead of returning rows
+  with fields silently missing.
+- A page whose image transform cannot be applied now fails, rather than being saved or shown
+  scrambled.
+- Browser endpoints, and hook and WASM browser captures, no longer auto-scroll unless asked to.
+- Repository indexes are re-verified against the pinned maintainer key on list, install and
+  refresh, not only when first added.
+
+### Added
+
+- `kani-cli check`, which checks a `.yaml` or `.wasm` extension the way the server does at install.
+- Request bodies for YAML endpoints (`body: {type: json | form | raw}`), sent identically by both
+  backends.
+- Cursor pagination for JSON YAML endpoints.
+- `$sort$` in `chapter_list` requests, so a chosen chapter sort reaches the source.
+- Administrators can grant one source named private-network hosts.
+
+### Fixed
+
+- A declared `total_pages` was never evaluated, so sources such as comix never reported a page
+  count. The count is now restated in the client's page size, and exact once the last chunk is
+  fetched. Rows left in a short final chunk are offered as a next page instead of being lost.
+- A cursor-paginated source returned page 1 for every page.
+- Interpreted and compiled YAML sources disagreed on chapter-list pagination, `get_url` for
+  composite ids, and path and query encoding.
+- `$placeholders$` in request headers were sent literally. They are now filled like routes, and a
+  value containing a line break fails the request.
+- An install interrupted by a crash or power loss could leave two artifacts or none. Installs are
+  now journaled and finish or roll back at the next start.
+- Deduplication dropped every row with a null key after the first.
+- An unparseable RFC 3339 date became an error instead of null.
+- A sub-fetch returning an error status was treated as an empty result.
+- The image proxy now retries Cloudflare origin errors 522 and 523.
+
 ## [1.0.0-rc.4] - 2026-09-23
 
 ### Fixed
