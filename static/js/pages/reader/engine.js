@@ -8,6 +8,7 @@ import { zoomStep, clampPan, ZOOM_MIN, ZOOM_MAX } from './zoom.js';
 import { isWideImage, spreadPairVerdict, edgeMatchResult } from './spread-detect.js';
 import { cropStyles, croppedWidth, croppedHeight, cropSourceRect } from './crop.js';
 import { pagesPerMinute, minutesRemaining, adaptivePreloadCount, preloadThreshold } from './preload.js';
+import { finishChapter } from './chapter-end.js';
 
 /**
  * @typedef {import('../../reader-prefs.js').ReaderPrefs} ReaderPrefs
@@ -1064,16 +1065,13 @@ export function createReaderEngine(/** @type {ReaderEngineDeps} */ deps) {
       return;
     }
     if (next >= state.pages.length) {
-      api.setChapterProgress(chapterId, 0).catch(() => {});
-      if (getPrefs()?.endCardInPaged) {
-        _showPagedEndCard();
-        return;
-      }
-      if (state.chapterInfo.next_chapter_id) {
-        navigateChapter(state.chapterInfo.next_chapter_id);
-      } else {
-        navigateToManga();
-      }
+      finishChapter({
+        api, chapterId,
+        nextChapterId: state.chapterInfo.next_chapter_id,
+        showEndCard: !!getPrefs()?.endCardInPaged,
+        onEndCard: _showPagedEndCard,
+        navigateChapter, navigateToManga,
+      });
       return;
     }
 
