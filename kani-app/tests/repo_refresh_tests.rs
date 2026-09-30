@@ -135,3 +135,49 @@ async fn a_repo_that_starts_failing_does_not_lose_its_cached_index() {
         "the cached index survived the failed refresh"
     );
 }
+
+#[tokio::test]
+async fn a_repo_trusted_before_signatures_were_stored_fetches_them_when_opened() {
+    use kani_app::source::signing::{pubkey_b64, sign_artifact, signature_b64};
+    let key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+    let pk = pubkey_b64(&key);
+    let index = format!(
+        r#"{{"name":"Test Repo","maintainer_key":"{pk}","extensions":[{{"id":"ext1","name":"Ext One","version":"1.0.0","format":"wasm","sha256":"00","signature":"x","author_key":"x","url":"/ext1.wasm"}}]}}"#
+    );
+    let origin = TestOrigin::start().await;
+    origin.set("/index.json", Response::json(&index));
+    origin.set(
+        "/index.json.sig",
+        Response::status(200).body(kani_shared_test::origin::Body::Bytes(
+            signature_b64(&sign_artifact(index.as_bytes(), &key)).into_bytes(),
+        )),
+    );
+
+    let svc = test_service().await;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
+         VALUES (?, 'Test Repo', ?, ?) RETURNING id",
+    )
+    .bind(origin.base())
+    .bind(&pk)
+    .bind(format!(
+        r#"{{"name":"Test Repo","maintainer_key":"{pk}","extensions":[]}}"#
+    ))
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+
+    let extensions = svc.list_repo_extensions(id).await.unwrap();
+    assert_eq!(
+        extensions.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+        ["ext1"],
+        "the signed index was fetched and verified in place of the unsigned cache"
+    );
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT index_sig FROM repo_trust WHERE id = ?")
+            .bind(id)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(stored.is_some(), "the signature is kept for later loads");
+}

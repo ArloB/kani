@@ -271,9 +271,18 @@ impl AppService {
     }
 
     pub async fn list_repo_extensions(&self, id: i64) -> Result<Vec<RepoExtensionEntry>> {
-        let repo = self.get_repo(id).await?;
-        let index = verified_index(&repo)?;
+        let (_, index) = self.signed_index(id).await?;
         Ok(index.extensions)
+    }
+
+    async fn signed_index(&self, id: i64) -> Result<(RepoRow, RepoIndex)> {
+        let mut repo = self.get_repo(id).await?;
+        if repo.index_sig.is_none() {
+            self.refresh_repo(id, None).await?;
+            repo = self.get_repo(id).await?;
+        }
+        let index = verified_index(&repo)?;
+        Ok((repo, index))
     }
 
     pub async fn install_source_from_repo(
@@ -463,7 +472,7 @@ impl AppService {
         let repo = self.get_repo(repo_id).await?;
         self.check_repo_blocked(&repo.url).await?;
 
-        let index = verified_index(&repo)?;
+        let (repo, index) = self.signed_index(repo.id).await?;
         let entry = index
             .extensions
             .iter()
