@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790592770983,
+  "lastUpdate": 1791199582536,
   "repoUrl": "https://github.com/kani-app/kani",
   "entries": {
     "Benchmark": [
@@ -271,6 +271,40 @@ window.BENCHMARK_DATA = {
             "name": "blueprint_eval/json_200_rows",
             "value": 1215283,
             "range": "± 17082",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Arlo Burke",
+            "username": "ArloB",
+            "email": "arlo.burke2@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "74c05ff578a149f543e2c1d84e814c575249ba36",
+          "message": "Mark a chapter read when the reader pages past its end (#58)",
+          "timestamp": "2026-09-30T13:57:53Z",
+          "url": "https://github.com/kani-app/kani/commit/74c05ff578a149f543e2c1d84e814c575249ba36"
+        },
+        "date": 1791199581970,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "blueprint_eval/html_200_rows",
+            "value": 3718942,
+            "range": "± 260904",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "blueprint_eval/json_200_rows",
+            "value": 1207834,
+            "range": "± 18901",
             "unit": "ns/iter"
           }
         ]
